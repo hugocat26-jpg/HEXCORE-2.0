@@ -97,6 +97,28 @@
         );
       }
 
+      if (hexcore.id === 'photographer') {
+        if (state.draft.round < 1 || state.draft.round > 3) {
+          Hexcore2.eventStore.append('海克斯执行失败', '摄影艺术家仅可在第1/2/3轮使用', 'warn');
+          return { ok: false };
+        }
+        state.draft.runtimeEffects.push({
+          type: 'global_pool_swap',
+          captainId: captain.id,
+          round: state.draft.round,
+          priority: 500,
+          reason: '摄影艺术家：本轮池与下轮池互换',
+        });
+        state.draft.currentDraw = null;
+        state.draft.pickedThisTurn = false;
+        const currentTier = Hexcore2.poolEngine.effectiveTier(captain.id);
+        Hexcore2.eventStore.append(
+          '海克斯全局生效',
+          `${captain.name} 使用【摄影艺术家】，第 ${state.draft.round} 轮与第 ${state.draft.round + 1} 轮卡池互换，当前执行${state.settings.tierNames[currentTier]}池`,
+          'warn'
+        );
+      }
+
       hexcore.status = 'used';
       Hexcore2.eventStore.append('海克斯激活', `${captain.name} 使用【${hexcore.name}】`, hexcore.id === 'blind' ? 'warn' : 'info');
       return { ok: true, advanceTurn: hexcore.id === 'steady' || Boolean(transmuteTiers[hexcore.id]) };

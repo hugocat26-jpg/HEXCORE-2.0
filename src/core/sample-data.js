@@ -13,6 +13,7 @@
     { id: 'demon-contract', name: '恶魔契约', type: 'cyan', desc: '第1-3轮自动第1顺位，第4轮自动最后顺位。', status: 'passive', uses: 0, mode: 'passive' },
     { id: 'steady', name: '稳扎稳打', type: 'amber', desc: '跳过本轮抽卡和选人，由系统从当前池随机分配1人。', status: 'available', uses: 1, mode: 'manual' },
     { id: 'open-feast', name: '开饭啦', type: 'cyan', desc: '无视原有顺位，直接从当前池任意自选1名选手。', status: 'available', uses: 1, mode: 'manual' },
+    { id: 'photographer', name: '摄影艺术家', type: 'amber', desc: '第1-3轮可用，本轮池与下轮池互换，影响所有队长。', status: 'available', uses: 1, mode: 'manual' },
   ];
 
   function take(...ids) {
@@ -75,6 +76,7 @@
       c9: take('giant-slayer'),
       c10: take('open-feast'),
       c11: take('elite-choice'),
+      c12: take('photographer'),
     },
 
     hexcores,
