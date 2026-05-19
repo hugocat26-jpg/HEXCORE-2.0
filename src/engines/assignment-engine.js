@@ -13,6 +13,9 @@
       player.status = 'drafted';
       player.teamId = captainId;
       Hexcore2.eventStore.append('选手入队', `${captain.name} 选择了选手「${player.name}」加入队伍（${captain.team.length}/4）`, 'success', { source });
+      if (Hexcore2.hexcoreEngine && source !== 'lock_contract_pair') {
+        Hexcore2.hexcoreEngine.resolveLockContracts(captainId, player.id);
+      }
       return true;
     },
 

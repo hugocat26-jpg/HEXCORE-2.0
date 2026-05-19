@@ -8,6 +8,7 @@
     { id: 'blind', name: '致盲吹箭', type: 'amber', desc: '每轮可指定另一位队长，本轮抽卡时隐藏选手信息，选中后揭示。', status: 'available', uses: 1, mode: 'manual', maxUsesPerRound: 1 },
     { id: 'double-shot', name: '双发快射', type: 'violet', desc: '本轮抽卡数量 +1，下一轮跳过。', status: 'available', uses: 1, mode: 'manual' },
     { id: 'last-stand', name: '背水一战', type: 'violet', desc: '第1/2轮跳过并随机分配，第4轮第一顺位并可自选猛犸。', status: 'passive', uses: 0, mode: 'passive' },
+    { id: 'lock-contract', name: '锁定契约', type: 'violet', desc: '全程1次：绑定任意两名可用选手，其中一人入队时另一人自动加入同队。', status: 'available', uses: 1, mode: 'manual' },
     { id: 'elite-choice', name: '优中选优', type: 'violet', desc: '抽上等马时自动额外展示1张，裁判二选一留下。', status: 'passive', uses: 0, mode: 'passive' },
     { id: 'giant-slayer', name: '巨人杀手', type: 'amber', desc: '侏儒马与猛犸池互换，仅影响持有者。', status: 'passive', uses: 0, mode: 'passive' },
     { id: 'ballroom-queen', name: '舞会女王', type: 'violet', desc: '持有者个人卡池顺序反转。', status: 'passive', uses: 0, mode: 'passive' },
@@ -72,7 +73,7 @@
 
     hexcoreAssignments: {
       c1: take('transmute-bronze', 'decompose-knowledge'),
-      c2: take('transmute-auric'),
+      c2: take('transmute-auric', 'lock-contract'),
       c3: take('demon-contract'),
       c4: take('transmute-prismatic'),
       c5: take('pandora-box'),

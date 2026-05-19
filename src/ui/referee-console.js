@@ -213,6 +213,15 @@
     const teamPlayers = captain.team
       .map(playerId => playerById(playerId))
       .filter(Boolean);
+    const availablePlayers = Hexcore2.state.players
+      .filter(player => player.status === 'available')
+      .sort((a, b) => b.score - a.score);
+    const lockPairs = [];
+    availablePlayers.forEach((first, firstIndex) => {
+      availablePlayers.slice(firstIndex + 1).forEach(second => {
+        lockPairs.push([first, second]);
+      });
+    });
     const swapPairs = [];
     Hexcore2.state.captains.forEach((first, firstIndex) => {
       Hexcore2.state.captains.slice(firstIndex + 1).forEach(second => {
@@ -228,7 +237,7 @@
             const snowUsed = hex.id === 'snow-cat' && Hexcore2.hexcoreEngine.snowCatUsedBy(captain.id);
             const isUsed = hex.mode === 'passive' || (hex.status === 'used' && hex.id !== 'blind' && hex.id !== 'snow-cat') || blindUsed || snowUsed;
             return `
-              <div class="hex-row ${hex.type} ${hex.id === 'blind' || hex.id === 'order-swap' || hex.id === 'decompose-knowledge' ? 'targetable' : ''}">
+              <div class="hex-row ${hex.type} ${hex.id === 'blind' || hex.id === 'order-swap' || hex.id === 'decompose-knowledge' || hex.id === 'lock-contract' ? 'targetable' : ''}">
                 <div class="hex-symbol">${Hexcore2.icon('hex')}</div>
                 <div>
                   <strong>${escapeHtml(hex.name)}</strong>
@@ -255,8 +264,15 @@
                       `).join('') || '<span>至少拥有1名选手后可用</span>'}
                     </div>
                   ` : ''}
+                  ${hex.id === 'lock-contract' && hex.status !== 'used' ? `
+                    <div class="target-grid pair-grid">
+                      ${lockPairs.map(([first, second]) => `
+                        <button onclick="window.hexcoreUI.useHexcore(${safeJsonString(hex.id)}, ${safeJsonString(first.id)}, ${safeJsonString(second.id)})">${escapeHtml(first.name)} ↔ ${escapeHtml(second.name)}</button>
+                      `).join('') || '<span>当前没有足够可绑定选手</span>'}
+                    </div>
+                  ` : ''}
                 </div>
-                <button class="${isUsed ? 'used' : ''}" ${hex.mode === 'passive' || blindUsed || snowUsed || hex.id === 'blind' || hex.id === 'order-swap' || hex.id === 'decompose-knowledge' ? 'disabled' : ''} onclick="window.hexcoreUI.useHexcore(${safeJsonString(hex.id)})">${hex.mode === 'passive' ? '被动' : (isUsed ? '已使用' : (hex.id === 'blind' || hex.id === 'order-swap' || hex.id === 'decompose-knowledge' ? '选下方' : '使用'))}</button>
+                <button class="${isUsed ? 'used' : ''}" ${hex.mode === 'passive' || blindUsed || snowUsed || hex.id === 'blind' || hex.id === 'order-swap' || hex.id === 'decompose-knowledge' || hex.id === 'lock-contract' ? 'disabled' : ''} onclick="window.hexcoreUI.useHexcore(${safeJsonString(hex.id)})">${hex.mode === 'passive' ? '被动' : (isUsed ? '已使用' : (hex.id === 'blind' || hex.id === 'order-swap' || hex.id === 'decompose-knowledge' || hex.id === 'lock-contract' ? '选下方' : '使用'))}</button>
               </div>
             `;
           }).join('')}

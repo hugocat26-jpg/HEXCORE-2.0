@@ -269,6 +269,29 @@
         Hexcore2.eventStore.append('海克斯信息增强', `${captain.name} 使用【知识来源于分解】，分析已有选手「${player.name}」，本轮抽卡将显示战力顺位信息`, 'info');
       }
 
+      if (hexcore.id === 'lock-contract') {
+        const first = state.players.find(item => item.id === options.firstPlayerId);
+        const second = state.players.find(item => item.id === options.secondPlayerId);
+        if (!first || !second || first.id === second.id) {
+          Hexcore2.eventStore.append('海克斯执行失败', '请选择两名不同选手建立锁定契约', 'warn');
+          return { ok: false };
+        }
+        if (first.status !== 'available' || second.status !== 'available') {
+          Hexcore2.eventStore.append('海克斯执行失败', '锁定契约只能绑定当前仍可被选择的选手', 'warn');
+          return { ok: false };
+        }
+
+        state.draft.runtimeEffects.push({
+          type: 'locked_pair',
+          sourceCaptainId: captain.id,
+          captainId: captain.id,
+          playerIds: [first.id, second.id],
+          priority: 500,
+          reason: `锁定契约：${first.name} 与 ${second.name} 已绑定`,
+        });
+        Hexcore2.eventStore.append('海克斯契约', `${captain.name} 使用【锁定契约】，绑定「${first.name}」与「${second.name}」；任意一人被选中时另一人会自动加入同一队伍`, 'warn');
+      }
+
       if (hexcore.id !== 'blind' && hexcore.id !== 'snow-cat') {
         hexcore.status = 'used';
       }
@@ -302,6 +325,39 @@
     powerRank(playerId) {
       const sorted = [...Hexcore2.state.players].sort((a, b) => b.score - a.score);
       return sorted.findIndex(player => player.id === playerId) + 1;
+    },
+
+    lockContractPairs() {
+      return Hexcore2.state.draft.runtimeEffects.filter(effect =>
+        effect.type === 'locked_pair'
+        && Array.isArray(effect.playerIds)
+        && effect.playerIds.length === 2
+      );
+    },
+
+    resolveLockContracts(captainId, playerId) {
+      const state = Hexcore2.state;
+      const captain = state.captains.find(item => item.id === captainId);
+      if (!captain || captain.team.length >= state.settings.playersPerTeam) return false;
+
+      const pair = this.lockContractPairs().find(effect => effect.playerIds.includes(playerId) && !effect.resolved);
+      if (!pair) return false;
+
+      const pairedPlayerId = pair.playerIds.find(id => id !== playerId);
+      const pairedPlayer = state.players.find(item => item.id === pairedPlayerId);
+      const pickedPlayer = state.players.find(item => item.id === playerId);
+      if (!pairedPlayer || pairedPlayer.status !== 'available') {
+        pair.resolved = true;
+        Hexcore2.eventStore.append('锁定契约失效', `锁定契约的另一名选手已不可用，无法随「${pickedPlayer ? pickedPlayer.name : playerId}」自动入队`, 'warn');
+        return false;
+      }
+
+      const assigned = Hexcore2.assignmentEngine.assign(captainId, pairedPlayer.id, 'lock_contract_pair');
+      pair.resolved = true;
+      if (assigned) {
+        Hexcore2.eventStore.append('锁定契约触发', `「${pickedPlayer ? pickedPlayer.name : playerId}」入队触发契约，「${pairedPlayer.name}」自动加入 ${captain.name} 队伍`, 'success');
+      }
+      return assigned;
     },
 
     extraDrawCount(captainId) {

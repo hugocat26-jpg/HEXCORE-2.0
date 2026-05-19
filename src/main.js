@@ -133,6 +133,8 @@
         targetPlayerId: targetCaptainId,
         firstCaptainId: targetCaptainId,
         secondCaptainId: secondTargetCaptainId,
+        firstPlayerId: targetCaptainId,
+        secondPlayerId: secondTargetCaptainId,
       });
       if (result && result.advanceTurn) {
         this.nextCaptain();
