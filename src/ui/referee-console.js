@@ -203,6 +203,12 @@
     }
     const hexcores = Hexcore2.selectors.currentHexcores();
     const blindTargets = Hexcore2.hexcoreEngine.blindTargetOptions(captain.id);
+    const swapPairs = [];
+    Hexcore2.state.captains.forEach((first, firstIndex) => {
+      Hexcore2.state.captains.slice(firstIndex + 1).forEach(second => {
+        swapPairs.push([first, second]);
+      });
+    });
     return `
       <section class="hexcore-panel">
         <h2>${escapeHtml(captain.name)} 的海克斯</h2>
@@ -211,7 +217,7 @@
             const blindUsed = hex.id === 'blind' && Hexcore2.hexcoreEngine.blindUsedBy(captain.id);
             const isUsed = hex.mode === 'passive' || (hex.status === 'used' && hex.id !== 'blind') || blindUsed;
             return `
-              <div class="hex-row ${hex.type} ${hex.id === 'blind' ? 'targetable' : ''}">
+              <div class="hex-row ${hex.type} ${hex.id === 'blind' || hex.id === 'order-swap' ? 'targetable' : ''}">
                 <div class="hex-symbol">${Hexcore2.icon('hex')}</div>
                 <div>
                   <strong>${escapeHtml(hex.name)}</strong>
@@ -224,8 +230,15 @@
                       `).join('') || '<span>本轮没有可致盲目标</span>'}
                     </div>
                   ` : ''}
+                  ${hex.id === 'order-swap' && hex.status !== 'used' ? `
+                    <div class="target-grid pair-grid">
+                      ${swapPairs.map(([first, second]) => `
+                        <button onclick="window.hexcoreUI.useHexcore(${safeJsonString(hex.id)}, ${safeJsonString(first.id)}, ${safeJsonString(second.id)})">${escapeHtml(first.name)} ↔ ${escapeHtml(second.name)}</button>
+                      `).join('')}
+                    </div>
+                  ` : ''}
                 </div>
-                <button class="${isUsed ? 'used' : ''}" ${hex.mode === 'passive' || blindUsed || hex.id === 'blind' ? 'disabled' : ''} onclick="window.hexcoreUI.useHexcore(${safeJsonString(hex.id)})">${hex.mode === 'passive' ? '被动' : (isUsed ? '已使用' : (hex.id === 'blind' ? '选下方' : '使用'))}</button>
+                <button class="${isUsed ? 'used' : ''}" ${hex.mode === 'passive' || blindUsed || hex.id === 'blind' || hex.id === 'order-swap' ? 'disabled' : ''} onclick="window.hexcoreUI.useHexcore(${safeJsonString(hex.id)})">${hex.mode === 'passive' ? '被动' : (isUsed ? '已使用' : (hex.id === 'blind' || hex.id === 'order-swap' ? '选下方' : '使用'))}</button>
               </div>
             `;
           }).join('')}

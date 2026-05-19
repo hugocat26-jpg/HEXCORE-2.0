@@ -188,6 +188,32 @@
         );
       }
 
+      if (hexcore.id === 'order-swap') {
+        const first = state.captains.find(item => item.id === options.firstCaptainId);
+        const second = state.captains.find(item => item.id === options.secondCaptainId);
+        if (!first || !second || first.id === second.id) {
+          Hexcore2.eventStore.append('海克斯执行失败', '请选择两名不同队长进行基础顺位互换', 'warn');
+          return { ok: false };
+        }
+
+        const firstIndex = state.draft.baseOrder.indexOf(first.id);
+        const secondIndex = state.draft.baseOrder.indexOf(second.id);
+        if (firstIndex < 0 || secondIndex < 0) {
+          Hexcore2.eventStore.append('海克斯执行失败', '目标队长不在基础顺位中，无法互换', 'warn');
+          return { ok: false };
+        }
+
+        state.draft.baseOrder[firstIndex] = second.id;
+        state.draft.baseOrder[secondIndex] = first.id;
+        Hexcore2.turnOrderEngine.recompute();
+        state.draft.currentIndex = Math.max(0, state.draft.currentOrder.indexOf(captain.id));
+        Hexcore2.eventStore.append(
+          '海克斯顺位调整',
+          `${captain.name} 使用【顺位互换】，交换 ${first.name} 与 ${second.name} 的基础选人顺位；固定顺位类海克斯仍按规则单独结算`,
+          'warn'
+        );
+      }
+
       if (hexcore.id !== 'blind') {
         hexcore.status = 'used';
       }

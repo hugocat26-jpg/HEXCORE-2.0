@@ -782,6 +782,13 @@ h2 span {
   white-space: nowrap;
 }
 
+.target-grid.pair-grid {
+  grid-template-columns: repeat(auto-fit, minmax(148px, 1fr));
+  max-height: 132px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
 .target-grid span {
   color: var(--muted);
 }
