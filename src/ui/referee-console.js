@@ -8,7 +8,11 @@
   function currentCards() {
     const draw = Hexcore2.state.draft.currentDraw;
     if (!draw) return [];
-    return draw.cards.map(card => playerById(card.playerId)).filter(Boolean);
+    return draw.cards.map(slot => {
+      const player = playerById(slot.displayPlayerId || slot.playerId);
+      const realPlayer = playerById(slot.playerId);
+      return player && realPlayer ? { slot, player, realPlayer } : null;
+    }).filter(Boolean);
   }
 
   function currentDrawLabel() {
@@ -148,24 +152,25 @@
           <button class="subtle-btn" onclick="window.hexcoreUI.drawCards()">${Hexcore2.icon('refresh')}刷新池子</button>
         </div>
         <div class="cards-grid ${draw && draw.pickMode === 'open_pick' ? 'open-pick-grid' : ''}">
-          ${cards.map((card, index) => `
-            <button class="player-card ${index === selected ? 'selected' : ''} ${blinded ? 'blind-card' : ''}" onclick="window.hexcoreUI.selectCard(${index})">
+          ${cards.map(({ slot, player, realPlayer }, index) => `
+            <button class="player-card ${index === selected ? 'selected' : ''} ${blinded ? 'blind-card' : ''} ${draw && draw.pickMode === 'mystery_swap' ? 'mystery-card' : ''}" onclick="window.hexcoreUI.selectCard(${index})">
               <span class="card-index">${index + 1}</span>
-              <span class="lane">${blinded ? '致盲' : escapeHtml(card.lane)}</span>
+              <span class="lane">${blinded ? '致盲' : escapeHtml(player.lane)}</span>
               <span class="check">${index === selected ? '✓' : ''}</span>
-              <strong>${blinded ? '身份隐藏' : escapeHtml(card.name)}</strong>
-              <small>${blinded ? '选中后揭示' : `ID: ${escapeHtml(card.gameId)}`}</small>
-              <div class="score-row">评分 <b>${blinded ? '??' : card.score}</b></div>
+              <strong>${blinded ? '身份隐藏' : escapeHtml(player.name)}</strong>
+              <small>${blinded ? '选中后揭示' : `ID: ${escapeHtml(player.gameId)}${draw && draw.pickMode === 'mystery_swap' ? ' / 真实身份待揭示' : ''}`}</small>
+              <div class="score-row">评分 <b>${blinded ? '??' : player.score}</b></div>
               <div class="history-title">历史表现（近5场）</div>
               <div class="stat-grid">
-                <span>KDA<b>${blinded ? '?' : escapeHtml(card.kda)}</b></span>
-                <span>场均伤害<b>${blinded ? '?' : escapeHtml(card.damage)}</b></span>
-                <span>胜率<b>${blinded ? '?' : escapeHtml(card.winRate)}</b></span>
+                <span>KDA<b>${blinded ? '?' : escapeHtml(player.kda)}</b></span>
+                <span>场均伤害<b>${blinded ? '?' : escapeHtml(player.damage)}</b></span>
+                <span>胜率<b>${blinded ? '?' : escapeHtml(player.winRate)}</b></span>
               </div>
               <div class="hero-title">擅长英雄</div>
               <div class="hero-row">
-                ${(blinded ? ['?', '?', '?'] : card.heroes).map(hero => `<span>${escapeHtml(hero)}</span>`).join('')}
+                ${(blinded ? ['?', '?', '?'] : player.heroes).map(hero => `<span>${escapeHtml(hero)}</span>`).join('')}
               </div>
+              ${draw && draw.pickMode === 'mystery_swap' && slot.displayPlayerId !== slot.playerId ? `<em>选择后揭示：真实选中并非当前展示身份</em>` : ''}
             </button>
           `).join('')}
         </div>
@@ -215,14 +220,15 @@
         <div class="hex-list">
           ${hexcores.map(hex => {
             const blindUsed = hex.id === 'blind' && Hexcore2.hexcoreEngine.blindUsedBy(captain.id);
-            const isUsed = hex.mode === 'passive' || (hex.status === 'used' && hex.id !== 'blind') || blindUsed;
+            const snowUsed = hex.id === 'snow-cat' && Hexcore2.hexcoreEngine.snowCatUsedBy(captain.id);
+            const isUsed = hex.mode === 'passive' || (hex.status === 'used' && hex.id !== 'blind' && hex.id !== 'snow-cat') || blindUsed || snowUsed;
             return `
               <div class="hex-row ${hex.type} ${hex.id === 'blind' || hex.id === 'order-swap' ? 'targetable' : ''}">
                 <div class="hex-symbol">${Hexcore2.icon('hex')}</div>
                 <div>
                   <strong>${escapeHtml(hex.name)}</strong>
                   <p>${escapeHtml(hex.desc)}</p>
-                  <span>${hex.mode === 'passive' ? '被动规则：自动生效' : (hex.id === 'blind' ? (blindUsed ? '本轮已使用' : '本轮可指定目标') : `可用次数：${hex.status === 'used' ? 0 : hex.uses}`)}</span>
+                  <span>${hex.mode === 'passive' ? '被动规则：自动生效' : (hex.id === 'blind' ? (blindUsed ? '本轮已使用' : '本轮可指定目标') : (hex.id === 'snow-cat' ? (snowUsed ? '本轮已使用' : '本轮可用') : `可用次数：${hex.status === 'used' ? 0 : hex.uses}`))}</span>
                   ${hex.id === 'blind' && !blindUsed ? `
                     <div class="target-grid">
                       ${blindTargets.map(target => `
@@ -238,7 +244,7 @@
                     </div>
                   ` : ''}
                 </div>
-                <button class="${isUsed ? 'used' : ''}" ${hex.mode === 'passive' || blindUsed || hex.id === 'blind' || hex.id === 'order-swap' ? 'disabled' : ''} onclick="window.hexcoreUI.useHexcore(${safeJsonString(hex.id)})">${hex.mode === 'passive' ? '被动' : (isUsed ? '已使用' : (hex.id === 'blind' || hex.id === 'order-swap' ? '选下方' : '使用'))}</button>
+                <button class="${isUsed ? 'used' : ''}" ${hex.mode === 'passive' || blindUsed || snowUsed || hex.id === 'blind' || hex.id === 'order-swap' ? 'disabled' : ''} onclick="window.hexcoreUI.useHexcore(${safeJsonString(hex.id)})">${hex.mode === 'passive' ? '被动' : (isUsed ? '已使用' : (hex.id === 'blind' || hex.id === 'order-swap' ? '选下方' : '使用'))}</button>
               </div>
             `;
           }).join('')}

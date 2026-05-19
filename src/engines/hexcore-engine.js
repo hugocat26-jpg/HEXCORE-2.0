@@ -26,6 +26,14 @@
     );
   }
 
+  function roundEffectForSource(type, captainId) {
+    return Hexcore2.state.draft.runtimeEffects.find(effect =>
+      effect.type === type
+      && effect.sourceCaptainId === captainId
+      && effect.round === Hexcore2.state.draft.round
+    );
+  }
+
   function nextAvailableTier(startTier) {
     for (let tier = startTier; tier <= 4; tier += 1) {
       if (Hexcore2.selectors.availablePlayers(tier).length > 0) return tier;
@@ -43,7 +51,7 @@
 
       const hexcore = (state.hexcoreAssignments[captain.id] || []).find(item => item.id === hexcoreId);
       if (!hexcore || hexcore.mode === 'passive') return { ok: false };
-      if (hexcore.status === 'used' && hexcore.id !== 'blind') return { ok: false };
+      if (hexcore.status === 'used' && hexcore.id !== 'blind' && hexcore.id !== 'snow-cat') return { ok: false };
 
       if (transmuteTiers[hexcore.id]) {
         const tier = transmuteTiers[hexcore.id];
@@ -214,7 +222,35 @@
         );
       }
 
-      if (hexcore.id !== 'blind') {
+      if (hexcore.id === 'snow-cat') {
+        if (roundEffectForSource('snow_cat_used', captain.id)) {
+          Hexcore2.eventStore.append('海克斯执行失败', '雪定饿的喵本轮已经使用过', 'warn');
+          return { ok: false };
+        }
+
+        const tier = Hexcore2.poolEngine.effectiveTier(captain.id);
+        const tierName = state.settings.tierNames[tier];
+        const draw = Hexcore2.probabilityEngine.drawHighestLowestSwap(captain.id, tier, '雪定饿的喵：最高分与最低分身份可能互换');
+        if (draw.cards.length < 2) {
+          Hexcore2.eventStore.append('海克斯执行失败', `${tierName}可用选手不足2人，【雪定饿的喵】无法生成二选一`, 'warn');
+          return { ok: false };
+        }
+
+        state.draft.runtimeEffects.push({
+          type: 'snow_cat_used',
+          sourceCaptainId: captain.id,
+          captainId: captain.id,
+          round: state.draft.round,
+          priority: 500,
+          reason: '雪定饿的喵：本轮已生成高低分身份扰动抽卡',
+        });
+        state.draft.currentDraw = draw;
+        state.draft.selectedSlot = 0;
+        state.draft.pickedThisTurn = false;
+        Hexcore2.eventStore.append('海克斯暗牌', `${captain.name} 使用【雪定饿的喵】，系统抽出${tierName}最高分与最低分选手，身份${draw.mysterySwapped ? '已互换展示' : '未互换展示'}`, 'warn');
+      }
+
+      if (hexcore.id !== 'blind' && hexcore.id !== 'snow-cat') {
         hexcore.status = 'used';
       }
       Hexcore2.eventStore.append('海克斯激活', `${captain.name} 使用【${hexcore.name}】`, hexcore.id === 'blind' ? 'warn' : 'info');
@@ -234,6 +270,10 @@
         captain.id !== sourceCaptainId
         && !blindEffectForTarget(captain.id)
       );
+    },
+
+    snowCatUsedBy(captainId) {
+      return Boolean(roundEffectForSource('snow_cat_used', captainId));
     },
 
     extraDrawCount(captainId) {

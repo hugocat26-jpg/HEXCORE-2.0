@@ -93,6 +93,17 @@
 
       snapshot(`选卡前：${captain.name}`);
       Hexcore2.assignmentEngine.assign(captain.id, slot.playerId, 'normal_pick');
+      if (draw.pickMode === 'mystery_swap') {
+        const shown = Hexcore2.state.players.find(player => player.id === (slot.displayPlayerId || slot.playerId));
+        const real = Hexcore2.state.players.find(player => player.id === slot.playerId);
+        Hexcore2.eventStore.append(
+          '暗牌揭示',
+          shown && real
+            ? `${captain.name} 选择了展示为「${shown.name}」的卡牌，真实入队选手为「${real.name}」`
+            : `${captain.name} 完成雪定饿的喵暗牌选择`,
+          'warn'
+        );
+      }
       Hexcore2.state.draft.pickedThisTurn = true;
       renderAndPersist();
     },
