@@ -66,15 +66,18 @@
   function topbar() {
     const time = new Date().toLocaleTimeString('zh-CN', { hour12: false });
     const captain = Hexcore2.selectors.currentCaptain();
-    const tier = Hexcore2.poolEngine.effectiveTier(captain.id);
+    const tier = captain ? Hexcore2.poolEngine.effectiveTier(captain.id) : Math.max(1, Math.min(4, Hexcore2.state.draft.round));
     const tierName = Hexcore2.state.settings.tierNames[tier];
+    const statusText = Hexcore2.state.draft.phase === 'completed'
+      ? '选秀已完成'
+      : (Hexcore2.state.draft.paused ? '流程已暂停' : '比赛进行中');
     return `
       <header class="topbar">
         <div class="mode">裁判代执行</div>
         <div class="phase">当前阶段：<strong>第 ${Hexcore2.state.draft.round} 轮 / ${tierName}池</strong></div>
-        <div class="captain-title">当前队长：<strong>${captain.name}</strong></div>
+        <div class="captain-title">当前队长：<strong>${captain ? captain.name : '无'}</strong></div>
         <div class="top-spacer"></div>
-        <div class="live-status"><span></span>${Hexcore2.state.draft.paused ? '流程已暂停' : '比赛进行中'}</div>
+        <div class="live-status ${Hexcore2.state.draft.phase === 'completed' ? 'done' : ''}"><span></span>${statusText}</div>
         <div class="clock">${time}</div>
         <button class="ghost-btn" onclick="window.hexcoreUI.drawCards()">${Hexcore2.icon('refresh')}刷新</button>
       </header>
@@ -86,7 +89,7 @@
     return `
       <section class="turn-panel">
         <div class="panel-title-row">
-          <h2>顺位顺序 <span>当前第 ${state.draft.round} 轮</span></h2>
+          <h2>顺位顺序 <span>当前第 ${state.draft.round} 轮 / 有效队伍 ${state.draft.currentOrder.length}</span></h2>
           <button class="subtle-btn">顺位详情</button>
         </div>
         <div class="turn-strip">
@@ -109,11 +112,12 @@
     const cards = currentCards();
     const captain = Hexcore2.selectors.currentCaptain();
     const selected = Hexcore2.state.draft.selectedSlot;
-    const blinded = Hexcore2.hexcoreEngine.isBlinded(captain.id);
+    const blinded = captain ? Hexcore2.hexcoreEngine.isBlinded(captain.id) : false;
+    const tier = captain ? Hexcore2.poolEngine.effectiveTier(captain.id) : Math.max(1, Math.min(4, Hexcore2.state.draft.round));
     return `
       <section class="draw-panel">
         <div class="panel-title-row">
-          <h2>本轮抽卡 <span>${Hexcore2.state.settings.tierNames[Hexcore2.poolEngine.effectiveTier(captain.id)]}池</span></h2>
+          <h2>本轮抽卡 <span>${Hexcore2.state.settings.tierNames[tier]}池</span></h2>
           <button class="subtle-btn" onclick="window.hexcoreUI.drawCards()">${Hexcore2.icon('refresh')}刷新池子</button>
         </div>
         <div class="cards-grid">
@@ -138,7 +142,7 @@
             </button>
           `).join('')}
         </div>
-        <p class="hint">提示：请选择一名选手加入 ${captain.name} 的队伍（${Hexcore2.selectors.teamSize(captain.id)}/4）</p>
+        <p class="hint">提示：${captain ? `请选择一名选手加入 ${captain.name} 的队伍（${Hexcore2.selectors.teamSize(captain.id)}/4）` : '当前没有可操作队长'}</p>
       </section>
     `;
   }
@@ -162,6 +166,14 @@
 
   function hexcorePanel() {
     const captain = Hexcore2.selectors.currentCaptain();
+    if (!captain) {
+      return `
+        <section class="hexcore-panel">
+          <h2>当前队长的海克斯</h2>
+          <div class="empty-log">当前没有可操作队长</div>
+        </section>
+      `;
+    }
     const hexcores = Hexcore2.selectors.currentHexcores();
     return `
       <section class="hexcore-panel">
@@ -197,18 +209,28 @@
   }
 
   function eventLog() {
+    const filter = (Hexcore2.state.ui && Hexcore2.state.ui.eventFilter) || 'all';
+    const filteredEvents = Hexcore2.state.events.filter(event => {
+      if (filter === 'all') return true;
+      if (filter === 'hexcore') return event.title.includes('海克斯');
+      if (filter === 'team') return event.title.includes('入队') || event.body.includes('加入队伍');
+      if (filter === 'warning') return event.level === 'warn';
+      return true;
+    });
+
     return `
       <aside class="event-rail">
         <div class="panel-title-row">
           <h2>事件日志</h2>
-          <select aria-label="事件筛选">
-            <option>全部事件</option>
-            <option>海克斯</option>
-            <option>选手入队</option>
+          <select aria-label="事件筛选" onchange="window.hexcoreUI.setEventFilter(this.value)">
+            <option value="all" ${filter === 'all' ? 'selected' : ''}>全部事件</option>
+            <option value="hexcore" ${filter === 'hexcore' ? 'selected' : ''}>海克斯</option>
+            <option value="team" ${filter === 'team' ? 'selected' : ''}>选手入队</option>
+            <option value="warning" ${filter === 'warning' ? 'selected' : ''}>警告</option>
           </select>
         </div>
         <div class="event-list">
-          ${Hexcore2.state.events.map(event => `
+          ${filteredEvents.map(event => `
             <div class="event-item ${event.level}">
               <time>${event.time}</time>
               <div class="event-dot"></div>
@@ -217,7 +239,7 @@
                 <p>${event.body}</p>
               </div>
             </div>
-          `).join('')}
+          `).join('') || '<div class="empty-log">当前筛选下没有事件</div>'}
         </div>
         <button class="export-btn" onclick="window.hexcoreUI.exportEvents()">导出日志</button>
       </aside>
@@ -225,6 +247,7 @@
   }
 
   function rosterRail() {
+    const currentCaptain = Hexcore2.selectors.currentCaptain();
     return `
       <footer class="roster-rail">
         <div class="rail-header">
@@ -233,7 +256,7 @@
         </div>
         <div class="roster-list">
           ${Hexcore2.state.captains.map((captain, index) => `
-            <div class="team-mini ${captain.id === Hexcore2.selectors.currentCaptain().id ? 'active' : ''}">
+            <div class="team-mini ${currentCaptain && captain.id === currentCaptain.id ? 'active' : ''}">
               <div><span>${index + 1}</span><strong>${captain.name}</strong></div>
               <p>${captain.team.length}/4</p>
               <div class="slots">

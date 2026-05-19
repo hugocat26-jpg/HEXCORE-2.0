@@ -21,6 +21,7 @@
     draft: {
       phase: 'captain_action',
       round: 2,
+      maxRounds: 4,
       baseOrder: seed.captains.map(captain => captain.id),
       currentOrder: seed.captains.map(captain => captain.id),
       currentIndex: 6,
@@ -33,10 +34,38 @@
     },
     events: [],
     undoStack: [],
+    ui: {
+      eventFilter: 'all',
+    },
+  };
+
+  Hexcore2.normalizeState = function normalizeState(state) {
+    state.settings = state.settings || clone(defaultState.settings);
+    state.settings.tierNames = state.settings.tierNames || clone(defaultState.settings.tierNames);
+    state.settings.playersPerTeam = state.settings.playersPerTeam || defaultState.settings.playersPerTeam;
+    state.captains = state.captains || clone(defaultState.captains);
+    state.players = state.players || clone(defaultState.players);
+    state.hexcoreAssignments = state.hexcoreAssignments || {};
+    state.draft = state.draft || clone(defaultState.draft);
+    state.draft.baseOrder = state.draft.baseOrder || seed.captains.map(captain => captain.id);
+    state.draft.maxRounds = state.draft.maxRounds || defaultState.draft.maxRounds;
+    state.draft.phase = state.draft.phase || 'captain_action';
+    state.draft.currentOrder = state.draft.currentOrder || [...state.draft.baseOrder];
+    state.draft.currentIndex = Number.isInteger(state.draft.currentIndex) ? state.draft.currentIndex : 0;
+    state.draft.selectedSlot = Number.isInteger(state.draft.selectedSlot) ? state.draft.selectedSlot : 0;
+    state.draft.runtimeEffects = state.draft.runtimeEffects || [];
+    state.draft.explanations = state.draft.explanations || [];
+    state.draft.pickedThisTurn = Boolean(state.draft.pickedThisTurn);
+    state.draft.paused = Boolean(state.draft.paused);
+    state.events = state.events || [];
+    state.undoStack = state.undoStack || [];
+    state.ui = state.ui || { eventFilter: 'all' };
+    state.ui.eventFilter = state.ui.eventFilter || 'all';
+    return state;
   };
 
   const savedState = Hexcore2.storageService ? Hexcore2.storageService.load() : null;
-  Hexcore2.state = savedState || defaultState;
+  Hexcore2.state = Hexcore2.normalizeState(savedState || clone(defaultState));
 
   Hexcore2.selectors = {
     currentCaptain() {

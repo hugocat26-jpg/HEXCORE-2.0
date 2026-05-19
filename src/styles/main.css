@@ -248,6 +248,11 @@ button {
   box-shadow: 0 0 16px rgba(85, 200, 121, 0.55);
 }
 
+.live-status.done span {
+  background: var(--amber);
+  box-shadow: 0 0 16px rgba(244, 182, 42, 0.5);
+}
+
 .ghost-btn,
 .subtle-btn,
 .export-btn {
@@ -847,6 +852,13 @@ h2 span {
   color: #a9bdc8;
   font-size: 13px;
   line-height: 1.45;
+}
+
+.empty-log {
+  padding: 24px 0;
+  color: var(--muted);
+  text-align: center;
+  font-size: 13px;
 }
 
 .export-btn {
