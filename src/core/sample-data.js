@@ -12,6 +12,7 @@
     { id: 'giant-slayer', name: '巨人杀手', type: 'amber', desc: '侏儒马与猛犸池互换，仅影响持有者。', status: 'passive', uses: 0, mode: 'passive' },
     { id: 'ballroom-queen', name: '舞会女王', type: 'violet', desc: '持有者个人卡池顺序反转。', status: 'passive', uses: 0, mode: 'passive' },
     { id: 'demon-contract', name: '恶魔契约', type: 'cyan', desc: '第1-3轮自动第1顺位，第4轮自动最后顺位。', status: 'passive', uses: 0, mode: 'passive' },
+    { id: 'decompose-knowledge', name: '知识来源于分解', type: 'cyan', desc: '全程1次：分析1名已有选手，本轮抽卡显示历史战绩和战力顺位信息。', status: 'available', uses: 1, mode: 'manual' },
     { id: 'pandora-box', name: '潘多拉魔盒', type: 'violet', desc: '固定第3顺位，每轮从当前池评分前5随机分配1人。', status: 'passive', uses: 0, mode: 'passive' },
     { id: 'snow-cat', name: '雪定饿的喵', type: 'amber', desc: '每轮可用：抽出当前池最高分和最低分，两张身份可能互换，选择后揭示真实身份。', status: 'available', uses: 1, mode: 'manual', maxUsesPerRound: 1 },
     { id: 'steady', name: '稳扎稳打', type: 'amber', desc: '跳过本轮抽卡和选人，由系统从当前池随机分配1人。', status: 'available', uses: 1, mode: 'manual' },
@@ -70,7 +71,7 @@
     ],
 
     hexcoreAssignments: {
-      c1: take('transmute-bronze'),
+      c1: take('transmute-bronze', 'decompose-knowledge'),
       c2: take('transmute-auric'),
       c3: take('demon-contract'),
       c4: take('transmute-prismatic'),

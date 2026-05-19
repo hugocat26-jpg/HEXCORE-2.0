@@ -130,6 +130,7 @@
       snapshot(`使用海克斯前：${captain ? captain.name : '未知'}`);
       const result = Hexcore2.hexcoreEngine.activate(id, {
         targetCaptainId,
+        targetPlayerId: targetCaptainId,
         firstCaptainId: targetCaptainId,
         secondCaptainId: secondTargetCaptainId,
       });

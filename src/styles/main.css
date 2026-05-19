@@ -563,6 +563,19 @@ h2 span {
   font-size: 36px;
 }
 
+.power-rank {
+  display: flex;
+  justify-content: space-between;
+  margin: -6px 0 14px;
+  border: 1px solid rgba(25, 212, 240, 0.24);
+  border-radius: 6px;
+  background: rgba(25, 212, 240, 0.08);
+  padding: 7px 9px;
+  color: #c9f7ff;
+  font-size: 12px;
+  font-weight: 800;
+}
+
 .history-title,
 .hero-title {
   border-top: 1px solid var(--line-soft);

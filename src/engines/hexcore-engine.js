@@ -250,6 +250,25 @@
         Hexcore2.eventStore.append('海克斯暗牌', `${captain.name} 使用【雪定饿的喵】，系统抽出${tierName}最高分与最低分选手，身份${draw.mysterySwapped ? '已互换展示' : '未互换展示'}`, 'warn');
       }
 
+      if (hexcore.id === 'decompose-knowledge') {
+        const player = state.players.find(item => item.id === options.targetPlayerId);
+        if (!player || !captain.team.includes(player.id)) {
+          Hexcore2.eventStore.append('海克斯执行失败', '请选择当前队伍内已有选手进行分析', 'warn');
+          return { ok: false };
+        }
+
+        state.draft.runtimeEffects.push({
+          type: 'info_boost',
+          sourceCaptainId: captain.id,
+          captainId: captain.id,
+          sourcePlayerId: player.id,
+          round: state.draft.round,
+          priority: 500,
+          reason: `知识来源于分解：分析 ${player.name}，本轮显示战力顺位信息`,
+        });
+        Hexcore2.eventStore.append('海克斯信息增强', `${captain.name} 使用【知识来源于分解】，分析已有选手「${player.name}」，本轮抽卡将显示战力顺位信息`, 'info');
+      }
+
       if (hexcore.id !== 'blind' && hexcore.id !== 'snow-cat') {
         hexcore.status = 'used';
       }
@@ -274,6 +293,15 @@
 
     snowCatUsedBy(captainId) {
       return Boolean(roundEffectForSource('snow_cat_used', captainId));
+    },
+
+    infoBoostFor(captainId) {
+      return roundEffectForSource('info_boost', captainId);
+    },
+
+    powerRank(playerId) {
+      const sorted = [...Hexcore2.state.players].sort((a, b) => b.score - a.score);
+      return sorted.findIndex(player => player.id === playerId) + 1;
     },
 
     extraDrawCount(captainId) {

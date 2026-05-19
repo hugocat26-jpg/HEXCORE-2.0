@@ -143,6 +143,7 @@
     const captain = Hexcore2.selectors.currentCaptain();
     const selected = Hexcore2.state.draft.selectedSlot;
     const blinded = captain ? Hexcore2.hexcoreEngine.isBlinded(captain.id) : false;
+    const infoBoost = captain ? Hexcore2.hexcoreEngine.infoBoostFor(captain.id) : null;
     const tier = captain ? Hexcore2.poolEngine.effectiveTier(captain.id) : Math.max(1, Math.min(4, Hexcore2.state.draft.round));
     const draw = Hexcore2.state.draft.currentDraw;
     return `
@@ -160,6 +161,7 @@
               <strong>${blinded ? '身份隐藏' : escapeHtml(player.name)}</strong>
               <small>${blinded ? '选中后揭示' : `ID: ${escapeHtml(player.gameId)}${draw && draw.pickMode === 'mystery_swap' ? ' / 真实身份待揭示' : ''}`}</small>
               <div class="score-row">评分 <b>${blinded ? '??' : player.score}</b></div>
+              ${infoBoost && !blinded ? `<div class="power-rank">战力顺位 <b>#${Hexcore2.hexcoreEngine.powerRank(realPlayer.id)}</b></div>` : ''}
               <div class="history-title">历史表现（近5场）</div>
               <div class="stat-grid">
                 <span>KDA<b>${blinded ? '?' : escapeHtml(player.kda)}</b></span>
@@ -208,6 +210,9 @@
     }
     const hexcores = Hexcore2.selectors.currentHexcores();
     const blindTargets = Hexcore2.hexcoreEngine.blindTargetOptions(captain.id);
+    const teamPlayers = captain.team
+      .map(playerId => playerById(playerId))
+      .filter(Boolean);
     const swapPairs = [];
     Hexcore2.state.captains.forEach((first, firstIndex) => {
       Hexcore2.state.captains.slice(firstIndex + 1).forEach(second => {
@@ -223,7 +228,7 @@
             const snowUsed = hex.id === 'snow-cat' && Hexcore2.hexcoreEngine.snowCatUsedBy(captain.id);
             const isUsed = hex.mode === 'passive' || (hex.status === 'used' && hex.id !== 'blind' && hex.id !== 'snow-cat') || blindUsed || snowUsed;
             return `
-              <div class="hex-row ${hex.type} ${hex.id === 'blind' || hex.id === 'order-swap' ? 'targetable' : ''}">
+              <div class="hex-row ${hex.type} ${hex.id === 'blind' || hex.id === 'order-swap' || hex.id === 'decompose-knowledge' ? 'targetable' : ''}">
                 <div class="hex-symbol">${Hexcore2.icon('hex')}</div>
                 <div>
                   <strong>${escapeHtml(hex.name)}</strong>
@@ -243,8 +248,15 @@
                       `).join('')}
                     </div>
                   ` : ''}
+                  ${hex.id === 'decompose-knowledge' && hex.status !== 'used' ? `
+                    <div class="target-grid">
+                      ${teamPlayers.map(player => `
+                        <button onclick="window.hexcoreUI.useHexcore(${safeJsonString(hex.id)}, ${safeJsonString(player.id)})">${escapeHtml(player.name)}</button>
+                      `).join('') || '<span>至少拥有1名选手后可用</span>'}
+                    </div>
+                  ` : ''}
                 </div>
-                <button class="${isUsed ? 'used' : ''}" ${hex.mode === 'passive' || blindUsed || snowUsed || hex.id === 'blind' || hex.id === 'order-swap' ? 'disabled' : ''} onclick="window.hexcoreUI.useHexcore(${safeJsonString(hex.id)})">${hex.mode === 'passive' ? '被动' : (isUsed ? '已使用' : (hex.id === 'blind' || hex.id === 'order-swap' ? '选下方' : '使用'))}</button>
+                <button class="${isUsed ? 'used' : ''}" ${hex.mode === 'passive' || blindUsed || snowUsed || hex.id === 'blind' || hex.id === 'order-swap' || hex.id === 'decompose-knowledge' ? 'disabled' : ''} onclick="window.hexcoreUI.useHexcore(${safeJsonString(hex.id)})">${hex.mode === 'passive' ? '被动' : (isUsed ? '已使用' : (hex.id === 'blind' || hex.id === 'order-swap' || hex.id === 'decompose-knowledge' ? '选下方' : '使用'))}</button>
               </div>
             `;
           }).join('')}
