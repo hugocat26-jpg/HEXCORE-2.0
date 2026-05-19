@@ -6,10 +6,21 @@
     return JSON.parse(JSON.stringify(value));
   }
 
+  function reconcileBaseOrder(captains, baseOrder) {
+    const captainIds = captains.map(captain => captain.id);
+    const current = Array.isArray(baseOrder) ? baseOrder.filter(id => captainIds.includes(id)) : [];
+    captainIds.forEach(id => {
+      if (!current.includes(id)) current.push(id);
+    });
+    return current;
+  }
+
   const defaultState = {
     mode: 'referee_single_client',
     settings: {
-      totalTeams: 12,
+      minTeams: 5,
+      maxTeams: 20,
+      totalTeams: seed.captains.length,
       playersPerTeam: 4,
       tierNames: { 1: '侏儒马', 2: '中等马', 3: '上等马', 4: '猛犸' },
     },
@@ -40,12 +51,15 @@
   Hexcore2.normalizeState = function normalizeState(state) {
     state.settings = state.settings || clone(defaultState.settings);
     state.settings.tierNames = state.settings.tierNames || clone(defaultState.settings.tierNames);
+    state.settings.minTeams = state.settings.minTeams || defaultState.settings.minTeams;
+    state.settings.maxTeams = state.settings.maxTeams || defaultState.settings.maxTeams;
     state.settings.playersPerTeam = state.settings.playersPerTeam || defaultState.settings.playersPerTeam;
     state.captains = state.captains || clone(defaultState.captains);
+    state.settings.totalTeams = state.captains.length;
     state.players = state.players || clone(defaultState.players);
     state.hexcoreAssignments = state.hexcoreAssignments || {};
     state.draft = state.draft || clone(defaultState.draft);
-    state.draft.baseOrder = state.draft.baseOrder || seed.captains.map(captain => captain.id);
+    state.draft.baseOrder = reconcileBaseOrder(state.captains, state.draft.baseOrder);
     state.draft.maxRounds = state.draft.maxRounds || defaultState.draft.maxRounds;
     state.draft.phase = state.draft.phase || 'captain_action';
     state.draft.currentOrder = state.draft.currentOrder || [...state.draft.baseOrder];
@@ -81,6 +95,9 @@
     currentHexcores() {
       const captain = Hexcore2.selectors.currentCaptain();
       return captain ? (Hexcore2.state.hexcoreAssignments[captain.id] || []) : [];
+    },
+    teamCount() {
+      return Hexcore2.state.captains.length;
     },
   };
 })(window);

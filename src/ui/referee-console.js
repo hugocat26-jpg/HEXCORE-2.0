@@ -26,6 +26,7 @@
 
   function sidebar() {
     const icon = Hexcore2.icon;
+    const teamCount = Hexcore2.selectors.teamCount();
     const items = [
       ['draft', '实时选秀', true],
       ['team', '队伍管理'],
@@ -55,7 +56,8 @@
         <div class="event-info">
           <div>赛事信息</div>
           <p>赛事名称：HEXCORE 杯 S2</p>
-          <p>赛制：12 队征召制</p>
+          <p>赛制：${teamCount} 队征召制</p>
+          <p>队伍范围：${Hexcore2.state.settings.minTeams}-${Hexcore2.state.settings.maxTeams} 队</p>
           <p>版本：2.0 裁判端</p>
           <p>模式：裁判代执行</p>
           <p>创建时间：2026-05-19 09:00</p>
@@ -92,13 +94,14 @@
 
   function turnOrder() {
     const state = Hexcore2.state;
+    const orderColumns = Math.max(1, state.draft.currentOrder.length);
     return `
       <section class="turn-panel">
         <div class="panel-title-row">
           <h2>顺位顺序 <span>当前第 ${state.draft.round} 轮 / 有效队伍 ${state.draft.currentOrder.length}</span></h2>
           <button class="subtle-btn">顺位详情</button>
         </div>
-        <div class="turn-strip">
+        <div class="turn-strip" style="grid-template-columns: repeat(${orderColumns}, minmax(92px, 1fr));">
           ${state.draft.currentOrder.map((captainId, index) => {
             const captain = state.captains.find(item => item.id === captainId);
             return `
@@ -261,13 +264,14 @@
 
   function rosterRail() {
     const currentCaptain = Hexcore2.selectors.currentCaptain();
+    const teamCount = Hexcore2.selectors.teamCount();
     return `
       <footer class="roster-rail">
         <div class="rail-header">
-          <h2>队伍阵容概览（12 队）</h2>
+          <h2>队伍阵容概览（${teamCount} 队）</h2>
           <div><span class="filled-dot"></span>已选 <span class="empty-dot"></span>空位</div>
         </div>
-        <div class="roster-list">
+        <div class="roster-list" style="grid-template-columns: repeat(${teamCount}, minmax(120px, 1fr));">
           ${Hexcore2.state.captains.map((captain, index) => `
             <div class="team-mini ${currentCaptain && captain.id === currentCaptain.id ? 'active' : ''}">
               <div><span>${index + 1}</span><strong>${captain.name}</strong></div>
