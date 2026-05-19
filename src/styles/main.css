@@ -1033,6 +1033,11 @@ h2 span {
   padding: 12px;
 }
 
+.data-card.active-card {
+  border-color: var(--amber);
+  box-shadow: inset 0 0 0 1px rgba(244, 182, 42, 0.24);
+}
+
 .data-card-head {
   display: flex;
   align-items: center;
@@ -1063,11 +1068,44 @@ h2 span {
 }
 
 .member-list span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   border: 1px solid var(--line-soft);
   border-radius: 5px;
   padding: 6px 8px;
   color: #c8d9e2;
   font-size: 13px;
+}
+
+.member-list button,
+.card-actions button,
+.owned-hex-list button {
+  min-height: 24px;
+  border: 1px solid rgba(25, 212, 240, 0.36);
+  border-radius: 4px;
+  background: rgba(25, 212, 240, 0.08);
+  color: #c9f7ff;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 12px;
+}
+
+.card-actions button {
+  flex: 1 1 74px;
+}
+
+.card-actions button.danger-inline {
+  border-color: rgba(239, 93, 93, 0.44);
+  background: rgba(239, 93, 93, 0.1);
+  color: #ffc7c7;
 }
 
 .pool-columns {
@@ -1130,6 +1168,23 @@ h2 span {
   gap: 5px;
 }
 
+.toolbar-actions {
+  display: flex !important;
+  grid-auto-flow: column;
+  align-items: center;
+  gap: 10px !important;
+}
+
+.toolbar-row select,
+.settings-form input {
+  min-height: 38px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #09151d;
+  color: #d6e5ec;
+  padding: 0 10px;
+}
+
 .primary-btn,
 .danger-btn {
   display: inline-flex;
@@ -1156,6 +1211,38 @@ h2 span {
 
 .hex-library {
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
+.owned-hex-panel {
+  margin-bottom: 14px;
+  border: 1px solid var(--line-soft);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.02);
+  padding: 12px;
+}
+
+.owned-hex-panel h2 {
+  margin-bottom: 10px;
+}
+
+.owned-hex-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.owned-hex-list span,
+.owned-hex-list em {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.03);
+  color: #d7e6ed;
+  padding: 5px 8px 5px 12px;
+  font-size: 13px;
+  font-style: normal;
 }
 
 .hex-library-card {
@@ -1208,6 +1295,26 @@ h2 span {
 
 .rules-grid {
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
+.settings-form {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(160px, 1fr)) auto;
+  align-items: end;
+  gap: 12px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--line-soft);
+  padding-bottom: 16px;
+}
+
+.settings-form label {
+  display: grid;
+  gap: 7px;
+}
+
+.settings-form label span {
+  color: var(--muted);
+  font-size: 13px;
 }
 
 .rule-block {
@@ -1416,9 +1523,14 @@ h2 span {
   }
 
   .page-header,
-  .toolbar-row {
+  .toolbar-row,
+  .toolbar-actions {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .settings-form {
+    grid-template-columns: 1fr;
   }
 
   .roster-list {

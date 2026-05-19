@@ -22,6 +22,7 @@ const sourceFiles = [
 
 function createHarness() {
   const app = { innerHTML: '' };
+  const elements = {};
   const context = {
     console,
     Math,
@@ -32,7 +33,9 @@ function createHarness() {
     window: {},
     document: {
       getElementById(id) {
-        return id === 'app' ? app : { click() {}, value: '', files: [] };
+        if (id === 'app') return app;
+        elements[id] = elements[id] || { click() {}, value: '', files: [] };
+        return elements[id];
       },
       createElement() {
         return { click() {}, set href(value) {}, set download(value) {} };
@@ -54,13 +57,14 @@ function createHarness() {
     },
     location: { protocol: 'http:', reload() {} },
     confirm() { return true; },
+    prompt(message, defaultValue) { return defaultValue || '测试输入'; },
   };
   context.window = context;
   vm.createContext(context);
   sourceFiles.forEach(file => {
     vm.runInContext(fs.readFileSync(path.join(root, file), 'utf8'), context, { filename: file });
   });
-  return { H: context.Hexcore2, app };
+  return { H: context.Hexcore2, app, elements };
 }
 
 function assert(condition, message) {
@@ -174,14 +178,27 @@ function testDecomposeKnowledge() {
 }
 
 function testUiNavigationAndHexButtons() {
-  const { H, app } = createHarness();
+  const { H, app, elements } = createHarness();
   H.ui.render();
   assert(app.innerHTML.includes('setActiveView'), '侧边栏应绑定视图切换动作');
   assert(!app.innerHTML.includes('useHexcore(" origin")'), '海克斯按钮不应生成被截断的 onclick 参数');
   H.actions.setActiveView('players');
-  assert(app.innerHTML.includes('选手库') && app.innerHTML.includes('侏儒马池'), '选手库页面应可渲染');
+  assert(app.innerHTML.includes('选手库') && app.innerHTML.includes('侏儒马池') && app.innerHTML.includes('setPlayerFilter'), '选手库页面应可筛选');
   H.actions.setActiveView('hexcores');
-  assert(app.innerHTML.includes('为当前队长抽海克斯'), '海克斯库页面应提供裁判抽海克斯入口');
+  assert(app.innerHTML.includes('为该队长抽海克斯') && app.innerHTML.includes('removeHexcore'), '海克斯库页面应提供裁判抽取和移除入口');
+  H.actions.setActiveView('teams');
+  assert(app.innerHTML.includes('新增队伍') && app.innerHTML.includes('renameCaptain'), '队伍管理页面应提供实质操作');
+  H.actions.setActiveView('rules');
+  assert(app.innerHTML.includes('保存规则并重算流程'), '规则设置页面应提供保存入口');
+
+  const beforeCount = H.state.captains.length;
+  elements['rules-team-count'] = { value: '13' };
+  elements['rules-players-per-team'] = { value: '4' };
+  elements['rules-current-round'] = { value: '3' };
+  H.actions.updateRules();
+  assert(H.state.captains.length === 13, '规则设置应能调整队伍数量');
+  assert(H.state.draft.round === 3, '规则设置应能调整当前轮次');
+  assert(H.state.captains.length === beforeCount + 1, '规则设置应新增缺失队伍');
 }
 
 function run() {

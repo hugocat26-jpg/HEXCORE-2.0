@@ -386,12 +386,20 @@
   }
 
   function teamsPage() {
+    const currentCaptain = Hexcore2.selectors.currentCaptain();
     return `
-      ${pageHeader('队伍管理', '裁判查看全部队伍阵容、队伍容量和当前队长状态。')}
+      ${pageHeader('队伍管理', '裁判可调整队伍、切换当前队长、重命名队长并处理队员归属。')}
       <section class="data-panel">
+        <div class="toolbar-row">
+          <div>
+            <strong>当前 ${Hexcore2.selectors.teamCount()} 队，允许 ${Hexcore2.state.settings.minTeams}-${Hexcore2.state.settings.maxTeams} 队</strong>
+            <span>队伍增删会重算基础顺位，并清空当前抽卡结果。</span>
+          </div>
+          <button class="primary-btn" onclick="window.hexcoreUI.addCaptain()">${Hexcore2.icon('team')}新增队伍</button>
+        </div>
         <div class="data-grid team-grid">
           ${Hexcore2.state.captains.map((captain, index) => `
-            <article class="data-card">
+            <article class="data-card ${currentCaptain && currentCaptain.id === captain.id ? 'active-card' : ''}">
               <div class="data-card-head">
                 <span>${index + 1}</span>
                 <strong>${escapeHtml(captain.name)}</strong>
@@ -401,8 +409,18 @@
               <div class="member-list">
                 ${captain.team.map(playerId => {
                   const player = playerById(playerId);
-                  return player ? `<span>${escapeHtml(player.name)} · ${escapeHtml(player.lane || '未知')}</span>` : '';
+                  return player ? `
+                    <span>
+                      ${escapeHtml(player.name)} · ${escapeHtml(player.lane || '未知')}
+                      <button onclick="window.hexcoreUI.removePlayerFromTeam('${captain.id}', '${player.id}')">移回池</button>
+                    </span>
+                  ` : '';
                 }).join('') || '<span>暂无队员</span>'}
+              </div>
+              <div class="card-actions">
+                <button onclick="window.hexcoreUI.setCurrentCaptain('${captain.id}')">设为当前</button>
+                <button onclick="window.hexcoreUI.renameCaptain('${captain.id}')">改名</button>
+                <button class="danger-inline" onclick="window.hexcoreUI.removeCaptain('${captain.id}')">删除</button>
               </div>
             </article>
           `).join('')}
@@ -413,14 +431,36 @@
 
   function playersPage() {
     const tierNames = Hexcore2.state.settings.tierNames;
+    const filter = (Hexcore2.state.ui && Hexcore2.state.ui.playerFilter) || 'all';
+    function visiblePlayer(player) {
+      if (filter === 'all') return true;
+      if (filter === 'available') return player.status === 'available';
+      if (filter === 'drafted') return player.status === 'drafted';
+      return Number(filter) === player.tier;
+    }
     return `
       ${pageHeader('选手库', '按卡池查看选手状态、评分、位置和归属队伍。')}
       <section class="data-panel">
+        <div class="toolbar-row">
+          <div>
+            <strong>选手总数：${Hexcore2.state.players.length}</strong>
+            <span>可选 ${Hexcore2.state.players.filter(player => player.status === 'available').length} 人，已入队 ${Hexcore2.state.players.filter(player => player.status === 'drafted').length} 人。</span>
+          </div>
+          <select aria-label="选手筛选" onchange="window.hexcoreUI.setPlayerFilter(this.value)">
+            <option value="all" ${filter === 'all' ? 'selected' : ''}>全部选手</option>
+            <option value="available" ${filter === 'available' ? 'selected' : ''}>仅可选</option>
+            <option value="drafted" ${filter === 'drafted' ? 'selected' : ''}>仅已入队</option>
+            <option value="1" ${filter === '1' ? 'selected' : ''}>侏儒马池</option>
+            <option value="2" ${filter === '2' ? 'selected' : ''}>中等马池</option>
+            <option value="3" ${filter === '3' ? 'selected' : ''}>上等马池</option>
+            <option value="4" ${filter === '4' ? 'selected' : ''}>猛犸池</option>
+          </select>
+        </div>
         <div class="pool-columns">
           ${[1, 2, 3, 4].map(tier => `
             <div class="pool-column">
               <h2>${escapeHtml(tierNames[tier])}池</h2>
-              ${Hexcore2.state.players.filter(player => player.tier === tier).map(player => {
+              ${Hexcore2.state.players.filter(player => player.tier === tier && visiblePlayer(player)).map(player => {
                 const owner = player.teamId ? Hexcore2.state.captains.find(captain => captain.id === player.teamId) : null;
                 return `
                   <div class="player-row">
@@ -439,15 +479,31 @@
 
   function hexcoresPage() {
     const captain = Hexcore2.selectors.currentCaptain();
+    const selectedCaptainId = (Hexcore2.state.ui && Hexcore2.state.ui.hexCaptainId) || (captain && captain.id) || '';
+    const selectedCaptain = Hexcore2.state.captains.find(item => item.id === selectedCaptainId) || captain;
+    const ownedHexcores = selectedCaptain ? (Hexcore2.state.hexcoreAssignments[selectedCaptain.id] || []) : [];
     return `
-      ${pageHeader('海克斯库', '裁判查看全量海克斯，并可为当前队长抽取新的海克斯。')}
+      ${pageHeader('海克斯库', '裁判查看全量海克斯，并可指定队长抽取或移除海克斯。')}
       <section class="data-panel">
         <div class="toolbar-row">
           <div>
-            <strong>当前队长：${captain ? escapeHtml(captain.name) : '无'}</strong>
-            <span>当前阶段仍由裁判代执行抽取和使用。</span>
+            <strong>操作队长：${selectedCaptain ? escapeHtml(selectedCaptain.name) : '无'}</strong>
+            <span>当前阶段仍由裁判代执行抽取、分配和使用。</span>
           </div>
-          <button class="primary-btn" onclick="window.hexcoreUI.drawHexcoreForCurrentCaptain()">${Hexcore2.icon('hex')}为当前队长抽海克斯</button>
+          <div class="toolbar-actions">
+            <select aria-label="选择海克斯队长" onchange="window.hexcoreUI.setHexCaptain(this.value)">
+              ${Hexcore2.state.captains.map(item => `<option value="${item.id}" ${selectedCaptain && selectedCaptain.id === item.id ? 'selected' : ''}>${escapeHtml(item.name)}</option>`).join('')}
+            </select>
+            <button class="primary-btn" onclick="window.hexcoreUI.drawHexcoreForCaptain('${selectedCaptain ? selectedCaptain.id : ''}')">${Hexcore2.icon('hex')}为该队长抽海克斯</button>
+          </div>
+        </div>
+        <div class="owned-hex-panel">
+          <h2>已持有海克斯</h2>
+          <div class="owned-hex-list">
+            ${ownedHexcores.map(hex => `
+              <span>${escapeHtml(hex.name)} <button onclick="window.hexcoreUI.removeHexcore('${selectedCaptain.id}', '${hex.id}')">移除</button></span>
+            `).join('') || '<em>暂无海克斯</em>'}
+          </div>
         </div>
         <div class="hex-library">
           ${Hexcore2.sampleData.hexcores.map(hex => `
@@ -482,11 +538,28 @@
   function rulesPage() {
     return `
       ${pageHeader('规则设置', '当前版本固定为裁判代执行，保留多人登录鉴权与队长自抽扩展口。')}
-      <section class="data-panel rules-grid">
-        <div class="rule-block"><strong>队伍数量</strong><span>${Hexcore2.state.settings.minTeams}-${Hexcore2.state.settings.maxTeams} 队，当前 ${Hexcore2.selectors.teamCount()} 队。</span></div>
-        <div class="rule-block"><strong>队伍容量</strong><span>每队 ${Hexcore2.state.settings.playersPerTeam} 名选手。</span></div>
-        <div class="rule-block"><strong>执行模式</strong><span>当前由裁判代抽、代选、代用海克斯。</span></div>
-        <div class="rule-block"><strong>旧购买逻辑</strong><span>已取消资源购买卡牌流程，抽卡只由规则、顺位、卡池和海克斯效果驱动。</span></div>
+      <section class="data-panel">
+        <div class="settings-form">
+          <label>
+            <span>队伍数量（${Hexcore2.state.settings.minTeams}-${Hexcore2.state.settings.maxTeams}）</span>
+            <input id="rules-team-count" type="number" min="${Hexcore2.state.settings.minTeams}" max="${Hexcore2.state.settings.maxTeams}" value="${Hexcore2.selectors.teamCount()}">
+          </label>
+          <label>
+            <span>每队人数</span>
+            <input id="rules-players-per-team" type="number" min="1" max="8" value="${Hexcore2.state.settings.playersPerTeam}">
+          </label>
+          <label>
+            <span>当前轮次</span>
+            <input id="rules-current-round" type="number" min="1" max="${Hexcore2.state.draft.maxRounds}" value="${Hexcore2.state.draft.round}">
+          </label>
+          <button class="primary-btn" onclick="window.hexcoreUI.updateRules()">保存规则并重算流程</button>
+        </div>
+        <div class="rules-grid">
+          <div class="rule-block"><strong>队伍数量</strong><span>${Hexcore2.state.settings.minTeams}-${Hexcore2.state.settings.maxTeams} 队，当前 ${Hexcore2.selectors.teamCount()} 队。</span></div>
+          <div class="rule-block"><strong>队伍容量</strong><span>每队 ${Hexcore2.state.settings.playersPerTeam} 名选手。</span></div>
+          <div class="rule-block"><strong>执行模式</strong><span>当前由裁判代抽、代选、代用海克斯。</span></div>
+          <div class="rule-block"><strong>旧购买逻辑</strong><span>已取消资源购买卡牌流程，抽卡只由规则、顺位、卡池和海克斯效果驱动。</span></div>
+        </div>
       </section>
     `;
   }
