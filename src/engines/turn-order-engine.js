@@ -5,6 +5,24 @@
     return Hexcore2.selectors.teamSize(captainId) < Hexcore2.state.settings.playersPerTeam;
   }
 
+  function isSkippedThisRound(captainId) {
+    const state = Hexcore2.state;
+    return state.draft.runtimeEffects.some(effect =>
+      effect.type === 'skip_round'
+      && effect.captainId === captainId
+      && effect.round === state.draft.round
+    );
+  }
+
+  function skippedThisRoundEffect(captainId) {
+    const state = Hexcore2.state;
+    return state.draft.runtimeEffects.find(effect =>
+      effect.type === 'skip_round'
+      && effect.captainId === captainId
+      && effect.round === state.draft.round
+    );
+  }
+
   function resetTurnState() {
     const state = Hexcore2.state;
     state.draft.selectedSlot = 0;
@@ -26,6 +44,9 @@
       order.splice(targetIndex, 0, modifier.captainId);
     } else if (modifier.operation === 'move_last') {
       order.push(modifier.captainId);
+    } else if (modifier.operation === 'move_down_one') {
+      const targetIndex = Math.max(0, Math.min(order.length, index + 1));
+      order.splice(targetIndex, 0, modifier.captainId);
     } else {
       order.unshift(modifier.captainId);
     }
@@ -35,7 +56,18 @@
   Hexcore2.turnOrderEngine = {
     recompute() {
       const state = Hexcore2.state;
-      const order = state.draft.baseOrder.filter(teamIsOpen);
+      const skippedCaptains = state.draft.baseOrder
+        .map(captainId => ({ captainId, effect: skippedThisRoundEffect(captainId) }))
+        .filter(item => item.effect);
+      skippedCaptains.forEach(({ captainId, effect }) => {
+        const captain = state.captains.find(item => item.id === captainId);
+        if (captain && !effect.announced) {
+          Hexcore2.eventStore.append('海克斯自动跳过', `${captain.name} 受海克斯效果影响，跳过第 ${state.draft.round} 轮选人`, 'warn');
+          effect.announced = true;
+        }
+      });
+
+      const order = state.draft.baseOrder.filter(captainId => teamIsOpen(captainId) && !isSkippedThisRound(captainId));
       const explanations = new Map(order.map((id, index) => [id, [`基础顺位第 ${index + 1}`]]));
 
       if (state.draft.round % 2 === 0) {
@@ -70,6 +102,15 @@
         .forEach(effect => modifiers.push({
           captainId: effect.captainId,
           operation: 'move_first',
+          priority: effect.priority,
+          reason: effect.reason,
+        }));
+
+      state.draft.runtimeEffects
+        .filter(effect => effect.type === 'move_down_one' && effect.round === state.draft.round)
+        .forEach(effect => modifiers.push({
+          captainId: effect.captainId,
+          operation: 'move_down_one',
           priority: effect.priority,
           reason: effect.reason,
         }));

@@ -68,14 +68,43 @@
       }
 
       if (hexcore.id === 'double-shot') {
+        if (state.draft.round < 1 || state.draft.round > 3) {
+          Hexcore2.eventStore.append('海克斯执行失败', '双发快射仅可在第1/2/3轮使用', 'warn');
+          return { ok: false };
+        }
+
+        const currentTier = Hexcore2.poolEngine.effectiveTier(captain.id);
+        const nextTier = Hexcore2.poolEngine.effectiveTierForRound(captain.id, Math.min(4, state.draft.round + 1));
+        const currentTierName = state.settings.tierNames[currentTier];
+        const nextTierName = state.settings.tierNames[nextTier];
+        const assignedCurrent = Hexcore2.assignmentEngine.assignRandomFromTier(captain.id, currentTier, 'double_shot_current');
+        const assignedNext = Hexcore2.assignmentEngine.assignRandomFromTier(captain.id, nextTier, 'double_shot_next');
+
         state.draft.runtimeEffects.push({
-          type: 'extra_draw',
+          type: 'skip_round',
           captainId: captain.id,
-          round: state.draft.round,
-          countBonus: 1,
+          round: Math.min(4, state.draft.round + 1),
           priority: 500,
-          reason: '双发快射：本轮额外抽 1 张',
+          reason: '双发快射：下一轮跳过选人',
         });
+
+        if (state.draft.round < 3) {
+          state.draft.runtimeEffects.push({
+            type: 'move_down_one',
+            captainId: captain.id,
+            round: 3,
+            priority: 500,
+            reason: '双发快射：第3轮顺位下降1位',
+          });
+        }
+
+        state.draft.currentDraw = null;
+        state.draft.pickedThisTurn = true;
+        Hexcore2.eventStore.append(
+          assignedCurrent || assignedNext ? '海克斯自动执行' : '海克斯执行失败',
+          `${captain.name} 使用【双发快射】，${currentTierName}${assignedCurrent ? '已入队1人' : '无可用选手'}，${nextTierName}${assignedNext ? '已入队1人' : '无可用选手'}，第 ${Math.min(4, state.draft.round + 1)} 轮将自动跳过`,
+          assignedCurrent || assignedNext ? 'success' : 'warn'
+        );
       }
 
       if (hexcore.id === 'steady') {
@@ -130,7 +159,7 @@
 
       hexcore.status = 'used';
       Hexcore2.eventStore.append('海克斯激活', `${captain.name} 使用【${hexcore.name}】`, hexcore.id === 'blind' ? 'warn' : 'info');
-      return { ok: true, advanceTurn: hexcore.id === 'steady' || Boolean(transmuteTiers[hexcore.id]) };
+      return { ok: true, advanceTurn: hexcore.id === 'steady' || hexcore.id === 'double-shot' || Boolean(transmuteTiers[hexcore.id]) };
     },
 
     isBlinded(captainId) {

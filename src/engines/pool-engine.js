@@ -13,22 +13,30 @@
     return effect.round === round ? round + 1 : round - 1;
   }
 
-  Hexcore2.poolEngine = {
-    effectiveTier(captainId) {
-      const state = Hexcore2.state;
-      const baseRound = swappedRound(state.draft.round);
-      if (hasHexcore(captainId, 'giant-slayer')) {
-        if (baseRound === 1) return 4;
-        if (baseRound === 4) return 1;
-      }
+  function effectiveTierAtRound(captainId, round) {
+    const state = Hexcore2.state;
+    const baseRound = swappedRound(round);
+    if (hasHexcore(captainId, 'giant-slayer')) {
+      if (baseRound === 1) return 4;
+      if (baseRound === 4) return 1;
+    }
 
-      const reverseEffect = state.draft.runtimeEffects.find(effect =>
-        effect.type === 'reverse_pool_order' && effect.captainId === captainId
-      );
-      const tier = (reverseEffect || hasHexcore(captainId, 'ballroom-queen'))
-        ? 5 - baseRound
-        : baseRound;
-      return Math.max(1, Math.min(4, tier));
+    const reverseEffect = state.draft.runtimeEffects.find(effect =>
+      effect.type === 'reverse_pool_order' && effect.captainId === captainId
+    );
+    const tier = (reverseEffect || hasHexcore(captainId, 'ballroom-queen'))
+      ? 5 - baseRound
+      : baseRound;
+    return Math.max(1, Math.min(4, tier));
+  }
+
+  Hexcore2.poolEngine = {
+    effectiveTierForRound(captainId, round) {
+      return effectiveTierAtRound(captainId, Math.max(1, Math.min(4, round)));
+    },
+
+    effectiveTier(captainId) {
+      return effectiveTierAtRound(captainId, Hexcore2.state.draft.round);
     },
 
     explain(captainId) {
