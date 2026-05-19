@@ -22,6 +22,26 @@
     return new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
   }
 
+  function validateStateBackup(state) {
+    if (!state || !Array.isArray(state.captains) || !Array.isArray(state.players) || !state.draft) {
+      throw new Error('备份文件结构不正确');
+    }
+    if (state.captains.length < 5 || state.captains.length > 20) {
+      throw new Error('队伍数量必须在5-20之间');
+    }
+
+    const captainIds = new Set();
+    state.captains.forEach(captain => {
+      if (!captain || typeof captain.id !== 'string' || !captain.id.trim()) {
+        throw new Error('队长数据缺少有效ID');
+      }
+      if (captainIds.has(captain.id)) {
+        throw new Error('队长ID不能重复');
+      }
+      captainIds.add(captain.id);
+    });
+  }
+
   Hexcore2.exportService = {
     exportEvents() {
       const lines = Hexcore2.state.events.map(event =>
@@ -49,9 +69,7 @@
       reader.onload = () => {
         try {
           const state = JSON.parse(String(reader.result || ''));
-          if (!state || !Array.isArray(state.captains) || !Array.isArray(state.players) || !state.draft) {
-            throw new Error('备份文件结构不正确');
-          }
+          validateStateBackup(state);
           onSuccess(state);
         } catch (error) {
           if (onError) onError(error);

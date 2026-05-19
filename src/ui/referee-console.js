@@ -24,6 +24,23 @@
     return explanation ? explanation.reasons : [];
   }
 
+  function escapeHtml(value) {
+    return String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  function safeJsonString(value) {
+    return JSON.stringify(String(value ?? '')).replace(/</g, '\\u003c');
+  }
+
+  function eventLevelClass(level) {
+    return ['info', 'draw', 'warn', 'success'].includes(level) ? level : 'info';
+  }
+
   function sidebar() {
     const icon = Hexcore2.icon;
     const teamCount = Hexcore2.selectors.teamCount();
@@ -83,7 +100,7 @@
       <header class="topbar">
         <div class="mode">裁判代执行</div>
         <div class="phase">当前阶段：<strong>第 ${Hexcore2.state.draft.round} 轮 / ${tierName}池</strong></div>
-        <div class="captain-title">当前队长：<strong>${captain ? captain.name : '无'}</strong></div>
+        <div class="captain-title">当前队长：<strong>${captain ? escapeHtml(captain.name) : '无'}</strong></div>
         <div class="top-spacer"></div>
         <div class="live-status ${Hexcore2.state.draft.phase === 'completed' ? 'done' : ''}"><span></span>${statusText}</div>
         <div class="clock">${time}</div>
@@ -106,13 +123,13 @@
             const captain = state.captains.find(item => item.id === captainId);
             return `
               <div class="turn-card ${index === state.draft.currentIndex ? 'current' : ''} ${index < state.draft.currentIndex ? 'done' : ''}">
-                <strong>${captain.name}</strong>
-                <span>${captain.record}</span>
+                <strong>${escapeHtml(captain.name)}</strong>
+                <span>${escapeHtml(captain.record)}</span>
               </div>
             `;
           }).join('')}
         </div>
-        <div class="turn-note">顺位变更说明：${currentExplanation().join('；') || '按基础蛇形顺位执行'}。</div>
+        <div class="turn-note">顺位变更说明：${escapeHtml(currentExplanation().join('；') || '按基础蛇形顺位执行')}。</div>
       </section>
     `;
   }
@@ -127,32 +144,32 @@
     return `
       <section class="draw-panel">
         <div class="panel-title-row">
-          <h2>${currentDrawLabel()} <span>${Hexcore2.state.settings.tierNames[tier]}池${draw && draw.reason ? ` / ${draw.reason}` : ''}</span></h2>
+          <h2>${escapeHtml(currentDrawLabel())} <span>${escapeHtml(Hexcore2.state.settings.tierNames[tier])}池${draw && draw.reason ? ` / ${escapeHtml(draw.reason)}` : ''}</span></h2>
           <button class="subtle-btn" onclick="window.hexcoreUI.drawCards()">${Hexcore2.icon('refresh')}刷新池子</button>
         </div>
         <div class="cards-grid ${draw && draw.pickMode === 'open_pick' ? 'open-pick-grid' : ''}">
           ${cards.map((card, index) => `
             <button class="player-card ${index === selected ? 'selected' : ''} ${blinded ? 'blind-card' : ''}" onclick="window.hexcoreUI.selectCard(${index})">
               <span class="card-index">${index + 1}</span>
-              <span class="lane">${blinded ? '致盲' : card.lane}</span>
+              <span class="lane">${blinded ? '致盲' : escapeHtml(card.lane)}</span>
               <span class="check">${index === selected ? '✓' : ''}</span>
-              <strong>${blinded ? '身份隐藏' : card.name}</strong>
-              <small>${blinded ? '选中后揭示' : `ID: ${card.gameId}`}</small>
+              <strong>${blinded ? '身份隐藏' : escapeHtml(card.name)}</strong>
+              <small>${blinded ? '选中后揭示' : `ID: ${escapeHtml(card.gameId)}`}</small>
               <div class="score-row">评分 <b>${blinded ? '??' : card.score}</b></div>
               <div class="history-title">历史表现（近5场）</div>
               <div class="stat-grid">
-                <span>KDA<b>${blinded ? '?' : card.kda}</b></span>
-                <span>场均伤害<b>${blinded ? '?' : card.damage}</b></span>
-                <span>胜率<b>${blinded ? '?' : card.winRate}</b></span>
+                <span>KDA<b>${blinded ? '?' : escapeHtml(card.kda)}</b></span>
+                <span>场均伤害<b>${blinded ? '?' : escapeHtml(card.damage)}</b></span>
+                <span>胜率<b>${blinded ? '?' : escapeHtml(card.winRate)}</b></span>
               </div>
               <div class="hero-title">擅长英雄</div>
               <div class="hero-row">
-                ${(blinded ? ['?', '?', '?'] : card.heroes).map(hero => `<span>${hero}</span>`).join('')}
+                ${(blinded ? ['?', '?', '?'] : card.heroes).map(hero => `<span>${escapeHtml(hero)}</span>`).join('')}
               </div>
             </button>
           `).join('')}
         </div>
-        <p class="hint">提示：${captain ? `${draw && draw.pickMode === 'open_pick' ? '开饭啦已展开当前池全部可选选手，' : ''}请选择一名选手加入 ${captain.name} 的队伍（${Hexcore2.selectors.teamSize(captain.id)}/4）` : '当前没有可操作队长'}</p>
+        <p class="hint">提示：${captain ? `${draw && draw.pickMode === 'open_pick' ? '开饭啦已展开当前池全部可选选手，' : ''}请选择一名选手加入 ${escapeHtml(captain.name)} 的队伍（${Hexcore2.selectors.teamSize(captain.id)}/4）` : '当前没有可操作队长'}</p>
       </section>
     `;
   }
@@ -187,17 +204,17 @@
     const hexcores = Hexcore2.selectors.currentHexcores();
     return `
       <section class="hexcore-panel">
-        <h2>${captain.name} 的海克斯</h2>
+        <h2>${escapeHtml(captain.name)} 的海克斯</h2>
         <div class="hex-list">
           ${hexcores.map(hex => `
             <div class="hex-row ${hex.type}">
               <div class="hex-symbol">${Hexcore2.icon('hex')}</div>
               <div>
-                <strong>${hex.name}</strong>
-                <p>${hex.desc}</p>
+                <strong>${escapeHtml(hex.name)}</strong>
+                <p>${escapeHtml(hex.desc)}</p>
                 <span>${hex.mode === 'passive' ? '被动规则：自动生效' : `可用次数：${hex.status === 'used' ? 0 : hex.uses}`}</span>
               </div>
-              <button class="${hex.status === 'used' || hex.mode === 'passive' ? 'used' : ''}" ${hex.mode === 'passive' ? 'disabled' : ''} onclick="window.hexcoreUI.useHexcore('${hex.id}')">${hex.mode === 'passive' ? '被动' : (hex.status === 'used' ? '已使用' : '使用')}</button>
+              <button class="${hex.status === 'used' || hex.mode === 'passive' ? 'used' : ''}" ${hex.mode === 'passive' ? 'disabled' : ''} onclick="window.hexcoreUI.useHexcore(${safeJsonString(hex.id)})">${hex.mode === 'passive' ? '被动' : (hex.status === 'used' ? '已使用' : '使用')}</button>
             </div>
           `).join('')}
         </div>
@@ -217,7 +234,7 @@
       <section class="rule-panel">
         <h2>规则说明</h2>
         ${lines.map((line, index) => `
-          <div class="rule-line ${index % 2 ? 'cyan' : 'amber'}"><strong>${line.label}</strong><span>${line.body}</span></div>
+          <div class="rule-line ${index % 2 ? 'cyan' : 'amber'}"><strong>${escapeHtml(line.label)}</strong><span>${escapeHtml(line.body)}</span></div>
         `).join('')}
         <button class="subtle-btn full">查看完整规则</button>
       </section>
@@ -247,12 +264,12 @@
         </div>
         <div class="event-list">
           ${filteredEvents.map(event => `
-            <div class="event-item ${event.level}">
-              <time>${event.time}</time>
+            <div class="event-item ${eventLevelClass(event.level)}">
+              <time>${escapeHtml(event.time)}</time>
               <div class="event-dot"></div>
               <div>
-                <strong>${event.title}</strong>
-                <p>${event.body}</p>
+                <strong>${escapeHtml(event.title)}</strong>
+                <p>${escapeHtml(event.body)}</p>
               </div>
             </div>
           `).join('') || '<div class="empty-log">当前筛选下没有事件</div>'}
@@ -274,7 +291,7 @@
         <div class="roster-list" style="grid-template-columns: repeat(${teamCount}, minmax(120px, 1fr));">
           ${Hexcore2.state.captains.map((captain, index) => `
             <div class="team-mini ${currentCaptain && captain.id === currentCaptain.id ? 'active' : ''}">
-              <div><span>${index + 1}</span><strong>${captain.name}</strong></div>
+              <div><span>${index + 1}</span><strong>${escapeHtml(captain.name)}</strong></div>
               <p>${captain.team.length}/4</p>
               <div class="slots">
                 ${Array.from({ length: 4 }, (_, slot) => `<i class="${slot < captain.team.length ? 'filled' : ''}"></i>`).join('')}
