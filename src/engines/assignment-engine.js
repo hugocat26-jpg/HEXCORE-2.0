@@ -27,5 +27,15 @@
     assignBlindFromTier(captainId, tier, source = 'blind_auto_assign') {
       return this.assignRandomFromTier(captainId, tier, source);
     },
+
+    assignRandomFromTopScored(captainId, tier, limit = 5, source = 'top_scored_auto_assign') {
+      const candidates = Hexcore2.selectors.availablePlayers(tier)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, limit);
+      if (candidates.length === 0) return false;
+
+      const index = Math.floor(Math.random() * candidates.length);
+      return this.assign(captainId, candidates[index].id, source);
+    },
   };
 })(window);

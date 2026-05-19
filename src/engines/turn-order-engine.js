@@ -21,7 +21,10 @@
     if (index < 0) return;
 
     order.splice(index, 1);
-    if (modifier.operation === 'move_last') {
+    if (modifier.operation === 'fixed_position') {
+      const targetIndex = Math.max(0, Math.min(order.length, (modifier.position || 1) - 1));
+      order.splice(targetIndex, 0, modifier.captainId);
+    } else if (modifier.operation === 'move_last') {
       order.push(modifier.captainId);
     } else {
       order.unshift(modifier.captainId);
@@ -42,6 +45,15 @@
 
       const modifiers = [];
       order.forEach(captainId => {
+        if (hasHexcore(captainId, 'pandora-box')) {
+          modifiers.push({
+            captainId,
+            operation: 'fixed_position',
+            position: 3,
+            priority: 700,
+            reason: '潘多拉魔盒：全程固定第3顺位',
+          });
+        }
         if (!hasHexcore(captainId, 'demon-contract')) return;
         modifiers.push({
           captainId,

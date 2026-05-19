@@ -44,6 +44,12 @@
       }
 
       snapshot(`抽卡前：${captain.name}`);
+      const autoAssign = Hexcore2.hexcoreEngine.autoAssignBeforeDraw(captain.id);
+      if (autoAssign.handled) {
+        this.nextCaptain();
+        return;
+      }
+
       const tier = Hexcore2.poolEngine.effectiveTier(captain.id);
       const drawReasons = Hexcore2.hexcoreEngine.drawReasons(captain.id);
       const drawCount = 3 + Hexcore2.hexcoreEngine.extraDrawCount(captain.id);

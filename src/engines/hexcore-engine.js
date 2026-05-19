@@ -10,7 +10,16 @@
     return (Hexcore2.state.hexcoreAssignments[captainId] || []).some(hexcore => hexcore.id === hexcoreId);
   }
 
+  function nextAvailableTier(startTier) {
+    for (let tier = startTier; tier <= 4; tier += 1) {
+      if (Hexcore2.selectors.availablePlayers(tier).length > 0) return tier;
+    }
+    return null;
+  }
+
   Hexcore2.hexcoreEngine = {
+    hasHexcore,
+
     activate(hexcoreId) {
       const state = Hexcore2.state;
       const captain = Hexcore2.selectors.currentCaptain();
@@ -142,6 +151,9 @@
     drawReasons(captainId) {
       const tier = Hexcore2.poolEngine.effectiveTier(captainId);
       const reasons = [];
+      if (hasHexcore(captainId, 'pandora-box')) {
+        reasons.push('潘多拉魔盒：自动从评分前5随机分配');
+      }
       if (hasHexcore(captainId, 'elite-choice') && tier === 3) {
         reasons.push('优中选优：上等马池额外展示1张');
       }
@@ -149,6 +161,29 @@
         .filter(effect => effect.type === 'extra_draw' && effect.captainId === captainId && effect.round === Hexcore2.state.draft.round)
         .forEach(effect => reasons.push(effect.reason));
       return reasons;
+    },
+
+    autoAssignBeforeDraw(captainId) {
+      if (!hasHexcore(captainId, 'pandora-box')) return { handled: false };
+
+      const startTier = Hexcore2.poolEngine.effectiveTier(captainId);
+      const tier = nextAvailableTier(startTier);
+      if (!tier) {
+        Hexcore2.eventStore.append('海克斯执行失败', '潘多拉魔盒未找到可自动分配的选手', 'warn');
+        return { handled: true, assigned: false };
+      }
+
+      const assigned = Hexcore2.assignmentEngine.assignRandomFromTopScored(captainId, tier, 5, 'pandora_auto_assign');
+      const captain = Hexcore2.state.captains.find(item => item.id === captainId);
+      const tierName = Hexcore2.state.settings.tierNames[tier];
+      Hexcore2.state.draft.currentDraw = null;
+      Hexcore2.state.draft.pickedThisTurn = true;
+      Hexcore2.eventStore.append(
+        assigned ? '海克斯自动执行' : '海克斯执行失败',
+        assigned ? `${captain.name} 触发【潘多拉魔盒】，系统从${tierName}评分前5中随机分配1名选手` : `${tierName}暂无可用选手，【潘多拉魔盒】无法完成自动分配`,
+        assigned ? 'success' : 'warn'
+      );
+      return { handled: true, assigned, tier };
     },
 
     nextCaptain(captainId) {
