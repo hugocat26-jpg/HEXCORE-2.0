@@ -193,6 +193,21 @@
     },
 
     autoAssignBeforeDraw(captainId) {
+      if (hasHexcore(captainId, 'last-stand') && [1, 2].includes(Hexcore2.state.draft.round)) {
+        const tier = Hexcore2.poolEngine.effectiveTier(captainId);
+        const assigned = Hexcore2.assignmentEngine.assignRandomFromTier(captainId, tier, 'last_stand_auto_assign');
+        const captain = Hexcore2.state.captains.find(item => item.id === captainId);
+        const tierName = Hexcore2.state.settings.tierNames[tier];
+        Hexcore2.state.draft.currentDraw = null;
+        Hexcore2.state.draft.pickedThisTurn = true;
+        Hexcore2.eventStore.append(
+          assigned ? '海克斯自动执行' : '海克斯执行失败',
+          assigned ? `${captain.name} 触发【背水一战】，第 ${Hexcore2.state.draft.round} 轮跳过抽卡和选人，系统已从${tierName}随机分配1名选手` : `${tierName}暂无可用选手，【背水一战】无法完成自动分配`,
+          assigned ? 'success' : 'warn'
+        );
+        return { handled: true, assigned, tier };
+      }
+
       if (!hasHexcore(captainId, 'pandora-box')) return { handled: false };
 
       const startTier = Hexcore2.poolEngine.effectiveTier(captainId);
@@ -213,6 +228,26 @@
         assigned ? 'success' : 'warn'
       );
       return { handled: true, assigned, tier };
+    },
+
+    drawOverrideBeforeDraw(captainId) {
+      if (!hasHexcore(captainId, 'last-stand') || Hexcore2.state.draft.round !== 4) {
+        return { handled: false };
+      }
+
+      const captain = Hexcore2.state.captains.find(item => item.id === captainId);
+      const tier = 4;
+      const tierName = Hexcore2.state.settings.tierNames[tier];
+      const draw = Hexcore2.probabilityEngine.drawAll(captainId, tier, '背水一战：第4轮猛犸池全池自选');
+      Hexcore2.state.draft.currentDraw = draw;
+      Hexcore2.state.draft.selectedSlot = 0;
+      Hexcore2.state.draft.pickedThisTurn = false;
+      Hexcore2.eventStore.append(
+        draw.cards.length ? '海克斯自选' : '海克斯执行失败',
+        draw.cards.length ? `${captain.name} 触发【背水一战】，裁判可从${tierName}池自选1名选手` : `${tierName}暂无可用选手，【背水一战】无法生成自选列表`,
+        draw.cards.length ? 'info' : 'warn'
+      );
+      return { handled: true, draw };
     },
 
     nextCaptain(captainId) {

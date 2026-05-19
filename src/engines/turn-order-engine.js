@@ -86,6 +86,14 @@
             reason: '潘多拉魔盒：全程固定第3顺位',
           });
         }
+        if (hasHexcore(captainId, 'last-stand') && state.draft.round === 4) {
+          modifiers.push({
+            captainId,
+            operation: 'move_first',
+            priority: 900,
+            reason: '背水一战：第4轮优先级最高，获得第1顺位',
+          });
+        }
         if (!hasHexcore(captainId, 'demon-contract')) return;
         modifiers.push({
           captainId,

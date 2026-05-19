@@ -50,6 +50,12 @@
         return;
       }
 
+      const drawOverride = Hexcore2.hexcoreEngine.drawOverrideBeforeDraw(captain.id);
+      if (drawOverride.handled) {
+        Hexcore2.ui.render();
+        return;
+      }
+
       const tier = Hexcore2.poolEngine.effectiveTier(captain.id);
       const drawReasons = Hexcore2.hexcoreEngine.drawReasons(captain.id);
       const drawCount = 3 + Hexcore2.hexcoreEngine.extraDrawCount(captain.id);
