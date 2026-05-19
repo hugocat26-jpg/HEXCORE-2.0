@@ -95,6 +95,17 @@
     `;
   }
 
+  function feedbackToast() {
+    const feedback = Hexcore2.state.ui && Hexcore2.state.ui.feedback;
+    if (!feedback) return '';
+    return `
+      <div class="feedback-toast ${eventLevelClass(feedback.level)}">
+        <strong>${escapeHtml(feedback.title)}</strong>
+        <span>${escapeHtml(feedback.body)}</span>
+      </div>
+    `;
+  }
+
   function topbar() {
     const time = new Date().toLocaleTimeString('zh-CN', { hour12: false });
     const captain = Hexcore2.selectors.currentCaptain();
@@ -402,7 +413,10 @@
             <article class="data-card ${currentCaptain && currentCaptain.id === captain.id ? 'active-card' : ''}">
               <div class="data-card-head">
                 <span>${index + 1}</span>
-                <strong>${escapeHtml(captain.name)}</strong>
+                <label class="captain-name-field">
+                  <small>队长名称</small>
+                  <input id="captain-name-${captain.id}" value="${escapeHtml(captain.name)}" aria-label="${escapeHtml(captain.name)} 队长名称">
+                </label>
               </div>
               <p>顺位记录：${escapeHtml(captain.record)}</p>
               <p>队伍人数：${captain.team.length}/${Hexcore2.state.settings.playersPerTeam}</p>
@@ -419,7 +433,7 @@
               </div>
               <div class="card-actions">
                 <button onclick="window.hexcoreUI.setCurrentCaptain('${captain.id}')">设为当前</button>
-                <button onclick="window.hexcoreUI.renameCaptain('${captain.id}')">改名</button>
+                <button onclick="window.hexcoreUI.saveCaptainName('${captain.id}')">保存名称</button>
                 <button class="danger-inline" onclick="window.hexcoreUI.removeCaptain('${captain.id}')">删除</button>
               </div>
             </article>
@@ -621,6 +635,7 @@
         ${topbar()}
         ${activePage()}
       </div>
+      ${feedbackToast()}
     `;
   }
 

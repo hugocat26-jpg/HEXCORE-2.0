@@ -326,17 +326,31 @@
       renderAndPersist();
     },
 
-    renameCaptain(captainId) {
+    saveCaptainName(captainId) {
       const captain = Hexcore2.state.captains.find(item => item.id === captainId);
       if (!captain) return;
-      const nextName = prompt('请输入新的队长名称', captain.name);
-      if (!nextName || !nextName.trim()) return;
+      const input = document.getElementById(`captain-name-${captainId}`);
+      const nextName = input ? input.value : '';
+      if (!nextName || !nextName.trim()) {
+        Hexcore2.eventStore.append('队伍改名失败', '队长名称不能为空', 'warn');
+        Hexcore2.ui.render();
+        return;
+      }
+      if (nextName.trim() === captain.name) {
+        Hexcore2.eventStore.append('队伍改名', `${captain.name} 名称未变化`, 'info');
+        Hexcore2.ui.render();
+        return;
+      }
 
       snapshot(`重命名队长前：${captain.name}`);
       const oldName = captain.name;
       captain.name = nextName.trim();
       Hexcore2.eventStore.append('队伍管理', `队长「${oldName}」重命名为「${captain.name}」`, 'info');
       renderAndPersist();
+    },
+
+    renameCaptain(captainId) {
+      this.saveCaptainName(captainId);
     },
 
     setCurrentCaptain(captainId) {

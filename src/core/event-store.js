@@ -21,6 +21,8 @@
       const time = new Date().toLocaleTimeString('zh-CN', { hour12: false });
       Hexcore2.state.events.unshift({ time, title, body, level, payload });
       Hexcore2.state.events = Hexcore2.state.events.slice(0, 16);
+      Hexcore2.state.ui = Hexcore2.state.ui || {};
+      Hexcore2.state.ui.feedback = { title, body, level, time };
       if (Hexcore2.storageService) Hexcore2.storageService.save(Hexcore2.state);
     },
   };

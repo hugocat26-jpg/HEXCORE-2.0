@@ -187,9 +187,12 @@ function testUiNavigationAndHexButtons() {
   H.actions.setActiveView('hexcores');
   assert(app.innerHTML.includes('为该队长抽海克斯') && app.innerHTML.includes('removeHexcore'), '海克斯库页面应提供裁判抽取和移除入口');
   H.actions.setActiveView('teams');
-  assert(app.innerHTML.includes('新增队伍') && app.innerHTML.includes('renameCaptain'), '队伍管理页面应提供实质操作');
+  assert(app.innerHTML.includes('新增队伍') && app.innerHTML.includes('saveCaptainName'), '队伍管理页面应提供实质操作');
   H.actions.setActiveView('rules');
   assert(app.innerHTML.includes('保存规则并重算流程'), '规则设置页面应提供保存入口');
+  elements['captain-name-c1'] = { value: 'C1 回归改名' };
+  H.actions.saveCaptainName('c1');
+  assert(H.state.captains.find(captain => captain.id === 'c1').name === 'C1 回归改名', '队伍管理应能通过输入框保存改名');
 
   const beforeCount = H.state.captains.length;
   elements['rules-team-count'] = { value: '13' };
