@@ -235,7 +235,21 @@ function testUiNavigationAndHexButtons() {
   assert(H.state.events[0].title === '系统检查通过', '系统检查应通过当前一致性数据');
 }
 
-function run() {
+function testFeedbackAutoDismiss() {
+  const { H, app } = createHarness();
+  H.eventStore.append('测试反馈', '2秒后应自动消失', 'success');
+  H.ui.render();
+  assert(app.innerHTML.includes('feedback-toast'), '反馈提示应立即显示');
+  return new Promise(resolve => {
+    setTimeout(() => {
+      assert(!H.state.ui.feedback, '反馈提示应在2.2秒后清除状态');
+      assert(!app.innerHTML.includes('feedback-toast'), '反馈提示应在2.2秒后从页面移除');
+      resolve();
+    }, 2300);
+  });
+}
+
+async function run() {
   const tests = [
     testOriginQueue,
     testPandoraConflict,
@@ -245,10 +259,16 @@ function run() {
     testSnowCat,
     testDecomposeKnowledge,
     testUiNavigationAndHexButtons,
+    testFeedbackAutoDismiss,
   ];
 
-  tests.forEach(test => test());
+  for (const test of tests) {
+    await test();
+  }
   console.log(`regression ok: ${tests.length} tests`);
 }
 
-run();
+run().catch(error => {
+  console.error(error);
+  process.exit(1);
+});

@@ -19,10 +19,21 @@
   Hexcore2.eventStore = {
     append(title, body, level = 'info', payload = {}) {
       const time = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+      const createdAt = Date.now();
       Hexcore2.state.events.unshift({ time, title, body, level, payload });
       Hexcore2.state.events = Hexcore2.state.events.slice(0, 16);
       Hexcore2.state.ui = Hexcore2.state.ui || {};
-      Hexcore2.state.ui.feedback = { title, body, level, time };
+      Hexcore2.state.ui.feedback = { title, body, level, time, createdAt };
+      if (global.clearTimeout) global.clearTimeout(Hexcore2.feedbackTimer);
+      if (global.setTimeout) {
+        Hexcore2.feedbackTimer = global.setTimeout(() => {
+          if (Hexcore2.state.ui && Hexcore2.state.ui.feedback && Hexcore2.state.ui.feedback.createdAt === createdAt) {
+            delete Hexcore2.state.ui.feedback;
+            if (Hexcore2.storageService) Hexcore2.storageService.save(Hexcore2.state);
+            if (Hexcore2.ui) Hexcore2.ui.render();
+          }
+        }, 2200);
+      }
       if (Hexcore2.storageService) Hexcore2.storageService.save(Hexcore2.state);
     },
   };

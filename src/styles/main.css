@@ -1568,7 +1568,8 @@ h2 span {
   background: rgba(7, 16, 21, 0.96);
   box-shadow: 0 18px 40px rgba(0, 0, 0, 0.38);
   padding: 12px 14px;
-  animation: feedback-in 0.18s ease-out;
+  pointer-events: none;
+  animation: feedback-life 2.2s ease forwards;
 }
 
 .feedback-toast.info,
@@ -1595,14 +1596,22 @@ h2 span {
   line-height: 1.45;
 }
 
-@keyframes feedback-in {
-  from {
+@keyframes feedback-life {
+  0% {
     opacity: 0;
     transform: translateY(-8px);
   }
-  to {
+  8% {
     opacity: 1;
     transform: translateY(0);
+  }
+  88% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-6px);
   }
 }
 

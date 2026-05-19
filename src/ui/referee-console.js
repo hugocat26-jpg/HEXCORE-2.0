@@ -98,8 +98,12 @@
   function feedbackToast() {
     const feedback = Hexcore2.state.ui && Hexcore2.state.ui.feedback;
     if (!feedback) return '';
+    const createdAt = Number(feedback.createdAt || 0);
+    const age = createdAt ? Date.now() - createdAt : 0;
+    if (age >= 2200) return '';
+    const fading = age >= 2000 ? 'fading' : '';
     return `
-      <div class="feedback-toast ${eventLevelClass(feedback.level)}">
+      <div class="feedback-toast ${eventLevelClass(feedback.level)} ${fading}">
         <strong>${escapeHtml(feedback.title)}</strong>
         <span>${escapeHtml(feedback.body)}</span>
       </div>
