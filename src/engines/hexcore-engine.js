@@ -6,6 +6,10 @@
     'transmute-prismatic': 4,
   };
 
+  function hasHexcore(captainId, hexcoreId) {
+    return (Hexcore2.state.hexcoreAssignments[captainId] || []).some(hexcore => hexcore.id === hexcoreId);
+  }
+
   Hexcore2.hexcoreEngine = {
     activate(hexcoreId) {
       const state = Hexcore2.state;
@@ -105,9 +109,24 @@
     },
 
     extraDrawCount(captainId) {
-      return Hexcore2.state.draft.runtimeEffects
+      const tier = Hexcore2.poolEngine.effectiveTier(captainId);
+      const passiveBonus = hasHexcore(captainId, 'elite-choice') && tier === 3 ? 1 : 0;
+      const runtimeBonus = Hexcore2.state.draft.runtimeEffects
         .filter(effect => effect.type === 'extra_draw' && effect.captainId === captainId && effect.round === Hexcore2.state.draft.round)
         .reduce((sum, effect) => sum + (effect.countBonus || 0), 0);
+      return passiveBonus + runtimeBonus;
+    },
+
+    drawReasons(captainId) {
+      const tier = Hexcore2.poolEngine.effectiveTier(captainId);
+      const reasons = [];
+      if (hasHexcore(captainId, 'elite-choice') && tier === 3) {
+        reasons.push('优中选优：上等马池额外展示1张');
+      }
+      Hexcore2.state.draft.runtimeEffects
+        .filter(effect => effect.type === 'extra_draw' && effect.captainId === captainId && effect.round === Hexcore2.state.draft.round)
+        .forEach(effect => reasons.push(effect.reason));
+      return reasons;
     },
 
     nextCaptain(captainId) {

@@ -45,8 +45,10 @@
 
       snapshot(`抽卡前：${captain.name}`);
       const tier = Hexcore2.poolEngine.effectiveTier(captain.id);
+      const drawReasons = Hexcore2.hexcoreEngine.drawReasons(captain.id);
       const drawCount = 3 + Hexcore2.hexcoreEngine.extraDrawCount(captain.id);
       Hexcore2.state.draft.currentDraw = Hexcore2.probabilityEngine.draw(captain.id, tier, drawCount);
+      Hexcore2.state.draft.currentDraw.reason = drawReasons.join('；');
       Hexcore2.state.draft.selectedSlot = 0;
       Hexcore2.state.draft.pickedThisTurn = false;
 
@@ -54,7 +56,7 @@
       const drawn = Hexcore2.state.draft.currentDraw.cards.length;
       Hexcore2.eventStore.append(
         drawn > 0 ? '抽卡完成' : '卡池不足',
-        drawn > 0 ? `${captain.name} 从${tierName}抽取 ${drawn} 张选手卡` : `${tierName}暂无可用选手，裁判需要跳过或手动处理`,
+        drawn > 0 ? `${captain.name} 从${tierName}抽取 ${drawn} 张选手卡${drawReasons.length ? `（${drawReasons.join('；')}）` : ''}` : `${tierName}暂无可用选手，裁判需要跳过或手动处理`,
         drawn > 0 ? 'draw' : 'warn'
       );
       Hexcore2.ui.render();
