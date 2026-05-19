@@ -87,12 +87,19 @@
       }
 
       if (hexcore.id === 'origin') {
+        const position = state.draft.runtimeEffects.filter(effect =>
+          effect.type === 'fixed_position'
+          && effect.source === 'origin'
+          && effect.round === state.draft.round
+        ).length + 1;
         state.draft.runtimeEffects.push({
-          type: 'move_first',
+          type: 'fixed_position',
+          source: 'origin',
           captainId: captain.id,
           round: state.draft.round,
+          position,
           priority: 800,
-          reason: '启元优先：本轮获得最高可用顺位',
+          reason: `启元优先队列：本轮第 ${position} 个使用者，固定第 ${position} 顺位`,
         });
         Hexcore2.turnOrderEngine.recompute();
         state.draft.currentIndex = state.draft.currentOrder.indexOf(captain.id);

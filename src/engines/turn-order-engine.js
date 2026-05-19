@@ -115,6 +115,16 @@
         }));
 
       state.draft.runtimeEffects
+        .filter(effect => effect.type === 'fixed_position' && effect.round === state.draft.round)
+        .forEach(effect => modifiers.push({
+          captainId: effect.captainId,
+          operation: 'fixed_position',
+          position: effect.position,
+          priority: effect.priority,
+          reason: effect.reason,
+        }));
+
+      state.draft.runtimeEffects
         .filter(effect => effect.type === 'move_down_one' && effect.round === state.draft.round)
         .forEach(effect => modifiers.push({
           captainId: effect.captainId,
