@@ -47,6 +47,13 @@
     }, 0) + 1;
   }
 
+  function nextPlayerId() {
+    return Hexcore2.state.players.reduce((max, player) => {
+      const match = String(player.id).match(/^p(\d+)$/);
+      return match ? Math.max(max, Number(match[1])) : max;
+    }, 0) + 1;
+  }
+
   Hexcore2.actions = {
     selectCard(index) {
       Hexcore2.state.draft.selectedSlot = index;
@@ -338,6 +345,29 @@
       renderAndPersist();
     },
 
+    assignHexcoreToCaptain(captainId, hexcoreId) {
+      const captain = Hexcore2.state.captains.find(item => item.id === captainId);
+      const hexcore = Hexcore2.sampleData.hexcores.find(item => item.id === hexcoreId);
+      if (!captain || !hexcore) {
+        Hexcore2.eventStore.append('分配海克斯失败', '目标队长或海克斯不存在', 'warn');
+        Hexcore2.ui.render();
+        return;
+      }
+
+      const list = Hexcore2.state.hexcoreAssignments[captainId] || [];
+      if (list.some(item => item.id === hexcoreId)) {
+        Hexcore2.eventStore.append('分配海克斯失败', `${captain.name} 已持有【${hexcore.name}】`, 'warn');
+        Hexcore2.ui.render();
+        return;
+      }
+
+      snapshot(`分配海克斯前：${captain.name}`);
+      Hexcore2.state.hexcoreAssignments[captainId] = list;
+      list.push({ ...hexcore, status: hexcore.mode === 'passive' ? 'passive' : 'available' });
+      Hexcore2.eventStore.append('分配海克斯', `${captain.name} 获得指定海克斯【${hexcore.name}】`, 'success');
+      renderAndPersist();
+    },
+
     saveCaptainName(captainId) {
       const captain = Hexcore2.state.captains.find(item => item.id === captainId);
       if (!captain) return;
@@ -529,9 +559,79 @@
       renderAndPersist();
     },
 
+    setHexFilter(filter) {
+      Hexcore2.state.ui = Hexcore2.state.ui || {};
+      Hexcore2.state.ui.hexFilter = filter || 'all';
+      renderAndPersist();
+    },
+
     setHexCaptain(captainId) {
       Hexcore2.state.ui = Hexcore2.state.ui || {};
       Hexcore2.state.ui.hexCaptainId = captainId;
+      renderAndPersist();
+    },
+
+    addPlayer() {
+      const number = nextPlayerId();
+      const player = {
+        id: `p${number}`,
+        lane: '未分配',
+        name: `新选手${number}`,
+        gameId: `NEW_${number}`,
+        score: 60,
+        tier: 1,
+        kda: '0.0',
+        damage: '0K',
+        winRate: '0%',
+        heroes: ['待', '定', '位'],
+        status: 'available',
+      };
+
+      snapshot('新增选手前');
+      Hexcore2.state.players.push(player);
+      Hexcore2.eventStore.append('选手库', `新增选手 ${player.name}`, 'success');
+      renderAndPersist();
+    },
+
+    savePlayer(playerId) {
+      const player = Hexcore2.state.players.find(item => item.id === playerId);
+      if (!player) return;
+      const name = document.getElementById(`player-name-${playerId}`);
+      const lane = document.getElementById(`player-lane-${playerId}`);
+      const tier = document.getElementById(`player-tier-${playerId}`);
+      const score = document.getElementById(`player-score-${playerId}`);
+      const nextName = name ? name.value.trim() : '';
+      const nextLane = lane ? lane.value.trim() : '';
+      const nextTier = Number(tier && tier.value);
+      const nextScore = Number(score && score.value);
+
+      if (!nextName || !nextLane || !Number.isInteger(nextTier) || nextTier < 1 || nextTier > 4 || !Number.isFinite(nextScore)) {
+        Hexcore2.eventStore.append('保存选手失败', '选手名称、位置、卡池或评分无效', 'warn');
+        Hexcore2.ui.render();
+        return;
+      }
+
+      snapshot(`保存选手前：${player.name}`);
+      player.name = nextName;
+      player.lane = nextLane;
+      player.tier = nextTier;
+      player.score = Math.max(0, Math.min(120, Math.round(nextScore)));
+      Hexcore2.eventStore.append('选手库', `保存选手 ${player.name} 的基础信息`, 'success');
+      renderAndPersist();
+    },
+
+    togglePlayerDisabled(playerId) {
+      const player = Hexcore2.state.players.find(item => item.id === playerId);
+      if (!player) return;
+      if (player.status === 'drafted') {
+        Hexcore2.eventStore.append('选手状态失败', '已入队选手不能直接禁用，请先从队伍移回可选池', 'warn');
+        Hexcore2.ui.render();
+        return;
+      }
+
+      snapshot(`切换选手状态前：${player.name}`);
+      player.status = player.status === 'disabled' ? 'available' : 'disabled';
+      Hexcore2.eventStore.append('选手库', `${player.name} 已${player.status === 'disabled' ? '禁用' : '恢复可选'}`, player.status === 'disabled' ? 'warn' : 'success');
       renderAndPersist();
     },
 

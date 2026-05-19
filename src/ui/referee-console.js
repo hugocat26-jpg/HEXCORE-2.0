@@ -450,6 +450,7 @@
       if (filter === 'all') return true;
       if (filter === 'available') return player.status === 'available';
       if (filter === 'drafted') return player.status === 'drafted';
+      if (filter === 'disabled') return player.status === 'disabled';
       return Number(filter) === player.tier;
     }
     return `
@@ -460,15 +461,19 @@
             <strong>选手总数：${Hexcore2.state.players.length}</strong>
             <span>可选 ${Hexcore2.state.players.filter(player => player.status === 'available').length} 人，已入队 ${Hexcore2.state.players.filter(player => player.status === 'drafted').length} 人。</span>
           </div>
-          <select aria-label="选手筛选" onchange="window.hexcoreUI.setPlayerFilter(this.value)">
-            <option value="all" ${filter === 'all' ? 'selected' : ''}>全部选手</option>
-            <option value="available" ${filter === 'available' ? 'selected' : ''}>仅可选</option>
-            <option value="drafted" ${filter === 'drafted' ? 'selected' : ''}>仅已入队</option>
-            <option value="1" ${filter === '1' ? 'selected' : ''}>侏儒马池</option>
-            <option value="2" ${filter === '2' ? 'selected' : ''}>中等马池</option>
-            <option value="3" ${filter === '3' ? 'selected' : ''}>上等马池</option>
-            <option value="4" ${filter === '4' ? 'selected' : ''}>猛犸池</option>
-          </select>
+          <div class="toolbar-actions">
+            <select aria-label="选手筛选" onchange="window.hexcoreUI.setPlayerFilter(this.value)">
+              <option value="all" ${filter === 'all' ? 'selected' : ''}>全部选手</option>
+              <option value="available" ${filter === 'available' ? 'selected' : ''}>仅可选</option>
+              <option value="drafted" ${filter === 'drafted' ? 'selected' : ''}>仅已入队</option>
+              <option value="disabled" ${filter === 'disabled' ? 'selected' : ''}>仅禁用</option>
+              <option value="1" ${filter === '1' ? 'selected' : ''}>侏儒马池</option>
+              <option value="2" ${filter === '2' ? 'selected' : ''}>中等马池</option>
+              <option value="3" ${filter === '3' ? 'selected' : ''}>上等马池</option>
+              <option value="4" ${filter === '4' ? 'selected' : ''}>猛犸池</option>
+            </select>
+            <button class="primary-btn" onclick="window.hexcoreUI.addPlayer()">新增选手</button>
+          </div>
         </div>
         <div class="pool-columns">
           ${[1, 2, 3, 4].map(tier => `
@@ -477,10 +482,16 @@
               ${Hexcore2.state.players.filter(player => player.tier === tier && visiblePlayer(player)).map(player => {
                 const owner = player.teamId ? Hexcore2.state.captains.find(captain => captain.id === player.teamId) : null;
                 return `
-                  <div class="player-row">
-                    <strong>${escapeHtml(player.name)}</strong>
-                    <span>${escapeHtml(player.lane || '未知')} · ${player.score || 0} 分</span>
-                    <em class="${player.status === 'available' ? 'available' : 'drafted'}">${player.status === 'available' ? '可选' : `已入队${owner ? `：${escapeHtml(owner.name)}` : ''}`}</em>
+                  <div class="player-row ${player.status === 'disabled' ? 'disabled-player' : ''}">
+                    <label><small>名称</small><input id="player-name-${player.id}" value="${escapeHtml(player.name)}"></label>
+                    <label><small>位置</small><input id="player-lane-${player.id}" value="${escapeHtml(player.lane || '未知')}"></label>
+                    <label><small>卡池</small><input id="player-tier-${player.id}" type="number" min="1" max="4" value="${player.tier}"></label>
+                    <label><small>评分</small><input id="player-score-${player.id}" type="number" min="0" max="120" value="${player.score || 0}"></label>
+                    <em class="${player.status === 'available' ? 'available' : (player.status === 'disabled' ? 'disabled' : 'drafted')}">${player.status === 'available' ? '可选' : (player.status === 'disabled' ? '已禁用' : `已入队${owner ? `：${escapeHtml(owner.name)}` : ''}`)}</em>
+                    <div class="player-actions">
+                      <button onclick="window.hexcoreUI.savePlayer('${player.id}')">保存</button>
+                      <button class="${player.status === 'disabled' ? '' : 'danger-inline'}" onclick="window.hexcoreUI.togglePlayerDisabled('${player.id}')">${player.status === 'disabled' ? '恢复' : '禁用'}</button>
+                    </div>
                   </div>
                 `;
               }).join('') || '<div class="empty-log">暂无选手</div>'}
@@ -496,6 +507,13 @@
     const selectedCaptainId = (Hexcore2.state.ui && Hexcore2.state.ui.hexCaptainId) || (captain && captain.id) || '';
     const selectedCaptain = Hexcore2.state.captains.find(item => item.id === selectedCaptainId) || captain;
     const ownedHexcores = selectedCaptain ? (Hexcore2.state.hexcoreAssignments[selectedCaptain.id] || []) : [];
+    const hexFilter = (Hexcore2.state.ui && Hexcore2.state.ui.hexFilter) || 'all';
+    const visibleHexcores = Hexcore2.sampleData.hexcores.filter(hex => {
+      if (hexFilter === 'all') return true;
+      if (hexFilter === 'manual') return hex.mode !== 'passive';
+      if (hexFilter === 'passive') return hex.mode === 'passive';
+      return hex.type === hexFilter;
+    });
     return `
       ${pageHeader('海克斯库', '裁判查看全量海克斯，并可指定队长抽取或移除海克斯。')}
       <section class="data-panel">
@@ -507,6 +525,14 @@
           <div class="toolbar-actions">
             <select aria-label="选择海克斯队长" onchange="window.hexcoreUI.setHexCaptain(this.value)">
               ${Hexcore2.state.captains.map(item => `<option value="${item.id}" ${selectedCaptain && selectedCaptain.id === item.id ? 'selected' : ''}>${escapeHtml(item.name)}</option>`).join('')}
+            </select>
+            <select aria-label="海克斯筛选" onchange="window.hexcoreUI.setHexFilter(this.value)">
+              <option value="all" ${hexFilter === 'all' ? 'selected' : ''}>全部海克斯</option>
+              <option value="manual" ${hexFilter === 'manual' ? 'selected' : ''}>手动效果</option>
+              <option value="passive" ${hexFilter === 'passive' ? 'selected' : ''}>被动效果</option>
+              <option value="cyan" ${hexFilter === 'cyan' ? 'selected' : ''}>青铜/功能</option>
+              <option value="amber" ${hexFilter === 'amber' ? 'selected' : ''}>黄金/干扰</option>
+              <option value="violet" ${hexFilter === 'violet' ? 'selected' : ''}>棱彩/强力</option>
             </select>
             <button class="primary-btn" onclick="window.hexcoreUI.drawHexcoreForCaptain('${selectedCaptain ? selectedCaptain.id : ''}')">${Hexcore2.icon('hex')}为该队长抽海克斯</button>
           </div>
@@ -520,13 +546,14 @@
           </div>
         </div>
         <div class="hex-library">
-          ${Hexcore2.sampleData.hexcores.map(hex => `
+          ${visibleHexcores.map(hex => `
             <article class="hex-library-card ${escapeHtml(hex.type)}">
               <div>
                 <strong>${escapeHtml(hex.name)}</strong>
                 <span>${hex.mode === 'passive' ? '被动自动' : '裁判手动'}</span>
               </div>
               <p>${escapeHtml(hex.desc)}</p>
+              <button onclick="window.hexcoreUI.assignHexcoreToCaptain('${selectedCaptain ? selectedCaptain.id : ''}', '${hex.id}')">分配给该队长</button>
             </article>
           `).join('')}
         </div>
