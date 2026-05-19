@@ -32,6 +32,7 @@
       paused: false,
     },
     events: [],
+    undoStack: [],
   };
 
   const savedState = Hexcore2.storageService ? Hexcore2.storageService.load() : null;

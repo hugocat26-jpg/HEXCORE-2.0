@@ -38,5 +38,29 @@
       if (ok) Hexcore2.eventStore.append('数据备份', '裁判导出了当前状态备份', 'info');
       return ok;
     },
+
+    readStateFile(file, onSuccess, onError) {
+      if (!file || typeof FileReader === 'undefined') {
+        if (onError) onError(new Error('当前环境不支持文件读取'));
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const state = JSON.parse(String(reader.result || ''));
+          if (!state || !Array.isArray(state.captains) || !Array.isArray(state.players) || !state.draft) {
+            throw new Error('备份文件结构不正确');
+          }
+          onSuccess(state);
+        } catch (error) {
+          if (onError) onError(error);
+        }
+      };
+      reader.onerror = () => {
+        if (onError) onError(new Error('备份文件读取失败'));
+      };
+      reader.readAsText(file, 'utf-8');
+    },
   };
 })(window);

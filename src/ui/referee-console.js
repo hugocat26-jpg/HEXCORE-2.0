@@ -53,7 +53,11 @@
           <p>版本：2.0 裁判端</p>
           <p>模式：裁判代执行</p>
           <p>创建时间：2026-05-19 09:00</p>
+          <p>可撤销步骤：${(Hexcore2.state.undoStack || []).length}</p>
           <button onclick="window.hexcoreUI.exportState()">导出状态备份</button>
+          <button onclick="document.getElementById('state-import-input').click()">导入状态备份</button>
+          <button class="danger-mini" onclick="window.hexcoreUI.resetLocalState()">重置本地状态</button>
+          <input id="state-import-input" type="file" accept=".json,application/json" hidden onchange="window.hexcoreUI.importState(this.files[0]); this.value = ''">
         </div>
       </aside>
     `;
@@ -150,7 +154,7 @@
           <button class="action-btn amber" onclick="window.hexcoreUI.skipTurn()"><span class="fast-icon">»</span><strong>跳过本轮</strong><span>不选择，跳过此轮</span></button>
           <button class="action-btn blue" onclick="window.hexcoreUI.nextCaptain()">${icon('team')}<strong>下一位</strong><span>交给下一队长</span></button>
           <button class="action-btn muted" onclick="window.hexcoreUI.pause()">${icon('pause')}<strong>暂停</strong><span>暂停选秀流程</span></button>
-          <button class="action-btn muted" onclick="window.hexcoreUI.undo()">${icon('undo')}<strong>撤销上一步</strong><span>撤销上一次操作</span></button>
+          <button class="action-btn muted ${(Hexcore2.state.undoStack || []).length === 0 ? 'disabled' : ''}" onclick="window.hexcoreUI.undo()">${icon('undo')}<strong>撤销上一步</strong><span>可撤销 ${(Hexcore2.state.undoStack || []).length} 步</span></button>
         </div>
       </section>
     `;

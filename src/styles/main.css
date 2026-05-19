@@ -177,6 +177,16 @@ button {
   font-weight: 800;
 }
 
+.event-info button + button {
+  margin-top: 7px;
+}
+
+.event-info button.danger-mini {
+  border-color: rgba(239, 93, 93, 0.36);
+  background: rgba(239, 93, 93, 0.08);
+  color: #ffc7c7;
+}
+
 .app-main {
   min-width: 0;
   display: grid;
