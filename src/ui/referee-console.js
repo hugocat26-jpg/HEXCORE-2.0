@@ -17,6 +17,7 @@
 
   function currentDrawLabel() {
     const draw = Hexcore2.state.draft.currentDraw;
+    if (draw && draw.pickMode === 'blind_box') return '盲盒抽卡';
     if (!draw || draw.pickMode !== 'open_pick') return '本轮抽卡';
     return '全池自选';
   }
@@ -146,6 +147,11 @@
     const infoBoost = captain ? Hexcore2.hexcoreEngine.infoBoostFor(captain.id) : null;
     const tier = captain ? Hexcore2.poolEngine.effectiveTier(captain.id) : Math.max(1, Math.min(4, Hexcore2.state.draft.round));
     const draw = Hexcore2.state.draft.currentDraw;
+    function teamOwnerName(player) {
+      if (!player || !player.teamId) return '';
+      const owner = Hexcore2.state.captains.find(item => item.id === player.teamId);
+      return owner ? owner.name : '';
+    }
     return `
       <section class="draw-panel">
         <div class="panel-title-row">
@@ -159,7 +165,7 @@
               <span class="lane">${blinded ? '致盲' : escapeHtml(player.lane)}</span>
               <span class="check">${index === selected ? '✓' : ''}</span>
               <strong>${blinded ? '身份隐藏' : escapeHtml(player.name)}</strong>
-              <small>${blinded ? '选中后揭示' : `ID: ${escapeHtml(player.gameId)}${draw && draw.pickMode === 'mystery_swap' ? ' / 真实身份待揭示' : ''}`}</small>
+              <small>${blinded ? '选中后揭示' : `ID: ${escapeHtml(player.gameId)}${draw && draw.pickMode === 'mystery_swap' ? ' / 真实身份待揭示' : ''}${draw && draw.pickMode === 'blind_box' && realPlayer.status === 'drafted' ? ` / 已在 ${escapeHtml(teamOwnerName(realPlayer))}` : ''}`}</small>
               <div class="score-row">评分 <b>${blinded ? '??' : player.score}</b></div>
               ${infoBoost && !blinded ? `<div class="power-rank">战力顺位 <b>#${Hexcore2.hexcoreEngine.powerRank(realPlayer.id)}</b></div>` : ''}
               <div class="history-title">历史表现（近5场）</div>
@@ -170,9 +176,10 @@
               </div>
               <div class="hero-title">擅长英雄</div>
               <div class="hero-row">
-                ${(blinded ? ['?', '?', '?'] : player.heroes).map(hero => `<span>${escapeHtml(hero)}</span>`).join('')}
+                ${(blinded ? ['?', '?', '?'] : (player.heroes && player.heroes.length ? player.heroes : ['暂无', '暂无', '暂无'])).map(hero => `<span>${escapeHtml(hero)}</span>`).join('')}
               </div>
               ${draw && draw.pickMode === 'mystery_swap' && slot.displayPlayerId !== slot.playerId ? `<em>选择后揭示：真实选中并非当前展示身份</em>` : ''}
+              ${draw && draw.pickMode === 'blind_box' && realPlayer.status === 'drafted' ? '<em>盲盒命中已选选手：选择后转队并补偿原队长</em>' : ''}
             </button>
           `).join('')}
         </div>

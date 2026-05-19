@@ -92,7 +92,18 @@
       }
 
       snapshot(`选卡前：${captain.name}`);
-      Hexcore2.assignmentEngine.assign(captain.id, slot.playerId, 'normal_pick');
+      const selectedPlayer = Hexcore2.state.players.find(player => player.id === slot.playerId);
+      if (draw.pickMode === 'blind_box' && selectedPlayer && selectedPlayer.status === 'drafted' && selectedPlayer.teamId !== captain.id) {
+        const transfer = Hexcore2.assignmentEngine.transferDraftedPlayer(captain.id, slot.playerId, 'mystery_box_transfer');
+        if (transfer) {
+          Hexcore2.hexcoreEngine.grantCompensationTurn(
+            transfer.sourceCaptain.id,
+            `神秘贤者·盲盒：${transfer.player.name} 被 ${captain.name} 选中并转队`
+          );
+        }
+      } else {
+        Hexcore2.assignmentEngine.assign(captain.id, slot.playerId, draw.pickMode === 'blind_box' ? 'mystery_box_pick' : 'normal_pick');
+      }
       if (draw.pickMode === 'mystery_swap') {
         const shown = Hexcore2.state.players.find(player => player.id === (slot.displayPlayerId || slot.playerId));
         const real = Hexcore2.state.players.find(player => player.id === slot.playerId);

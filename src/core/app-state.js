@@ -15,6 +15,19 @@
     return current;
   }
 
+  function reconcilePlayerTeamIds(captains, players) {
+    players.forEach(player => {
+      const owner = captains.find(captain => (captain.team || []).includes(player.id));
+      if (owner) {
+        player.status = 'drafted';
+        player.teamId = owner.id;
+      } else if (player.status === 'drafted') {
+        player.status = 'available';
+        delete player.teamId;
+      }
+    });
+  }
+
   const defaultState = {
     mode: 'referee_single_client',
     settings: {
@@ -57,6 +70,7 @@
     state.captains = state.captains || clone(defaultState.captains);
     state.settings.totalTeams = state.captains.length;
     state.players = state.players || clone(defaultState.players);
+    reconcilePlayerTeamIds(state.captains, state.players);
     state.hexcoreAssignments = state.hexcoreAssignments || {};
     state.draft = state.draft || clone(defaultState.draft);
     state.draft.baseOrder = reconcileBaseOrder(state.captains, state.draft.baseOrder);

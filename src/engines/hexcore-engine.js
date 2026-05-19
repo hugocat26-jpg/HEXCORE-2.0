@@ -174,6 +174,20 @@
         );
       }
 
+      if (hexcore.id === 'mystery-box') {
+        const tier = Hexcore2.poolEngine.effectiveTier(captain.id);
+        const tierName = state.settings.tierNames[tier];
+        const draw = Hexcore2.probabilityEngine.drawTierIncludingDrafted(captain.id, tier, 3, '神秘贤者·盲盒：本轮卡池包含已被选中的选手');
+        state.draft.currentDraw = draw;
+        state.draft.selectedSlot = 0;
+        state.draft.pickedThisTurn = false;
+        Hexcore2.eventStore.append(
+          draw.cards.length ? '海克斯盲盒' : '海克斯执行失败',
+          draw.cards.length ? `${captain.name} 使用【神秘贤者·盲盒】，从${tierName}全部选手中抽取 ${draw.cards.length} 张，可能包含已入队选手` : `${tierName}没有可抽取选手，【神秘贤者·盲盒】无法生成抽卡结果`,
+          draw.cards.length ? 'warn' : 'warn'
+        );
+      }
+
       if (hexcore.id === 'photographer') {
         if (state.draft.round < 1 || state.draft.round > 3) {
           Hexcore2.eventStore.append('海克斯执行失败', '摄影艺术家仅可在第1/2/3轮使用', 'warn');
@@ -358,6 +372,29 @@
         Hexcore2.eventStore.append('锁定契约触发', `「${pickedPlayer ? pickedPlayer.name : playerId}」入队触发契约，「${pairedPlayer.name}」自动加入 ${captain.name} 队伍`, 'success');
       }
       return assigned;
+    },
+
+    grantCompensationTurn(captainId, reason) {
+      const state = Hexcore2.state;
+      const captain = state.captains.find(item => item.id === captainId);
+      if (!captain || captain.team.length >= state.settings.playersPerTeam) return false;
+
+      const currentIndex = state.draft.currentIndex;
+      const existingLaterIndex = state.draft.currentOrder
+        .slice(currentIndex + 1)
+        .findIndex(id => id === captainId);
+      if (existingLaterIndex < 0) {
+        state.draft.currentOrder.splice(currentIndex + 1, 0, captainId);
+      }
+      state.draft.runtimeEffects.push({
+        type: 'compensation_turn',
+        captainId,
+        round: state.draft.round,
+        priority: 500,
+        reason,
+      });
+      Hexcore2.eventStore.append('补偿回合', `${captain.name} 获得1次补偿抽卡和选人机会，顺位在当前队长之后`, 'info');
+      return true;
     },
 
     extraDrawCount(captainId) {
