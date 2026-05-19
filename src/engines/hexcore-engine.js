@@ -1,5 +1,10 @@
 (function initHexcoreEngine(global) {
   const Hexcore2 = global.Hexcore2 || (global.Hexcore2 = {});
+  const transmuteTiers = {
+    'transmute-bronze': 2,
+    'transmute-auric': 3,
+    'transmute-prismatic': 4,
+  };
 
   Hexcore2.hexcoreEngine = {
     activate(hexcoreId) {
@@ -9,6 +14,19 @@
 
       const hexcore = (state.hexcoreAssignments[captain.id] || []).find(item => item.id === hexcoreId);
       if (!hexcore || hexcore.status === 'used' || hexcore.mode === 'passive') return { ok: false };
+
+      if (transmuteTiers[hexcore.id]) {
+        const tier = transmuteTiers[hexcore.id];
+        const tierName = state.settings.tierNames[tier];
+        const assigned = Hexcore2.assignmentEngine.assignBlindFromTier(captain.id, tier, `transmute_${tier}`);
+        state.draft.currentDraw = null;
+        state.draft.pickedThisTurn = true;
+        Hexcore2.eventStore.append(
+          assigned ? '海克斯自动执行' : '海克斯执行失败',
+          assigned ? `${captain.name} 使用【${hexcore.name}】，跳过当前池并从${tierName}盲抽1名选手入队` : `${tierName}暂无可用选手，【${hexcore.name}】无法完成盲抽`,
+          assigned ? 'success' : 'warn'
+        );
+      }
 
       if (hexcore.id === 'origin') {
         state.draft.runtimeEffects.push({
@@ -77,7 +95,7 @@
 
       hexcore.status = 'used';
       Hexcore2.eventStore.append('海克斯激活', `${captain.name} 使用【${hexcore.name}】`, hexcore.id === 'blind' ? 'warn' : 'info');
-      return { ok: true, advanceTurn: hexcore.id === 'steady' };
+      return { ok: true, advanceTurn: hexcore.id === 'steady' || Boolean(transmuteTiers[hexcore.id]) };
     },
 
     isBlinded(captainId) {

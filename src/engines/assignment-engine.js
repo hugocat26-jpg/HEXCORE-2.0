@@ -23,5 +23,9 @@
       const index = Math.floor(Math.random() * candidates.length);
       return this.assign(captainId, candidates[index].id, source);
     },
+
+    assignBlindFromTier(captainId, tier, source = 'blind_auto_assign') {
+      return this.assignRandomFromTier(captainId, tier, source);
+    },
   };
 })(window);

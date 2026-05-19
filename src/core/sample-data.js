@@ -1,6 +1,9 @@
 (function initSampleData(global) {
   const Hexcore2 = global.Hexcore2 || (global.Hexcore2 = {});
   const hexcores = [
+    { id: 'transmute-bronze', name: '质变：青铜阶', type: 'cyan', desc: '跳过侏儒马池，直接从中等马池盲抽1人。', status: 'available', uses: 1, mode: 'manual', targetTier: 2 },
+    { id: 'transmute-auric', name: '质变：黄金阶', type: 'amber', desc: '跳过侏儒马池，直接从上等马池盲抽1人。', status: 'available', uses: 1, mode: 'manual', targetTier: 3 },
+    { id: 'transmute-prismatic', name: '质变：棱彩阶', type: 'violet', desc: '跳过侏儒马池，直接从猛犸池盲抽1人。', status: 'available', uses: 1, mode: 'manual', targetTier: 4 },
     { id: 'origin', name: '启元', type: 'cyan', desc: '立刻获得本轮下一位优先顺位。', status: 'available', uses: 1, mode: 'manual' },
     { id: 'blind', name: '致盲吹箭', type: 'amber', desc: '指定下一位队长本轮抽卡致盲，选中后揭示。', status: 'available', uses: 1, mode: 'manual' },
     { id: 'double-shot', name: '双发快射', type: 'violet', desc: '本轮抽卡数量 +1，下一轮跳过。', status: 'available', uses: 1, mode: 'manual' },
@@ -58,7 +61,10 @@
     ],
 
     hexcoreAssignments: {
+      c1: take('transmute-bronze'),
+      c2: take('transmute-auric'),
       c3: take('demon-contract'),
+      c4: take('transmute-prismatic'),
       c6: take('steady', 'blind'),
       c7: take('origin', 'double-shot'),
       c8: take('ballroom-queen'),
