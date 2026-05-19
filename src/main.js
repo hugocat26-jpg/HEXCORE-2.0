@@ -242,6 +242,18 @@
       renderAndPersist();
     },
 
+    clearEvents() {
+      const confirmed = typeof confirm === 'function'
+        ? confirm('确认清空当前事件日志？此操作会保留当前比赛状态。')
+        : true;
+      if (!confirmed) return;
+
+      snapshot('清空事件日志前');
+      Hexcore2.state.events = [];
+      Hexcore2.eventStore.append('日志清理', '裁判清空了事件日志', 'warn');
+      renderAndPersist();
+    },
+
     importState(file) {
       Hexcore2.exportService.readStateFile(file, state => {
         snapshot('导入状态备份前');
@@ -368,6 +380,27 @@
       Hexcore2.state.draft.selectedSlot = 0;
       Hexcore2.state.draft.pickedThisTurn = false;
       Hexcore2.eventStore.append('队伍管理', `裁判将当前队长切换为 ${captain.name}`, 'warn');
+      renderAndPersist();
+    },
+
+    jumpToScheduleSlot(round, captainId) {
+      const targetRound = Number(round);
+      const captain = Hexcore2.state.captains.find(item => item.id === captainId);
+      if (!captain || !Number.isInteger(targetRound) || targetRound < 1 || targetRound > Hexcore2.state.draft.maxRounds) {
+        Hexcore2.eventStore.append('赛程跳转失败', '目标轮次或队长无效', 'warn');
+        Hexcore2.ui.render();
+        return;
+      }
+
+      snapshot(`赛程跳转前：第${targetRound}轮 ${captain.name}`);
+      Hexcore2.state.draft.round = targetRound;
+      Hexcore2.turnOrderEngine.recompute();
+      const index = Hexcore2.state.draft.currentOrder.indexOf(captainId);
+      Hexcore2.state.draft.currentIndex = index >= 0 ? index : 0;
+      Hexcore2.state.draft.currentDraw = null;
+      Hexcore2.state.draft.selectedSlot = 0;
+      Hexcore2.state.draft.pickedThisTurn = false;
+      Hexcore2.eventStore.append('赛程跳转', `裁判跳转到第 ${targetRound} 轮：${captain.name}`, 'warn');
       renderAndPersist();
     },
 
@@ -500,6 +533,41 @@
       Hexcore2.state.ui = Hexcore2.state.ui || {};
       Hexcore2.state.ui.hexCaptainId = captainId;
       renderAndPersist();
+    },
+
+    runSystemCheck() {
+      const issues = [];
+      const captainIds = new Set(Hexcore2.state.captains.map(captain => captain.id));
+      const assignedPlayers = new Set();
+
+      Hexcore2.state.captains.forEach(captain => {
+        if (captain.team.length > Hexcore2.state.settings.playersPerTeam) {
+          issues.push(`${captain.name} 队伍人数超过上限`);
+        }
+        captain.team.forEach(playerId => {
+          if (assignedPlayers.has(playerId)) issues.push(`选手 ${playerId} 被多个队伍占用`);
+          assignedPlayers.add(playerId);
+          const player = Hexcore2.state.players.find(item => item.id === playerId);
+          if (!player) issues.push(`${captain.name} 包含不存在的选手 ${playerId}`);
+          if (player && player.teamId !== captain.id) issues.push(`${player.name} 的归属字段与队伍列表不一致`);
+        });
+      });
+
+      Hexcore2.state.draft.baseOrder.forEach(captainId => {
+        if (!captainIds.has(captainId)) issues.push(`基础顺位包含不存在队长 ${captainId}`);
+      });
+
+      Hexcore2.state.players.forEach(player => {
+        if (player.status === 'drafted' && !player.teamId) issues.push(`${player.name} 已入队但缺少队伍归属`);
+        if (player.teamId && !captainIds.has(player.teamId)) issues.push(`${player.name} 指向不存在的队伍`);
+      });
+
+      Hexcore2.eventStore.append(
+        issues.length ? '系统检查发现问题' : '系统检查通过',
+        issues.length ? issues.slice(0, 5).join('；') : '队伍、选手归属、顺位数据当前一致',
+        issues.length ? 'warn' : 'success'
+      );
+      Hexcore2.ui.render();
     },
   };
 

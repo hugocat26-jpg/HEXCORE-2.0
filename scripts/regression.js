@@ -202,6 +202,18 @@ function testUiNavigationAndHexButtons() {
   assert(H.state.captains.length === 13, '规则设置应能调整队伍数量');
   assert(H.state.draft.round === 3, '规则设置应能调整当前轮次');
   assert(H.state.captains.length === beforeCount + 1, '规则设置应新增缺失队伍');
+  H.actions.setActiveView('schedule');
+  assert(app.innerHTML.includes('schedule-cell') && app.innerHTML.includes('jumpToScheduleSlot'), '赛程页面应提供跳转入口');
+  H.actions.jumpToScheduleSlot(2, 'c2');
+  assert(H.state.draft.round === 2 && H.selectors.currentCaptain().id === 'c2', '赛程跳转应切换轮次和当前队长');
+  H.actions.setActiveView('logs');
+  assert(app.innerHTML.includes('clearEvents'), '日志页面应提供清空入口');
+  H.actions.clearEvents();
+  assert(H.state.events.length === 1 && H.state.events[0].title === '日志清理', '清空日志后应保留清理反馈事件');
+  H.actions.setActiveView('settings');
+  assert(app.innerHTML.includes('runSystemCheck'), '系统设置应提供状态检查入口');
+  H.actions.runSystemCheck();
+  assert(H.state.events[0].title === '系统检查通过', '系统检查应通过当前一致性数据');
 }
 
 function run() {

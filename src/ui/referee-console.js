@@ -535,8 +535,17 @@
   }
 
   function schedulePage() {
+    function roundStatus(captain, round) {
+      if (captain.team.length >= round) return { label: '已完成', className: 'done' };
+      if (Hexcore2.state.draft.round === round && Hexcore2.selectors.currentCaptain() && Hexcore2.selectors.currentCaptain().id === captain.id) {
+        return { label: '当前', className: 'current' };
+      }
+      if (captain.team.length >= Hexcore2.state.settings.playersPerTeam) return { label: '满员', className: 'done' };
+      return { label: '待处理', className: 'pending' };
+    }
+
     return `
-      ${pageHeader('赛程进度', '查看当前轮次、顺位和选秀完成度。')}
+      ${pageHeader('赛程进度', '查看当前轮次、顺位和选秀完成度，并支持裁判跳转到指定队长。')}
       <section class="data-panel">
         <div class="metrics-grid">
           <div><span>当前轮次</span><strong>${Hexcore2.state.draft.round}/${Hexcore2.state.draft.maxRounds}</strong></div>
@@ -545,6 +554,27 @@
           <div><span>流程状态</span><strong>${Hexcore2.state.draft.paused ? '已暂停' : '进行中'}</strong></div>
         </div>
         ${turnOrder()}
+        <div class="schedule-matrix">
+          <div class="schedule-row schedule-head">
+            <strong>队长</strong>
+            ${Array.from({ length: Hexcore2.state.draft.maxRounds }, (_, index) => `<strong>第 ${index + 1} 轮</strong>`).join('')}
+          </div>
+          ${Hexcore2.state.captains.map(captain => `
+            <div class="schedule-row">
+              <strong>${escapeHtml(captain.name)}</strong>
+              ${Array.from({ length: Hexcore2.state.draft.maxRounds }, (_, index) => {
+                const round = index + 1;
+                const status = roundStatus(captain, round);
+                return `
+                  <button class="schedule-cell ${status.className}" onclick="window.hexcoreUI.jumpToScheduleSlot(${round}, '${captain.id}')">
+                    <span>${status.label}</span>
+                    <small>跳转</small>
+                  </button>
+                `;
+              }).join('')}
+            </div>
+          `).join('')}
+        </div>
       </section>
     `;
   }
@@ -581,6 +611,10 @@
   function logsPage() {
     return `
       ${pageHeader('日志导出', '筛选、查看并导出裁判操作和海克斯自动执行记录。')}
+      <section class="data-panel log-tools">
+        <button class="primary-btn" onclick="window.hexcoreUI.exportEvents()">导出当前筛选日志</button>
+        <button class="danger-btn" onclick="window.hexcoreUI.clearEvents()">清空日志</button>
+      </section>
       <div class="log-workspace">
         ${eventLog()}
       </div>
@@ -588,9 +622,17 @@
   }
 
   function settingsPage() {
+    const lastEvent = Hexcore2.state.events[0];
     return `
       ${pageHeader('系统设置', '本地裁判端状态备份、导入和重置。部署访问请使用 npm start 或静态 HTTP 服务。')}
+      <section class="data-panel system-summary">
+        <div><span>当前版本</span><strong>HEXCORE 2.0 裁判端</strong></div>
+        <div><span>事件数量</span><strong>${Hexcore2.state.events.length}</strong></div>
+        <div><span>撤销快照</span><strong>${(Hexcore2.state.undoStack || []).length}</strong></div>
+        <div><span>最近事件</span><strong>${lastEvent ? escapeHtml(lastEvent.title) : '暂无'}</strong></div>
+      </section>
       <section class="data-panel settings-actions">
+        <button class="primary-btn" onclick="window.hexcoreUI.runSystemCheck()">运行状态检查</button>
         <button class="primary-btn" onclick="window.hexcoreUI.exportState()">导出状态备份</button>
         <button class="subtle-btn" onclick="document.getElementById('state-import-input').click()">导入状态备份</button>
         <button class="danger-btn" onclick="window.hexcoreUI.resetLocalState()">重置本地状态</button>

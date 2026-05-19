@@ -1346,6 +1346,71 @@ h2 span {
   font-size: 24px;
 }
 
+.schedule-matrix {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+  overflow-x: auto;
+}
+
+.schedule-row {
+  display: grid;
+  grid-template-columns: minmax(160px, 1.2fr) repeat(4, minmax(120px, 1fr));
+  gap: 8px;
+  align-items: stretch;
+}
+
+.schedule-row > strong {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.025);
+  padding: 0 10px;
+}
+
+.schedule-head > strong {
+  color: var(--cyan);
+  background: rgba(25, 212, 240, 0.08);
+}
+
+.schedule-cell {
+  min-height: 44px;
+  display: grid;
+  gap: 2px;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.025);
+  color: #d7e6ed;
+}
+
+.schedule-cell span {
+  font-weight: 900;
+}
+
+.schedule-cell small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.schedule-cell.current {
+  border-color: var(--amber);
+  background: var(--amber-soft);
+  color: var(--amber);
+}
+
+.schedule-cell.done {
+  border-color: rgba(85, 200, 121, 0.38);
+  background: var(--green-soft);
+  color: var(--green);
+}
+
+.schedule-cell.pending {
+  border-color: rgba(25, 212, 240, 0.25);
+}
+
 .rules-grid {
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
 }
@@ -1380,6 +1445,40 @@ h2 span {
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
+}
+
+.log-tools {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.system-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(150px, 1fr));
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.system-summary div {
+  display: grid;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.025);
+  padding: 12px;
+}
+
+.system-summary span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.system-summary strong {
+  color: var(--cyan);
+  font-size: 18px;
+  line-height: 1.25;
 }
 
 .log-workspace .event-rail {
@@ -1622,7 +1721,8 @@ h2 span {
   }
 
   .pool-columns,
-  .metrics-grid {
+  .metrics-grid,
+  .system-summary {
     grid-template-columns: 1fr;
   }
 
