@@ -5,7 +5,7 @@
     { id: 'transmute-auric', name: '质变：黄金阶', type: 'amber', desc: '跳过侏儒马池，直接从上等马池盲抽1人。', status: 'available', uses: 1, mode: 'manual', targetTier: 3 },
     { id: 'transmute-prismatic', name: '质变：棱彩阶', type: 'violet', desc: '跳过侏儒马池，直接从猛犸池盲抽1人。', status: 'available', uses: 1, mode: 'manual', targetTier: 4 },
     { id: 'origin', name: '启元', type: 'cyan', desc: '立刻获得本轮下一位优先顺位。', status: 'available', uses: 1, mode: 'manual' },
-    { id: 'blind', name: '致盲吹箭', type: 'amber', desc: '指定下一位队长本轮抽卡致盲，选中后揭示。', status: 'available', uses: 1, mode: 'manual' },
+    { id: 'blind', name: '致盲吹箭', type: 'amber', desc: '每轮可指定另一位队长，本轮抽卡时隐藏选手信息，选中后揭示。', status: 'available', uses: 1, mode: 'manual', maxUsesPerRound: 1 },
     { id: 'double-shot', name: '双发快射', type: 'violet', desc: '本轮抽卡数量 +1，下一轮跳过。', status: 'available', uses: 1, mode: 'manual' },
     { id: 'last-stand', name: '背水一战', type: 'violet', desc: '第1/2轮跳过并随机分配，第4轮第一顺位并可自选猛犸。', status: 'passive', uses: 0, mode: 'passive' },
     { id: 'elite-choice', name: '优中选优', type: 'violet', desc: '抽上等马时自动额外展示1张，裁判二选一留下。', status: 'passive', uses: 0, mode: 'passive' },

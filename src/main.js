@@ -114,10 +114,10 @@
       Hexcore2.ui.render();
     },
 
-    useHexcore(id) {
+    useHexcore(id, targetCaptainId) {
       const captain = Hexcore2.selectors.currentCaptain();
       snapshot(`使用海克斯前：${captain ? captain.name : '未知'}`);
-      const result = Hexcore2.hexcoreEngine.activate(id);
+      const result = Hexcore2.hexcoreEngine.activate(id, { targetCaptainId });
       if (result && result.advanceTurn) {
         this.nextCaptain();
       } else {

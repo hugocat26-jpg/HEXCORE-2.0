@@ -10,6 +10,22 @@
     return (Hexcore2.state.hexcoreAssignments[captainId] || []).some(hexcore => hexcore.id === hexcoreId);
   }
 
+  function blindEffectForSource(captainId) {
+    return Hexcore2.state.draft.runtimeEffects.find(effect =>
+      effect.type === 'blind_draw'
+      && effect.sourceCaptainId === captainId
+      && effect.round === Hexcore2.state.draft.round
+    );
+  }
+
+  function blindEffectForTarget(captainId) {
+    return Hexcore2.state.draft.runtimeEffects.find(effect =>
+      effect.type === 'blind_draw'
+      && effect.captainId === captainId
+      && effect.round === Hexcore2.state.draft.round
+    );
+  }
+
   function nextAvailableTier(startTier) {
     for (let tier = startTier; tier <= 4; tier += 1) {
       if (Hexcore2.selectors.availablePlayers(tier).length > 0) return tier;
@@ -20,13 +36,14 @@
   Hexcore2.hexcoreEngine = {
     hasHexcore,
 
-    activate(hexcoreId) {
+    activate(hexcoreId, options = {}) {
       const state = Hexcore2.state;
       const captain = Hexcore2.selectors.currentCaptain();
       if (!captain) return { ok: false };
 
       const hexcore = (state.hexcoreAssignments[captain.id] || []).find(item => item.id === hexcoreId);
-      if (!hexcore || hexcore.status === 'used' || hexcore.mode === 'passive') return { ok: false };
+      if (!hexcore || hexcore.mode === 'passive') return { ok: false };
+      if (hexcore.status === 'used' && hexcore.id !== 'blind') return { ok: false };
 
       if (transmuteTiers[hexcore.id]) {
         const tier = transmuteTiers[hexcore.id];
@@ -54,17 +71,31 @@
       }
 
       if (hexcore.id === 'blind') {
-        const target = this.nextCaptain(captain.id);
-        if (target) {
-          state.draft.runtimeEffects.push({
-            type: 'blind_draw',
-            captainId: target.id,
-            round: state.draft.round,
-            priority: 500,
-            reason: `${captain.name} 对 ${target.name} 使用致盲吹箭`,
-          });
-          Hexcore2.eventStore.append('海克斯激活', `${captain.name} 化身提莫，对 ${target.name} 使用了致盲吹箭`, 'warn');
+        if (blindEffectForSource(captain.id)) {
+          Hexcore2.eventStore.append('海克斯执行失败', '致盲吹箭本轮已经使用过', 'warn');
+          return { ok: false };
         }
+
+        const target = state.captains.find(item => item.id === options.targetCaptainId);
+        if (!target || target.id === captain.id) {
+          Hexcore2.eventStore.append('海克斯执行失败', '请选择另一位队长作为致盲目标', 'warn');
+          return { ok: false };
+        }
+
+        if (blindEffectForTarget(target.id)) {
+          Hexcore2.eventStore.append('海克斯执行失败', `${target.name} 本轮已被致盲，不能重复选择`, 'warn');
+          return { ok: false };
+        }
+
+        state.draft.runtimeEffects.push({
+          type: 'blind_draw',
+          sourceCaptainId: captain.id,
+          captainId: target.id,
+          round: state.draft.round,
+          priority: 500,
+          reason: `${captain.name} 对 ${target.name} 使用致盲吹箭`,
+        });
+        Hexcore2.eventStore.append('海克斯公告', `${captain.name} 化身提莫，对 ${target.name} 使用了致盲吹箭，哼哈哈哈哈`, 'warn');
       }
 
       if (hexcore.id === 'double-shot') {
@@ -157,14 +188,25 @@
         );
       }
 
-      hexcore.status = 'used';
+      if (hexcore.id !== 'blind') {
+        hexcore.status = 'used';
+      }
       Hexcore2.eventStore.append('海克斯激活', `${captain.name} 使用【${hexcore.name}】`, hexcore.id === 'blind' ? 'warn' : 'info');
       return { ok: true, advanceTurn: hexcore.id === 'steady' || hexcore.id === 'double-shot' || Boolean(transmuteTiers[hexcore.id]) };
     },
 
     isBlinded(captainId) {
-      return Hexcore2.state.draft.runtimeEffects.some(effect =>
-        effect.type === 'blind_draw' && effect.captainId === captainId && effect.round === Hexcore2.state.draft.round
+      return Boolean(blindEffectForTarget(captainId));
+    },
+
+    blindUsedBy(captainId) {
+      return Boolean(blindEffectForSource(captainId));
+    },
+
+    blindTargetOptions(sourceCaptainId) {
+      return Hexcore2.state.captains.filter(captain =>
+        captain.id !== sourceCaptainId
+        && !blindEffectForTarget(captain.id)
       );
     },
 

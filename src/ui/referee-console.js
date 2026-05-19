@@ -202,21 +202,33 @@
       `;
     }
     const hexcores = Hexcore2.selectors.currentHexcores();
+    const blindTargets = Hexcore2.hexcoreEngine.blindTargetOptions(captain.id);
     return `
       <section class="hexcore-panel">
         <h2>${escapeHtml(captain.name)} 的海克斯</h2>
         <div class="hex-list">
-          ${hexcores.map(hex => `
-            <div class="hex-row ${hex.type}">
-              <div class="hex-symbol">${Hexcore2.icon('hex')}</div>
-              <div>
-                <strong>${escapeHtml(hex.name)}</strong>
-                <p>${escapeHtml(hex.desc)}</p>
-                <span>${hex.mode === 'passive' ? '被动规则：自动生效' : `可用次数：${hex.status === 'used' ? 0 : hex.uses}`}</span>
+          ${hexcores.map(hex => {
+            const blindUsed = hex.id === 'blind' && Hexcore2.hexcoreEngine.blindUsedBy(captain.id);
+            const isUsed = hex.mode === 'passive' || (hex.status === 'used' && hex.id !== 'blind') || blindUsed;
+            return `
+              <div class="hex-row ${hex.type} ${hex.id === 'blind' ? 'targetable' : ''}">
+                <div class="hex-symbol">${Hexcore2.icon('hex')}</div>
+                <div>
+                  <strong>${escapeHtml(hex.name)}</strong>
+                  <p>${escapeHtml(hex.desc)}</p>
+                  <span>${hex.mode === 'passive' ? '被动规则：自动生效' : (hex.id === 'blind' ? (blindUsed ? '本轮已使用' : '本轮可指定目标') : `可用次数：${hex.status === 'used' ? 0 : hex.uses}`)}</span>
+                  ${hex.id === 'blind' && !blindUsed ? `
+                    <div class="target-grid">
+                      ${blindTargets.map(target => `
+                        <button onclick="window.hexcoreUI.useHexcore(${safeJsonString(hex.id)}, ${safeJsonString(target.id)})">${escapeHtml(target.name)}</button>
+                      `).join('') || '<span>本轮没有可致盲目标</span>'}
+                    </div>
+                  ` : ''}
+                </div>
+                <button class="${isUsed ? 'used' : ''}" ${hex.mode === 'passive' || blindUsed || hex.id === 'blind' ? 'disabled' : ''} onclick="window.hexcoreUI.useHexcore(${safeJsonString(hex.id)})">${hex.mode === 'passive' ? '被动' : (isUsed ? '已使用' : (hex.id === 'blind' ? '选下方' : '使用'))}</button>
               </div>
-              <button class="${hex.status === 'used' || hex.mode === 'passive' ? 'used' : ''}" ${hex.mode === 'passive' ? 'disabled' : ''} onclick="window.hexcoreUI.useHexcore(${safeJsonString(hex.id)})">${hex.mode === 'passive' ? '被动' : (hex.status === 'used' ? '已使用' : '使用')}</button>
-            </div>
-          `).join('')}
+            `;
+          }).join('')}
         </div>
       </section>
     `;
