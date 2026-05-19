@@ -12,6 +12,23 @@
     state.draft.pickedThisTurn = false;
   }
 
+  function hasHexcore(captainId, hexcoreId) {
+    return (Hexcore2.state.hexcoreAssignments[captainId] || []).some(hexcore => hexcore.id === hexcoreId);
+  }
+
+  function applyModifier(order, explanations, modifier) {
+    const index = order.indexOf(modifier.captainId);
+    if (index < 0) return;
+
+    order.splice(index, 1);
+    if (modifier.operation === 'move_last') {
+      order.push(modifier.captainId);
+    } else {
+      order.unshift(modifier.captainId);
+    }
+    explanations.get(modifier.captainId).push(modifier.reason);
+  }
+
   Hexcore2.turnOrderEngine = {
     recompute() {
       const state = Hexcore2.state;
@@ -23,18 +40,31 @@
         order.forEach(id => explanations.get(id).push('偶数轮蛇形反转'));
       }
 
-      const priorityEffects = state.draft.runtimeEffects
-        .filter(effect => effect.type === 'move_first' && effect.round === state.draft.round)
-        .sort((a, b) => b.priority - a.priority);
-
-      priorityEffects.forEach(effect => {
-        const index = order.indexOf(effect.captainId);
-        if (index >= 0) {
-          order.splice(index, 1);
-          order.unshift(effect.captainId);
-          explanations.get(effect.captainId).push(effect.reason);
-        }
+      const modifiers = [];
+      order.forEach(captainId => {
+        if (!hasHexcore(captainId, 'demon-contract')) return;
+        modifiers.push({
+          captainId,
+          operation: state.draft.round === 4 ? 'move_last' : 'move_first',
+          priority: 600,
+          reason: state.draft.round === 4
+            ? '恶魔契约：第4轮自动变为最后顺位'
+            : '恶魔契约：第1-3轮自动获得第1顺位',
+        });
       });
+
+      state.draft.runtimeEffects
+        .filter(effect => effect.type === 'move_first' && effect.round === state.draft.round)
+        .forEach(effect => modifiers.push({
+          captainId: effect.captainId,
+          operation: 'move_first',
+          priority: effect.priority,
+          reason: effect.reason,
+        }));
+
+      modifiers
+        .sort((a, b) => a.priority - b.priority)
+        .forEach(modifier => applyModifier(order, explanations, modifier));
 
       state.draft.currentOrder = order;
       state.draft.explanations = order.map((captainId, index) => ({

@@ -5,10 +5,10 @@
     activate(hexcoreId) {
       const state = Hexcore2.state;
       const captain = Hexcore2.selectors.currentCaptain();
-      if (!captain) return false;
+      if (!captain) return { ok: false };
 
       const hexcore = (state.hexcoreAssignments[captain.id] || []).find(item => item.id === hexcoreId);
-      if (!hexcore || hexcore.status === 'used') return false;
+      if (!hexcore || hexcore.status === 'used' || hexcore.mode === 'passive') return { ok: false };
 
       if (hexcore.id === 'origin') {
         state.draft.runtimeEffects.push({
@@ -47,9 +47,22 @@
         });
       }
 
+      if (hexcore.id === 'steady') {
+        const tier = Hexcore2.poolEngine.effectiveTier(captain.id);
+        const assigned = Hexcore2.assignmentEngine.assignRandomFromTier(captain.id, tier, 'steady_auto_assign');
+        const tierName = state.settings.tierNames[tier];
+        Hexcore2.eventStore.append(
+          assigned ? '海克斯自动执行' : '海克斯执行失败',
+          assigned ? `${captain.name} 使用【稳扎稳打】，系统已从${tierName}随机分配1名选手` : `${tierName}暂无可用选手，【稳扎稳打】无法完成自动分配`,
+          assigned ? 'success' : 'warn'
+        );
+        state.draft.currentDraw = null;
+        state.draft.pickedThisTurn = true;
+      }
+
       hexcore.status = 'used';
       Hexcore2.eventStore.append('海克斯激活', `${captain.name} 使用【${hexcore.name}】`, hexcore.id === 'blind' ? 'warn' : 'info');
-      return true;
+      return { ok: true, advanceTurn: hexcore.id === 'steady' };
     },
 
     isBlinded(captainId) {

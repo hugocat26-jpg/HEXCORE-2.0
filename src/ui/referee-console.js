@@ -185,9 +185,9 @@
               <div>
                 <strong>${hex.name}</strong>
                 <p>${hex.desc}</p>
-                <span>可用次数：${hex.status === 'used' ? 0 : hex.uses}</span>
+                <span>${hex.mode === 'passive' ? '被动规则：自动生效' : `可用次数：${hex.status === 'used' ? 0 : hex.uses}`}</span>
               </div>
-              <button class="${hex.status === 'used' ? 'used' : ''}" onclick="window.hexcoreUI.useHexcore('${hex.id}')">${hex.status === 'used' ? '已使用' : '使用'}</button>
+              <button class="${hex.status === 'used' || hex.mode === 'passive' ? 'used' : ''}" ${hex.mode === 'passive' ? 'disabled' : ''} onclick="window.hexcoreUI.useHexcore('${hex.id}')">${hex.mode === 'passive' ? '被动' : (hex.status === 'used' ? '已使用' : '使用')}</button>
             </div>
           `).join('')}
         </div>

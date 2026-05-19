@@ -15,9 +15,7 @@
     },
     captains: clone(seed.captains),
     players: clone(seed.players),
-    hexcoreAssignments: {
-      c7: clone(seed.hexcores),
-    },
+    hexcoreAssignments: clone(seed.hexcoreAssignments || { c7: seed.hexcores }),
     draft: {
       phase: 'captain_action',
       round: 2,

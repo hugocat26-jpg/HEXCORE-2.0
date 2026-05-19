@@ -103,8 +103,12 @@
     useHexcore(id) {
       const captain = Hexcore2.selectors.currentCaptain();
       snapshot(`使用海克斯前：${captain ? captain.name : '未知'}`);
-      Hexcore2.hexcoreEngine.activate(id);
-      Hexcore2.ui.render();
+      const result = Hexcore2.hexcoreEngine.activate(id);
+      if (result && result.advanceTurn) {
+        this.nextCaptain();
+      } else {
+        Hexcore2.ui.render();
+      }
     },
 
     skipTurn() {

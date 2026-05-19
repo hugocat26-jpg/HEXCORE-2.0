@@ -15,5 +15,13 @@
       Hexcore2.eventStore.append('选手入队', `${captain.name} 选择了选手「${player.name}」加入队伍（${captain.team.length}/4）`, 'success', { source });
       return true;
     },
+
+    assignRandomFromTier(captainId, tier, source = 'auto_assign') {
+      const candidates = Hexcore2.selectors.availablePlayers(tier);
+      if (candidates.length === 0) return false;
+
+      const index = Math.floor(Math.random() * candidates.length);
+      return this.assign(captainId, candidates[index].id, source);
+    },
   };
 })(window);

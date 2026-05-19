@@ -1,5 +1,21 @@
 (function initSampleData(global) {
   const Hexcore2 = global.Hexcore2 || (global.Hexcore2 = {});
+  const hexcores = [
+    { id: 'origin', name: '启元', type: 'cyan', desc: '立刻获得本轮下一位优先顺位。', status: 'available', uses: 1, mode: 'manual' },
+    { id: 'blind', name: '致盲吹箭', type: 'amber', desc: '指定下一位队长本轮抽卡致盲，选中后揭示。', status: 'available', uses: 1, mode: 'manual' },
+    { id: 'double-shot', name: '双发快射', type: 'violet', desc: '本轮抽卡数量 +1，下一轮跳过。', status: 'available', uses: 1, mode: 'manual' },
+    { id: 'giant-slayer', name: '巨人杀手', type: 'amber', desc: '侏儒马与猛犸池互换，仅影响持有者。', status: 'passive', uses: 0, mode: 'passive' },
+    { id: 'ballroom-queen', name: '舞会女王', type: 'violet', desc: '持有者个人卡池顺序反转。', status: 'passive', uses: 0, mode: 'passive' },
+    { id: 'demon-contract', name: '恶魔契约', type: 'cyan', desc: '第1-3轮自动第1顺位，第4轮自动最后顺位。', status: 'passive', uses: 0, mode: 'passive' },
+    { id: 'steady', name: '稳扎稳打', type: 'amber', desc: '跳过本轮抽卡和选人，由系统从当前池随机分配1人。', status: 'available', uses: 1, mode: 'manual' },
+  ];
+
+  function take(...ids) {
+    return ids
+      .map(id => hexcores.find(hexcore => hexcore.id === id))
+      .filter(Boolean)
+      .map(hexcore => ({ ...hexcore }));
+  }
 
   Hexcore2.sampleData = {
     captains: [
@@ -40,10 +56,14 @@
       { id: 'p111', lane: '辅助', name: '已选十一', gameId: 'Team_K', score: 71, tier: 2, status: 'drafted' },
     ],
 
-    hexcores: [
-      { id: 'origin', name: '启元', type: 'cyan', desc: '立刻获得本轮下一位优先顺位。', status: 'available', uses: 1 },
-      { id: 'blind', name: '致盲吹箭', type: 'amber', desc: '指定下一位队长本轮抽卡致盲，选中后揭示。', status: 'available', uses: 1 },
-      { id: 'double-shot', name: '双发快射', type: 'violet', desc: '本轮抽卡数量 +1，下一轮跳过。', status: 'available', uses: 1 },
-    ],
+    hexcoreAssignments: {
+      c3: take('demon-contract'),
+      c6: take('steady', 'blind'),
+      c7: take('origin', 'double-shot'),
+      c8: take('ballroom-queen'),
+      c9: take('giant-slayer'),
+    },
+
+    hexcores,
   };
 })(window);
