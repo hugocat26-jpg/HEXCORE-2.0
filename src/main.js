@@ -1,6 +1,18 @@
 (function bootstrap(global) {
   const Hexcore2 = global.Hexcore2;
 
+  if (global.location && global.location.protocol === 'file:') {
+    document.getElementById('app').innerHTML = `
+      <main class="launch-warning">
+        <section>
+          <h1>请通过部署服务访问 HEXCORE 2.0</h1>
+          <p>当前页面不支持 file:// 直接打开。请在项目目录执行 npm start，然后访问 http://127.0.0.1:4176/。</p>
+        </section>
+      </main>
+    `;
+    return;
+  }
+
   Hexcore2.turnOrderEngine.recompute();
 
   function persist() {
@@ -221,7 +233,7 @@
         Hexcore2.state.draft = state.draft;
         Hexcore2.state.events = state.events || [];
         Hexcore2.state.undoStack = state.undoStack || [];
-        Hexcore2.state.ui = state.ui || { eventFilter: 'all' };
+        Hexcore2.state.ui = state.ui || { activeView: 'draft', eventFilter: 'all' };
         if (Hexcore2.normalizeState) Hexcore2.normalizeState(Hexcore2.state);
         Hexcore2.turnOrderEngine.recompute();
         Hexcore2.eventStore.append('数据导入', '裁判导入了状态备份', 'info');
@@ -240,6 +252,38 @@
 
       if (Hexcore2.storageService) Hexcore2.storageService.clear();
       location.reload();
+    },
+
+    setActiveView(view) {
+      Hexcore2.state.ui = Hexcore2.state.ui || {};
+      Hexcore2.state.ui.activeView = view || 'draft';
+      renderAndPersist();
+    },
+
+    drawHexcoreForCurrentCaptain() {
+      const captain = Hexcore2.selectors.currentCaptain();
+      if (!captain) {
+        Hexcore2.eventStore.append('抽取海克斯失败', '当前没有可操作队长', 'warn');
+        Hexcore2.ui.render();
+        return;
+      }
+
+      snapshot(`抽取海克斯前：${captain.name}`);
+      const owned = new Set((Hexcore2.state.hexcoreAssignments[captain.id] || []).map(hex => hex.id));
+      const candidates = Hexcore2.sampleData.hexcores
+        .filter(hex => !owned.has(hex.id))
+        .filter(hex => hex.status !== 'passive' || hex.mode === 'passive');
+      if (!candidates.length) {
+        Hexcore2.eventStore.append('抽取海克斯失败', `${captain.name} 没有可抽取的新海克斯`, 'warn');
+        Hexcore2.ui.render();
+        return;
+      }
+
+      const picked = candidates[Math.floor(Math.random() * candidates.length)];
+      Hexcore2.state.hexcoreAssignments[captain.id] = Hexcore2.state.hexcoreAssignments[captain.id] || [];
+      Hexcore2.state.hexcoreAssignments[captain.id].push({ ...picked, status: picked.mode === 'passive' ? 'passive' : 'available' });
+      Hexcore2.eventStore.append('抽取海克斯', `${captain.name} 获得【${picked.name}】`, 'success');
+      renderAndPersist();
     },
   };
 

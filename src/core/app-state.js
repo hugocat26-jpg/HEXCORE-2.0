@@ -57,6 +57,7 @@
     events: [],
     undoStack: [],
     ui: {
+      activeView: 'draft',
       eventFilter: 'all',
     },
   };
@@ -85,7 +86,8 @@
     state.draft.paused = Boolean(state.draft.paused);
     state.events = state.events || [];
     state.undoStack = state.undoStack || [];
-    state.ui = state.ui || { eventFilter: 'all' };
+    state.ui = state.ui || { activeView: 'draft', eventFilter: 'all' };
+    state.ui.activeView = state.ui.activeView || 'draft';
     state.ui.eventFilter = state.ui.eventFilter || 'all';
     return state;
   };

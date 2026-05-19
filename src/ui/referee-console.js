@@ -50,15 +50,16 @@
   function sidebar() {
     const icon = Hexcore2.icon;
     const teamCount = Hexcore2.selectors.teamCount();
+    const activeView = (Hexcore2.state.ui && Hexcore2.state.ui.activeView) || 'draft';
     const items = [
-      ['draft', '实时选秀', true],
-      ['team', '队伍管理'],
-      ['users', '选手库'],
-      ['hex', '海克斯库'],
-      ['calendar', '赛程进度'],
-      ['rule', '规则设置'],
-      ['log', '日志导出'],
-      ['cog', '系统设置'],
+      ['draft', 'draft', '实时选秀'],
+      ['team', 'teams', '队伍管理'],
+      ['users', 'players', '选手库'],
+      ['hex', 'hexcores', '海克斯库'],
+      ['calendar', 'schedule', '赛程进度'],
+      ['rule', 'rules', '规则设置'],
+      ['log', 'logs', '日志导出'],
+      ['cog', 'settings', '系统设置'],
     ];
 
     return `
@@ -69,9 +70,9 @@
         </div>
         <div class="nav-section">赛事控制台</div>
         <nav class="nav-list">
-          ${items.map(([name, label, active]) => `
-            <button class="nav-item ${active ? 'active' : ''}">
-              ${icon(name)}
+          ${items.map(([iconName, view, label]) => `
+            <button class="nav-item ${activeView === view ? 'active' : ''}" onclick="window.hexcoreUI.setActiveView('${view}')">
+              ${icon(iconName)}
               <span>${label}</span>
             </button>
           `).join('')}
@@ -256,33 +257,33 @@
                   ${hex.id === 'blind' && !blindUsed ? `
                     <div class="target-grid">
                       ${blindTargets.map(target => `
-                        <button onclick="window.hexcoreUI.useHexcore(${safeJsonString(hex.id)}, ${safeJsonString(target.id)})">${escapeHtml(target.name)}</button>
+                        <button onclick='window.hexcoreUI.useHexcore(${safeJsonString(hex.id)}, ${safeJsonString(target.id)})'>${escapeHtml(target.name)}</button>
                       `).join('') || '<span>本轮没有可致盲目标</span>'}
                     </div>
                   ` : ''}
                   ${hex.id === 'order-swap' && hex.status !== 'used' ? `
                     <div class="target-grid pair-grid">
                       ${swapPairs.map(([first, second]) => `
-                        <button onclick="window.hexcoreUI.useHexcore(${safeJsonString(hex.id)}, ${safeJsonString(first.id)}, ${safeJsonString(second.id)})">${escapeHtml(first.name)} ↔ ${escapeHtml(second.name)}</button>
+                        <button onclick='window.hexcoreUI.useHexcore(${safeJsonString(hex.id)}, ${safeJsonString(first.id)}, ${safeJsonString(second.id)})'>${escapeHtml(first.name)} ↔ ${escapeHtml(second.name)}</button>
                       `).join('')}
                     </div>
                   ` : ''}
                   ${hex.id === 'decompose-knowledge' && hex.status !== 'used' ? `
                     <div class="target-grid">
                       ${teamPlayers.map(player => `
-                        <button onclick="window.hexcoreUI.useHexcore(${safeJsonString(hex.id)}, ${safeJsonString(player.id)})">${escapeHtml(player.name)}</button>
+                        <button onclick='window.hexcoreUI.useHexcore(${safeJsonString(hex.id)}, ${safeJsonString(player.id)})'>${escapeHtml(player.name)}</button>
                       `).join('') || '<span>至少拥有1名选手后可用</span>'}
                     </div>
                   ` : ''}
                   ${hex.id === 'lock-contract' && hex.status !== 'used' ? `
                     <div class="target-grid pair-grid">
                       ${lockPairs.map(([first, second]) => `
-                        <button onclick="window.hexcoreUI.useHexcore(${safeJsonString(hex.id)}, ${safeJsonString(first.id)}, ${safeJsonString(second.id)})">${escapeHtml(first.name)} ↔ ${escapeHtml(second.name)}</button>
+                        <button onclick='window.hexcoreUI.useHexcore(${safeJsonString(hex.id)}, ${safeJsonString(first.id)}, ${safeJsonString(second.id)})'>${escapeHtml(first.name)} ↔ ${escapeHtml(second.name)}</button>
                       `).join('') || '<span>当前没有足够可绑定选手</span>'}
                     </div>
                   ` : ''}
                 </div>
-                <button class="${isUsed ? 'used' : ''}" ${hex.mode === 'passive' || blindUsed || snowUsed || pandoraDisabled || hex.id === 'blind' || hex.id === 'order-swap' || hex.id === 'decompose-knowledge' || hex.id === 'lock-contract' ? 'disabled' : ''} onclick="window.hexcoreUI.useHexcore(${safeJsonString(hex.id)})">${hex.mode === 'passive' ? '被动' : (isUsed ? (pandoraDisabled ? '失效' : '已使用') : (hex.id === 'blind' || hex.id === 'order-swap' || hex.id === 'decompose-knowledge' || hex.id === 'lock-contract' ? '选下方' : '使用'))}</button>
+                <button class="${isUsed ? 'used' : ''}" ${hex.mode === 'passive' || blindUsed || snowUsed || pandoraDisabled || hex.id === 'blind' || hex.id === 'order-swap' || hex.id === 'decompose-knowledge' || hex.id === 'lock-contract' ? 'disabled' : ''} onclick='window.hexcoreUI.useHexcore(${safeJsonString(hex.id)})'>${hex.mode === 'passive' ? '被动' : (isUsed ? (pandoraDisabled ? '失效' : '已使用') : (hex.id === 'blind' || hex.id === 'order-swap' || hex.id === 'decompose-knowledge' || hex.id === 'lock-contract' ? '选下方' : '使用'))}</button>
               </div>
             `;
           }).join('')}
@@ -372,28 +373,180 @@
     `;
   }
 
+  function pageHeader(title, subtitle) {
+    return `
+      <section class="page-header">
+        <div>
+          <h1>${escapeHtml(title)}</h1>
+          <p>${escapeHtml(subtitle)}</p>
+        </div>
+        <button class="subtle-btn" onclick="window.hexcoreUI.setActiveView('draft')">${Hexcore2.icon('draft')}返回实时选秀</button>
+      </section>
+    `;
+  }
+
+  function teamsPage() {
+    return `
+      ${pageHeader('队伍管理', '裁判查看全部队伍阵容、队伍容量和当前队长状态。')}
+      <section class="data-panel">
+        <div class="data-grid team-grid">
+          ${Hexcore2.state.captains.map((captain, index) => `
+            <article class="data-card">
+              <div class="data-card-head">
+                <span>${index + 1}</span>
+                <strong>${escapeHtml(captain.name)}</strong>
+              </div>
+              <p>顺位记录：${escapeHtml(captain.record)}</p>
+              <p>队伍人数：${captain.team.length}/${Hexcore2.state.settings.playersPerTeam}</p>
+              <div class="member-list">
+                ${captain.team.map(playerId => {
+                  const player = playerById(playerId);
+                  return player ? `<span>${escapeHtml(player.name)} · ${escapeHtml(player.lane || '未知')}</span>` : '';
+                }).join('') || '<span>暂无队员</span>'}
+              </div>
+            </article>
+          `).join('')}
+        </div>
+      </section>
+    `;
+  }
+
+  function playersPage() {
+    const tierNames = Hexcore2.state.settings.tierNames;
+    return `
+      ${pageHeader('选手库', '按卡池查看选手状态、评分、位置和归属队伍。')}
+      <section class="data-panel">
+        <div class="pool-columns">
+          ${[1, 2, 3, 4].map(tier => `
+            <div class="pool-column">
+              <h2>${escapeHtml(tierNames[tier])}池</h2>
+              ${Hexcore2.state.players.filter(player => player.tier === tier).map(player => {
+                const owner = player.teamId ? Hexcore2.state.captains.find(captain => captain.id === player.teamId) : null;
+                return `
+                  <div class="player-row">
+                    <strong>${escapeHtml(player.name)}</strong>
+                    <span>${escapeHtml(player.lane || '未知')} · ${player.score || 0} 分</span>
+                    <em class="${player.status === 'available' ? 'available' : 'drafted'}">${player.status === 'available' ? '可选' : `已入队${owner ? `：${escapeHtml(owner.name)}` : ''}`}</em>
+                  </div>
+                `;
+              }).join('') || '<div class="empty-log">暂无选手</div>'}
+            </div>
+          `).join('')}
+        </div>
+      </section>
+    `;
+  }
+
+  function hexcoresPage() {
+    const captain = Hexcore2.selectors.currentCaptain();
+    return `
+      ${pageHeader('海克斯库', '裁判查看全量海克斯，并可为当前队长抽取新的海克斯。')}
+      <section class="data-panel">
+        <div class="toolbar-row">
+          <div>
+            <strong>当前队长：${captain ? escapeHtml(captain.name) : '无'}</strong>
+            <span>当前阶段仍由裁判代执行抽取和使用。</span>
+          </div>
+          <button class="primary-btn" onclick="window.hexcoreUI.drawHexcoreForCurrentCaptain()">${Hexcore2.icon('hex')}为当前队长抽海克斯</button>
+        </div>
+        <div class="hex-library">
+          ${Hexcore2.sampleData.hexcores.map(hex => `
+            <article class="hex-library-card ${escapeHtml(hex.type)}">
+              <div>
+                <strong>${escapeHtml(hex.name)}</strong>
+                <span>${hex.mode === 'passive' ? '被动自动' : '裁判手动'}</span>
+              </div>
+              <p>${escapeHtml(hex.desc)}</p>
+            </article>
+          `).join('')}
+        </div>
+      </section>
+    `;
+  }
+
+  function schedulePage() {
+    return `
+      ${pageHeader('赛程进度', '查看当前轮次、顺位和选秀完成度。')}
+      <section class="data-panel">
+        <div class="metrics-grid">
+          <div><span>当前轮次</span><strong>${Hexcore2.state.draft.round}/${Hexcore2.state.draft.maxRounds}</strong></div>
+          <div><span>有效队伍</span><strong>${Hexcore2.selectors.teamCount()}</strong></div>
+          <div><span>已入队选手</span><strong>${Hexcore2.state.players.filter(player => player.status === 'drafted').length}</strong></div>
+          <div><span>流程状态</span><strong>${Hexcore2.state.draft.paused ? '已暂停' : '进行中'}</strong></div>
+        </div>
+        ${turnOrder()}
+      </section>
+    `;
+  }
+
+  function rulesPage() {
+    return `
+      ${pageHeader('规则设置', '当前版本固定为裁判代执行，保留多人登录鉴权与队长自抽扩展口。')}
+      <section class="data-panel rules-grid">
+        <div class="rule-block"><strong>队伍数量</strong><span>${Hexcore2.state.settings.minTeams}-${Hexcore2.state.settings.maxTeams} 队，当前 ${Hexcore2.selectors.teamCount()} 队。</span></div>
+        <div class="rule-block"><strong>队伍容量</strong><span>每队 ${Hexcore2.state.settings.playersPerTeam} 名选手。</span></div>
+        <div class="rule-block"><strong>执行模式</strong><span>当前由裁判代抽、代选、代用海克斯。</span></div>
+        <div class="rule-block"><strong>旧购买逻辑</strong><span>已取消资源购买卡牌流程，抽卡只由规则、顺位、卡池和海克斯效果驱动。</span></div>
+      </section>
+    `;
+  }
+
+  function logsPage() {
+    return `
+      ${pageHeader('日志导出', '筛选、查看并导出裁判操作和海克斯自动执行记录。')}
+      <div class="log-workspace">
+        ${eventLog()}
+      </div>
+    `;
+  }
+
+  function settingsPage() {
+    return `
+      ${pageHeader('系统设置', '本地裁判端状态备份、导入和重置。部署访问请使用 npm start 或静态 HTTP 服务。')}
+      <section class="data-panel settings-actions">
+        <button class="primary-btn" onclick="window.hexcoreUI.exportState()">导出状态备份</button>
+        <button class="subtle-btn" onclick="document.getElementById('state-import-input').click()">导入状态备份</button>
+        <button class="danger-btn" onclick="window.hexcoreUI.resetLocalState()">重置本地状态</button>
+      </section>
+    `;
+  }
+
+  function activePage() {
+    const activeView = (Hexcore2.state.ui && Hexcore2.state.ui.activeView) || 'draft';
+    if (activeView === 'teams') return `<main class="workspace-main page-workspace">${teamsPage()}</main>`;
+    if (activeView === 'players') return `<main class="workspace-main page-workspace">${playersPage()}</main>`;
+    if (activeView === 'hexcores') return `<main class="workspace-main page-workspace">${hexcoresPage()}</main>`;
+    if (activeView === 'schedule') return `<main class="workspace-main page-workspace">${schedulePage()}</main>`;
+    if (activeView === 'rules') return `<main class="workspace-main page-workspace">${rulesPage()}</main>`;
+    if (activeView === 'logs') return `<main class="workspace-main page-workspace">${logsPage()}</main>`;
+    if (activeView === 'settings') return `<main class="workspace-main page-workspace">${settingsPage()}</main>`;
+    return `
+      <main class="workspace">
+        <div class="workspace-main">
+          ${turnOrder()}
+          <div class="content-grid">
+            <div>
+              ${playerCards()}
+              ${refereeControls()}
+            </div>
+            <div>
+              ${hexcorePanel()}
+              ${rulePanel()}
+            </div>
+          </div>
+        </div>
+        ${eventLog()}
+      </main>
+      ${rosterRail()}
+    `;
+  }
+
   function app() {
     return `
       ${sidebar()}
       <div class="app-main">
         ${topbar()}
-        <main class="workspace">
-          <div class="workspace-main">
-            ${turnOrder()}
-            <div class="content-grid">
-              <div>
-                ${playerCards()}
-                ${refereeControls()}
-              </div>
-              <div>
-                ${hexcorePanel()}
-                ${rulePanel()}
-              </div>
-            </div>
-          </div>
-          ${eventLog()}
-        </main>
-        ${rosterRail()}
+        ${activePage()}
       </div>
     `;
   }
