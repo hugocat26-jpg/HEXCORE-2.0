@@ -115,8 +115,27 @@
           'warn'
         );
       }
-      Hexcore2.state.draft.pickedThisTurn = true;
+      if (draw.pickMode === 'hellhound') {
+        Hexcore2.hexcoreEngine.advanceHellhound(captain.id);
+      } else {
+        Hexcore2.state.draft.pickedThisTurn = true;
+      }
       renderAndPersist();
+    },
+
+    timeoutRandomPick() {
+      const draw = Hexcore2.state.draft.currentDraw;
+      if (!draw || draw.pickMode !== 'hellhound' || !draw.cards.length) {
+        Hexcore2.eventStore.append('超时随机失败', '当前没有可随机分配的地狱三头犬候选卡', 'warn');
+        Hexcore2.ui.render();
+        return;
+      }
+
+      const index = Math.floor(Math.random() * draw.cards.length);
+      Hexcore2.state.draft.selectedSlot = index;
+      const captain = Hexcore2.selectors.currentCaptain();
+      Hexcore2.eventStore.append('地狱三头犬超时', `${captain ? captain.name : '当前队长'} 本段超时，系统随机选择第 ${index + 1} 张`, 'warn');
+      this.pickCard();
     },
 
     nextCaptain() {

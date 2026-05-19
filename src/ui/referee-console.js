@@ -18,6 +18,7 @@
   function currentDrawLabel() {
     const draw = Hexcore2.state.draft.currentDraw;
     if (draw && draw.pickMode === 'blind_box') return '盲盒抽卡';
+    if (draw && draw.pickMode === 'hellhound') return '地狱三头犬连选';
     if (!draw || draw.pickMode !== 'open_pick') return '本轮抽卡';
     return '全池自选';
   }
@@ -183,7 +184,7 @@
             </button>
           `).join('')}
         </div>
-        <p class="hint">提示：${captain ? `${draw && draw.pickMode === 'open_pick' ? '开饭啦已展开当前池全部可选选手，' : ''}请选择一名选手加入 ${escapeHtml(captain.name)} 的队伍（${Hexcore2.selectors.teamSize(captain.id)}/4）` : '当前没有可操作队长'}</p>
+        <p class="hint">提示：${captain ? `${draw && draw.pickMode === 'open_pick' ? '开饭啦已展开当前池全部可选选手，' : ''}${draw && draw.pickMode === 'hellhound' ? `本段限时 ${draw.timeLimitSeconds} 秒，超时可随机分配，` : ''}请选择一名选手加入 ${escapeHtml(captain.name)} 的队伍（${Hexcore2.selectors.teamSize(captain.id)}/4）` : '当前没有可操作队长'}</p>
       </section>
     `;
   }
@@ -196,6 +197,7 @@
         <div class="control-grid">
           <button class="action-btn cyan" onclick="window.hexcoreUI.drawCards()">${icon('cube')}<strong>抽卡</strong><span>抽取本轮选手</span></button>
           <button class="action-btn green ${Hexcore2.state.draft.pickedThisTurn ? 'disabled' : ''}" onclick="window.hexcoreUI.pickCard()">${icon('pick')}<strong>${Hexcore2.state.draft.pickedThisTurn ? '已选择' : '选择此卡'}</strong><span>将选手加入队伍</span></button>
+          <button class="action-btn amber ${Hexcore2.state.draft.currentDraw && Hexcore2.state.draft.currentDraw.pickMode === 'hellhound' ? '' : 'disabled'}" onclick="window.hexcoreUI.timeoutRandomPick()"><span class="fast-icon">⏱</span><strong>超时随机</strong><span>当前段随机入队</span></button>
           <button class="action-btn amber" onclick="window.hexcoreUI.skipTurn()"><span class="fast-icon">»</span><strong>跳过本轮</strong><span>不选择，跳过此轮</span></button>
           <button class="action-btn blue" onclick="window.hexcoreUI.nextCaptain()">${icon('team')}<strong>下一位</strong><span>交给下一队长</span></button>
           <button class="action-btn muted" onclick="window.hexcoreUI.pause()">${icon('pause')}<strong>暂停</strong><span>暂停选秀流程</span></button>

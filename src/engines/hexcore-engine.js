@@ -188,6 +188,28 @@
         );
       }
 
+      if (hexcore.id === 'hellhound') {
+        if (state.draft.round !== 1) {
+          Hexcore2.eventStore.append('海克斯执行失败', '地狱三头犬仅可在第1轮使用', 'warn');
+          return { ok: false };
+        }
+
+        const sequence = {
+          type: 'hellhound_sequence',
+          sourceCaptainId: captain.id,
+          captainId: captain.id,
+          round: state.draft.round,
+          tiers: [1, 2, 3],
+          timeLimits: { 1: 15, 2: 10, 3: 5 },
+          step: 0,
+          priority: 500,
+          reason: '地狱三头犬：连续三池自选',
+        };
+        state.draft.runtimeEffects.push(sequence);
+        this.startHellhoundStep(captain.id, sequence);
+        Hexcore2.eventStore.append('海克斯连选', `${captain.name} 使用【地狱三头犬】，开始侏儒马→中等马→上等马连续三段自选`, 'warn');
+      }
+
       if (hexcore.id === 'photographer') {
         if (state.draft.round < 1 || state.draft.round > 3) {
           Hexcore2.eventStore.append('海克斯执行失败', '摄影艺术家仅可在第1/2/3轮使用', 'warn');
@@ -395,6 +417,57 @@
       });
       Hexcore2.eventStore.append('补偿回合', `${captain.name} 获得1次补偿抽卡和选人机会，顺位在当前队长之后`, 'info');
       return true;
+    },
+
+    currentHellhoundSequence(captainId) {
+      return Hexcore2.state.draft.runtimeEffects.find(effect =>
+        effect.type === 'hellhound_sequence'
+        && effect.captainId === captainId
+        && effect.round === Hexcore2.state.draft.round
+        && !effect.completed
+      );
+    },
+
+    startHellhoundStep(captainId, sequence) {
+      const state = Hexcore2.state;
+      const tier = sequence.tiers[sequence.step];
+      if (!tier || Hexcore2.selectors.teamSize(captainId) >= state.settings.playersPerTeam) {
+        sequence.completed = true;
+        state.draft.currentDraw = null;
+        state.draft.pickedThisTurn = true;
+        return { completed: true };
+      }
+
+      const tierName = state.settings.tierNames[tier];
+      const draw = Hexcore2.probabilityEngine.drawAll(captainId, tier, `地狱三头犬：${tierName}池限时 ${sequence.timeLimits[tier]} 秒自选`);
+      draw.pickMode = 'hellhound';
+      draw.hellhoundStep = sequence.step;
+      draw.timeLimitSeconds = sequence.timeLimits[tier];
+      state.draft.currentDraw = draw;
+      state.draft.selectedSlot = 0;
+      state.draft.pickedThisTurn = false;
+      Hexcore2.eventStore.append(
+        draw.cards.length ? '地狱三头犬阶段' : '地狱三头犬空池',
+        draw.cards.length ? `进入${tierName}池自选，限时 ${sequence.timeLimits[tier]} 秒` : `${tierName}池暂无可用选手，可进入下一段或由裁判处理`,
+        draw.cards.length ? 'info' : 'warn'
+      );
+      return { completed: false, draw };
+    },
+
+    advanceHellhound(captainId) {
+      const sequence = this.currentHellhoundSequence(captainId);
+      if (!sequence) return { handled: false };
+
+      sequence.step += 1;
+      if (sequence.step >= sequence.tiers.length || Hexcore2.selectors.teamSize(captainId) >= Hexcore2.state.settings.playersPerTeam) {
+        sequence.completed = true;
+        Hexcore2.state.draft.currentDraw = null;
+        Hexcore2.state.draft.pickedThisTurn = true;
+        Hexcore2.eventStore.append('地狱三头犬完成', '连续三段自选已完成或队伍已满员', 'success');
+        return { handled: true, completed: true };
+      }
+
+      return { handled: true, ...this.startHellhoundStep(captainId, sequence) };
     },
 
     extraDrawCount(captainId) {
