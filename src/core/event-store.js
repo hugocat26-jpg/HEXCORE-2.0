@@ -12,13 +12,16 @@
     ['14:29:41', '海克斯询问', 'C5 无痕 询问可用海克斯', 'info'],
   ];
 
-  Hexcore2.state.events = initialEvents.map(([time, title, body, level]) => ({ time, title, body, level }));
+  if (!Hexcore2.state.events || Hexcore2.state.events.length === 0) {
+    Hexcore2.state.events = initialEvents.map(([time, title, body, level]) => ({ time, title, body, level }));
+  }
 
   Hexcore2.eventStore = {
     append(title, body, level = 'info', payload = {}) {
       const time = new Date().toLocaleTimeString('zh-CN', { hour12: false });
       Hexcore2.state.events.unshift({ time, title, body, level, payload });
       Hexcore2.state.events = Hexcore2.state.events.slice(0, 16);
+      if (Hexcore2.storageService) Hexcore2.storageService.save(Hexcore2.state);
     },
   };
 })(window);

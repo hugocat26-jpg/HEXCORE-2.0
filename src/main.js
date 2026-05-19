@@ -3,11 +3,20 @@
 
   Hexcore2.turnOrderEngine.recompute();
 
+  function persist() {
+    if (Hexcore2.storageService) Hexcore2.storageService.save(Hexcore2.state);
+  }
+
+  function renderAndPersist() {
+    persist();
+    Hexcore2.ui.render();
+  }
+
   Hexcore2.actions = {
     selectCard(index) {
       Hexcore2.state.draft.selectedSlot = index;
       Hexcore2.state.draft.pickedThisTurn = false;
-      Hexcore2.ui.render();
+      renderAndPersist();
     },
 
     drawCards() {
@@ -35,6 +44,7 @@
     pickCard() {
       const draw = Hexcore2.state.draft.currentDraw;
       const captain = Hexcore2.selectors.currentCaptain();
+      if (Hexcore2.state.draft.pickedThisTurn) return;
       if (!draw || !captain) return;
 
       const slot = draw.cards[Hexcore2.state.draft.selectedSlot];
@@ -42,7 +52,7 @@
 
       Hexcore2.assignmentEngine.assign(captain.id, slot.playerId, 'normal_pick');
       Hexcore2.state.draft.pickedThisTurn = true;
-      Hexcore2.ui.render();
+      renderAndPersist();
     },
 
     nextCaptain() {
@@ -73,8 +83,20 @@
       Hexcore2.eventStore.append('裁判操作', '撤销上一步操作已进入待确认状态', 'warn');
       Hexcore2.ui.render();
     },
+
+    exportEvents() {
+      if (Hexcore2.exportService.exportEvents()) Hexcore2.ui.render();
+    },
+
+    exportState() {
+      if (Hexcore2.exportService.exportState()) Hexcore2.ui.render();
+    },
   };
 
   global.hexcoreUI = Hexcore2.actions;
-  Hexcore2.actions.drawCards();
+  if (Hexcore2.state.draft.currentDraw) {
+    Hexcore2.ui.render();
+  } else {
+    Hexcore2.actions.drawCards();
+  }
 })(window);

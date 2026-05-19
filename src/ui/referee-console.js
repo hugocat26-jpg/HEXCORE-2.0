@@ -53,6 +53,7 @@
           <p>版本：2.0 裁判端</p>
           <p>模式：裁判代执行</p>
           <p>创建时间：2026-05-19 09:00</p>
+          <button onclick="window.hexcoreUI.exportState()">导出状态备份</button>
         </div>
       </aside>
     `;
@@ -145,7 +146,7 @@
         <h2>裁判操作</h2>
         <div class="control-grid">
           <button class="action-btn cyan" onclick="window.hexcoreUI.drawCards()">${icon('cube')}<strong>抽卡</strong><span>抽取本轮选手</span></button>
-          <button class="action-btn green" onclick="window.hexcoreUI.pickCard()">${icon('pick')}<strong>选择此卡</strong><span>将选手加入队伍</span></button>
+          <button class="action-btn green ${Hexcore2.state.draft.pickedThisTurn ? 'disabled' : ''}" onclick="window.hexcoreUI.pickCard()">${icon('pick')}<strong>${Hexcore2.state.draft.pickedThisTurn ? '已选择' : '选择此卡'}</strong><span>将选手加入队伍</span></button>
           <button class="action-btn amber" onclick="window.hexcoreUI.skipTurn()"><span class="fast-icon">»</span><strong>跳过本轮</strong><span>不选择，跳过此轮</span></button>
           <button class="action-btn blue" onclick="window.hexcoreUI.nextCaptain()">${icon('team')}<strong>下一位</strong><span>交给下一队长</span></button>
           <button class="action-btn muted" onclick="window.hexcoreUI.pause()">${icon('pause')}<strong>暂停</strong><span>暂停选秀流程</span></button>
@@ -214,7 +215,7 @@
             </div>
           `).join('')}
         </div>
-        <button class="export-btn">导出日志</button>
+        <button class="export-btn" onclick="window.hexcoreUI.exportEvents()">导出日志</button>
       </aside>
     `;
   }

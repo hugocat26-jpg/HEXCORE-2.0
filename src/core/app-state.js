@@ -6,7 +6,7 @@
     return JSON.parse(JSON.stringify(value));
   }
 
-  Hexcore2.state = {
+  const defaultState = {
     mode: 'referee_single_client',
     settings: {
       totalTeams: 12,
@@ -33,6 +33,9 @@
     },
     events: [],
   };
+
+  const savedState = Hexcore2.storageService ? Hexcore2.storageService.load() : null;
+  Hexcore2.state = savedState || defaultState;
 
   Hexcore2.selectors = {
     currentCaptain() {
