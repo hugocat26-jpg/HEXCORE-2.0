@@ -11,6 +11,12 @@
     return draw.cards.map(card => playerById(card.playerId)).filter(Boolean);
   }
 
+  function currentDrawLabel() {
+    const draw = Hexcore2.state.draft.currentDraw;
+    if (!draw || draw.pickMode !== 'open_pick') return '本轮抽卡';
+    return '全池自选';
+  }
+
   function currentExplanation() {
     const captain = Hexcore2.selectors.currentCaptain();
     if (!captain) return [];
@@ -114,13 +120,14 @@
     const selected = Hexcore2.state.draft.selectedSlot;
     const blinded = captain ? Hexcore2.hexcoreEngine.isBlinded(captain.id) : false;
     const tier = captain ? Hexcore2.poolEngine.effectiveTier(captain.id) : Math.max(1, Math.min(4, Hexcore2.state.draft.round));
+    const draw = Hexcore2.state.draft.currentDraw;
     return `
       <section class="draw-panel">
         <div class="panel-title-row">
-          <h2>本轮抽卡 <span>${Hexcore2.state.settings.tierNames[tier]}池</span></h2>
+          <h2>${currentDrawLabel()} <span>${Hexcore2.state.settings.tierNames[tier]}池${draw && draw.reason ? ` / ${draw.reason}` : ''}</span></h2>
           <button class="subtle-btn" onclick="window.hexcoreUI.drawCards()">${Hexcore2.icon('refresh')}刷新池子</button>
         </div>
-        <div class="cards-grid">
+        <div class="cards-grid ${draw && draw.pickMode === 'open_pick' ? 'open-pick-grid' : ''}">
           ${cards.map((card, index) => `
             <button class="player-card ${index === selected ? 'selected' : ''} ${blinded ? 'blind-card' : ''}" onclick="window.hexcoreUI.selectCard(${index})">
               <span class="card-index">${index + 1}</span>
@@ -142,7 +149,7 @@
             </button>
           `).join('')}
         </div>
-        <p class="hint">提示：${captain ? `请选择一名选手加入 ${captain.name} 的队伍（${Hexcore2.selectors.teamSize(captain.id)}/4）` : '当前没有可操作队长'}</p>
+        <p class="hint">提示：${captain ? `${draw && draw.pickMode === 'open_pick' ? '开饭啦已展开当前池全部可选选手，' : ''}请选择一名选手加入 ${captain.name} 的队伍（${Hexcore2.selectors.teamSize(captain.id)}/4）` : '当前没有可操作队长'}</p>
       </section>
     `;
   }
@@ -196,12 +203,18 @@
   }
 
   function rulePanel() {
+    const captain = Hexcore2.selectors.currentCaptain();
     const reasons = currentExplanation();
+    const poolReasons = captain ? Hexcore2.poolEngine.explain(captain.id).reasons : [];
+    const lines = [
+      ...poolReasons.map(reason => ({ label: '卡池原因', body: reason })),
+      ...(reasons.length ? reasons : ['基础顺位：按当前轮次蛇形顺位执行']).map(reason => ({ label: '顺位原因', body: reason })),
+    ];
     return `
       <section class="rule-panel">
         <h2>规则说明</h2>
-        ${(reasons.length ? reasons : ['基础顺位：按当前轮次蛇形顺位执行']).map((reason, index) => `
-          <div class="rule-line ${index % 2 ? 'cyan' : 'amber'}"><strong>顺位原因</strong><span>${reason}</span></div>
+        ${lines.map((line, index) => `
+          <div class="rule-line ${index % 2 ? 'cyan' : 'amber'}"><strong>${line.label}</strong><span>${line.body}</span></div>
         `).join('')}
         <button class="subtle-btn full">查看完整规则</button>
       </section>

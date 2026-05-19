@@ -60,6 +60,21 @@
         state.draft.pickedThisTurn = true;
       }
 
+      if (hexcore.id === 'open-feast') {
+        const tier = Hexcore2.poolEngine.effectiveTier(captain.id);
+        const tierName = state.settings.tierNames[tier];
+        state.draft.currentDraw = Hexcore2.probabilityEngine.drawAll(captain.id, tier, '开饭啦：当前池全量自选');
+        state.draft.selectedSlot = 0;
+        state.draft.pickedThisTurn = false;
+        Hexcore2.eventStore.append(
+          state.draft.currentDraw.cards.length ? '海克斯自选' : '海克斯执行失败',
+          state.draft.currentDraw.cards.length
+            ? `${captain.name} 使用【开饭啦】，裁判可从${tierName}全部可用选手中选择1名`
+            : `${tierName}暂无可用选手，【开饭啦】无法生成自选列表`,
+          state.draft.currentDraw.cards.length ? 'info' : 'warn'
+        );
+      }
+
       hexcore.status = 'used';
       Hexcore2.eventStore.append('海克斯激活', `${captain.name} 使用【${hexcore.name}】`, hexcore.id === 'blind' ? 'warn' : 'info');
       return { ok: true, advanceTurn: hexcore.id === 'steady' };

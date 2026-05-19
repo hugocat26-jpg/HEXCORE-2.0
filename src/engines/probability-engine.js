@@ -22,5 +22,24 @@
         })),
       };
     },
+
+    drawAll(captainId, tier, reason) {
+      const candidates = Hexcore2.selectors.availablePlayers(tier)
+        .sort((a, b) => b.score - a.score);
+      return {
+        id: `draw_${Date.now()}`,
+        captainId,
+        round: Hexcore2.state.draft.round,
+        effectiveTier: tier,
+        pickMode: 'open_pick',
+        reason,
+        cards: candidates.map((player, index) => ({
+          slotId: `slot_${index + 1}`,
+          playerId: player.id,
+          visibleToReferee: true,
+          visibleToCaptain: !Hexcore2.hexcoreEngine.isBlinded(captainId),
+        })),
+      };
+    },
   };
 })(window);

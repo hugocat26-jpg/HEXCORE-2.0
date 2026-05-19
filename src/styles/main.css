@@ -412,6 +412,19 @@ h2 span {
   gap: 12px;
 }
 
+.cards-grid.open-pick-grid {
+  grid-template-columns: repeat(auto-fit, minmax(188px, 1fr));
+}
+
+.cards-grid.open-pick-grid .player-card {
+  min-height: 286px;
+  padding-inline: 16px;
+}
+
+.cards-grid.open-pick-grid .player-card strong {
+  font-size: 21px;
+}
+
 .player-card {
   position: relative;
   min-height: 344px;
