@@ -54,6 +54,21 @@
     }, 0) + 1;
   }
 
+  function allocatePlayerId(preferredId, usedIds) {
+    if (preferredId && /^p[\w-]+$/i.test(preferredId) && !usedIds.has(preferredId)) {
+      usedIds.add(preferredId);
+      return preferredId;
+    }
+    let number = nextPlayerId();
+    let id = `p${number}`;
+    while (usedIds.has(id)) {
+      number += 1;
+      id = `p${number}`;
+    }
+    usedIds.add(id);
+    return id;
+  }
+
   Hexcore2.actions = {
     selectCard(index) {
       Hexcore2.state.draft.selectedSlot = index;
@@ -797,6 +812,43 @@
       renderAndPersist();
     },
 
+    importPlayers(file) {
+      Hexcore2.exportService.readPlayerFile(file, players => {
+        snapshot('导入选手前');
+        const usedIds = new Set(Hexcore2.state.players.map(player => player.id));
+        const gameIds = new Set(Hexcore2.state.players.map(player => String(player.gameId || '').toLowerCase()).filter(Boolean));
+        let skipped = 0;
+        const imported = [];
+
+        players.forEach(player => {
+          const gameIdKey = String(player.gameId || '').toLowerCase();
+          if (gameIdKey && gameIds.has(gameIdKey)) {
+            skipped += 1;
+            return;
+          }
+          const nextPlayer = {
+            ...player,
+            id: allocatePlayerId(player.id, usedIds),
+          };
+          delete nextPlayer.teamId;
+          gameIds.add(gameIdKey);
+          imported.push(nextPlayer);
+        });
+
+        Hexcore2.state.players.push(...imported);
+        if (Hexcore2.normalizeState) Hexcore2.normalizeState(Hexcore2.state);
+        Hexcore2.eventStore.append(
+          '选手导入',
+          `导入 ${imported.length} 名选手${skipped ? `，跳过 ${skipped} 名重复游戏ID` : ''}`,
+          imported.length ? 'success' : 'warn'
+        );
+        renderAndPersist();
+      }, error => {
+        Hexcore2.eventStore.append('选手导入失败', error.message, 'warn');
+        Hexcore2.ui.render();
+      });
+    },
+
     savePlayer(playerId) {
       const player = Hexcore2.state.players.find(item => item.id === playerId);
       if (!player) return;
@@ -836,6 +888,29 @@
       snapshot(`切换选手状态前：${player.name}`);
       player.status = player.status === 'disabled' ? 'available' : 'disabled';
       Hexcore2.eventStore.append('选手库', `${player.name} 已${player.status === 'disabled' ? '禁用' : '恢复可选'}`, player.status === 'disabled' ? 'warn' : 'success');
+      renderAndPersist();
+    },
+
+    deletePlayer(playerId) {
+      const player = Hexcore2.state.players.find(item => item.id === playerId);
+      if (!player) return;
+      const confirmed = typeof confirm === 'function'
+        ? confirm(`确认删除选手 ${player.name}？若已入队，会同时从队伍中移除。`)
+        : true;
+      if (!confirmed) return;
+
+      snapshot(`删除选手前：${player.name}`);
+      Hexcore2.state.captains.forEach(captain => {
+        captain.team = captain.team.filter(id => id !== playerId);
+      });
+      Hexcore2.state.players = Hexcore2.state.players.filter(item => item.id !== playerId);
+      if (Hexcore2.state.draft.currentDraw) {
+        Hexcore2.state.draft.currentDraw.cards = Hexcore2.state.draft.currentDraw.cards.filter(card => card.playerId !== playerId);
+      }
+      Hexcore2.state.draft.runtimeEffects = Hexcore2.state.draft.runtimeEffects.filter(effect =>
+        effect.playerId !== playerId && effect.firstPlayerId !== playerId && effect.secondPlayerId !== playerId
+      );
+      Hexcore2.eventStore.append('选手库', `删除选手 ${player.name}`, 'warn');
       renderAndPersist();
     },
 

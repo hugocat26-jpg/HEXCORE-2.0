@@ -69,6 +69,85 @@
     });
   }
 
+  function splitCsvLine(line) {
+    const cells = [];
+    let current = '';
+    let quoted = false;
+    for (let index = 0; index < line.length; index += 1) {
+      const char = line[index];
+      const next = line[index + 1];
+      if (char === '"' && quoted && next === '"') {
+        current += '"';
+        index += 1;
+      } else if (char === '"') {
+        quoted = !quoted;
+      } else if (char === ',' && !quoted) {
+        cells.push(current.trim());
+        current = '';
+      } else {
+        current += char;
+      }
+    }
+    cells.push(current.trim());
+    return cells;
+  }
+
+  function normalizeImportedPlayer(row, index) {
+    const source = row && typeof row === 'object' ? row : {};
+    const tier = Math.max(1, Math.min(4, Number(source.tier || source.卡池 || source.pool || 1) || 1));
+    const score = Math.max(0, Math.min(120, Math.round(Number(source.score || source.评分 || 60) || 60)));
+    const status = String(source.status || source.状态 || 'available') === 'disabled' || String(source.status || source.状态) === '禁用'
+      ? 'disabled'
+      : 'available';
+    const name = String(source.name || source.名称 || source.playerName || '').trim();
+    if (!name) {
+      throw new Error(`第 ${index + 1} 行缺少选手名称`);
+    }
+
+    return {
+      id: String(source.id || source.ID || '').trim(),
+      name: name.slice(0, 32),
+      lane: String(source.lane || source.位置 || '未分配').trim().slice(0, 16),
+      gameId: String(source.gameId || source.游戏ID || source.uid || `IMPORT_${Date.now()}_${index}`).trim().slice(0, 40),
+      score,
+      tier,
+      kda: String(source.kda || source.KDA || '0.0').trim().slice(0, 12),
+      damage: String(source.damage || source.伤害 || '0K').trim().slice(0, 12),
+      winRate: String(source.winRate || source.胜率 || '0%').trim().slice(0, 12),
+      heroes: Array.isArray(source.heroes)
+        ? source.heroes.map(hero => String(hero).slice(0, 8)).slice(0, 5)
+        : String(source.heroes || source.英雄 || '待,定,位').split(/[，,|/]/).map(hero => hero.trim()).filter(Boolean).slice(0, 5),
+      status,
+    };
+  }
+
+  function parsePlayerImport(filename, text) {
+    const raw = String(text || '').trim();
+    if (!raw) throw new Error('导入文件为空');
+    const isJson = /\.json$/i.test(filename || '') || raw.startsWith('[') || raw.startsWith('{');
+    let rows;
+
+    if (isJson) {
+      const parsed = JSON.parse(raw);
+      rows = Array.isArray(parsed) ? parsed : parsed.players;
+      if (!Array.isArray(rows)) throw new Error('JSON 需为选手数组或包含 players 数组');
+    } else {
+      const lines = raw.split(/\r?\n/).filter(line => line.trim());
+      const headers = splitCsvLine(lines.shift() || '').map(header => header.trim());
+      rows = lines.map(line => {
+        const cells = splitCsvLine(line);
+        return headers.reduce((record, header, index) => {
+          record[header] = cells[index] || '';
+          return record;
+        }, {});
+      });
+    }
+
+    if (!rows.length) throw new Error('没有可导入的选手数据');
+    if (rows.length > 500) throw new Error('单次最多导入 500 名选手');
+    return rows.map(normalizeImportedPlayer);
+  }
+
   Hexcore2.exportService = {
     filteredEvents,
 
@@ -137,6 +216,28 @@
       };
       reader.onerror = () => {
         if (onError) onError(new Error('备份文件读取失败'));
+      };
+      reader.readAsText(file, 'utf-8');
+    },
+
+    parsePlayerImport,
+
+    readPlayerFile(file, onSuccess, onError) {
+      if (!file || typeof FileReader === 'undefined') {
+        if (onError) onError(new Error('当前环境不支持文件读取'));
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          onSuccess(parsePlayerImport(file.name || '', String(reader.result || '')));
+        } catch (error) {
+          if (onError) onError(error);
+        }
+      };
+      reader.onerror = () => {
+        if (onError) onError(new Error('选手文件读取失败'));
       };
       reader.readAsText(file, 'utf-8');
     },

@@ -498,6 +498,18 @@
   function playersPage() {
     const tierNames = Hexcore2.state.settings.tierNames;
     const filter = (Hexcore2.state.ui && Hexcore2.state.ui.playerFilter) || 'all';
+    const requiredByTier = [1, 2, 3, 4].reduce((result, tier) => {
+      const rounds = Hexcore2.state.settings.roundTiers.filter(item => Number(item) === tier).length;
+      result[tier] = rounds * Hexcore2.selectors.teamCount();
+      return result;
+    }, {});
+    const poolStats = [1, 2, 3, 4].map(tier => {
+      const players = Hexcore2.state.players.filter(player => player.tier === tier);
+      const enabled = players.filter(player => player.status !== 'disabled').length;
+      const available = players.filter(player => player.status === 'available').length;
+      const required = requiredByTier[tier] || 0;
+      return { tier, enabled, available, required, ok: enabled >= required };
+    });
     function visiblePlayer(player) {
       if (filter === 'all') return true;
       if (filter === 'available') return player.status === 'available';
@@ -525,7 +537,18 @@
               <option value="4" ${filter === '4' ? 'selected' : ''}>猛犸池</option>
             </select>
             <button class="primary-btn" onclick="window.hexcoreUI.addPlayer()">新增选手</button>
+            <button class="subtle-btn" onclick="document.getElementById('player-import-input').click()">导入 JSON/CSV</button>
+            <input id="player-import-input" type="file" accept=".json,.csv,application/json,text/csv" hidden onchange="window.hexcoreUI.importPlayers(this.files[0]); this.value = ''">
           </div>
+        </div>
+        <div class="pool-health-grid">
+          ${poolStats.map(stat => `
+            <div class="${stat.ok ? 'ok' : 'warn'}">
+              <span>${escapeHtml(tierNames[stat.tier])}</span>
+              <strong>${stat.enabled}/${stat.required}</strong>
+              <small>可选 ${stat.available} · ${stat.ok ? '数量足够' : '数量不足'}</small>
+            </div>
+          `).join('')}
         </div>
         <div class="pool-columns">
           ${[1, 2, 3, 4].map(tier => `
@@ -543,6 +566,7 @@
                     <div class="player-actions">
                       <button onclick="window.hexcoreUI.savePlayer('${player.id}')">保存</button>
                       <button class="${player.status === 'disabled' ? '' : 'danger-inline'}" onclick="window.hexcoreUI.togglePlayerDisabled('${player.id}')">${player.status === 'disabled' ? '恢复' : '禁用'}</button>
+                      <button class="danger-inline" onclick="window.hexcoreUI.deletePlayer('${player.id}')">删除</button>
                     </div>
                   </div>
                 `;

@@ -47,6 +47,12 @@ function createHarness() {
       this.parts = parts;
       this.options = options;
     },
+    FileReader: function FileReader() {
+      this.readAsText = file => {
+        this.result = file && file.content ? file.content : '';
+        if (this.onload) this.onload();
+      };
+    },
     URL: {
       createObjectURL() { return 'blob:test'; },
       revokeObjectURL() {},
@@ -185,6 +191,7 @@ function testUiNavigationAndHexButtons() {
   assert(!app.innerHTML.includes('useHexcore(" origin")'), '海克斯按钮不应生成被截断的 onclick 参数');
   H.actions.setActiveView('players');
   assert(app.innerHTML.includes('选手库') && app.innerHTML.includes('侏儒马池') && app.innerHTML.includes('setPlayerFilter'), '选手库页面应可筛选');
+  assert(app.innerHTML.includes('导入 JSON/CSV') && app.innerHTML.includes('pool-health-grid'), '选手库应提供导入和卡池容量检测');
   const beforePlayers = H.state.players.length;
   H.actions.addPlayer();
   assert(H.state.players.length === beforePlayers + 1, '选手库应能新增选手');
@@ -199,6 +206,15 @@ function testUiNavigationAndHexButtons() {
   assert(newPlayer.status === 'disabled', '选手库应能禁用可选选手');
   H.actions.togglePlayerDisabled(newPlayer.id);
   assert(newPlayer.status === 'available', '选手库应能恢复禁用选手');
+  H.actions.importPlayers({
+    name: 'players.csv',
+    content: 'name,lane,tier,score,gameId\nCSV选手,中路,3,91,CSV_001\n重复选手,上路,2,70,CSV_001',
+  });
+  assert(H.state.players.some(player => player.name === 'CSV选手' && player.tier === 3), '选手库应能导入CSV选手');
+  assert(H.state.players.filter(player => player.gameId === 'CSV_001').length === 1, '选手导入应跳过重复游戏ID');
+  const importedPlayer = H.state.players.find(player => player.name === 'CSV选手');
+  H.actions.deletePlayer(importedPlayer.id);
+  assert(!H.state.players.some(player => player.id === importedPlayer.id), '选手库应能删除选手');
   H.actions.setActiveView('hexcores');
   assert(app.innerHTML.includes('为该队长抽海克斯') && app.innerHTML.includes('removeHexcore') && app.innerHTML.includes('assignHexcoreToCaptain'), '海克斯库页面应提供裁判抽取、移除和指定分配入口');
   H.actions.setHexFilter('manual');

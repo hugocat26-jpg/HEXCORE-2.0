@@ -1199,6 +1199,42 @@ h2 span {
   gap: 12px;
 }
 
+.pool-health-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(160px, 1fr));
+  gap: 10px;
+  margin: 0 0 14px;
+}
+
+.pool-health-grid div {
+  display: grid;
+  gap: 5px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.025);
+  padding: 10px 12px;
+}
+
+.pool-health-grid div.ok {
+  border-color: rgba(31, 199, 123, 0.35);
+}
+
+.pool-health-grid div.warn {
+  border-color: rgba(255, 193, 94, 0.52);
+  background: rgba(255, 193, 94, 0.07);
+}
+
+.pool-health-grid span,
+.pool-health-grid small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.pool-health-grid strong {
+  color: var(--cyan);
+  font-size: 18px;
+}
+
 .pool-column h2 {
   margin-bottom: 10px;
   color: var(--cyan);
@@ -1950,6 +1986,7 @@ h2 span {
 
   .pool-columns,
   .metrics-grid,
+  .pool-health-grid,
   .system-summary {
     grid-template-columns: 1fr;
   }
