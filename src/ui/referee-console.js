@@ -74,6 +74,7 @@
             <button class="nav-item ${activeView === view ? 'active' : ''}" onclick="window.hexcoreUI.setActiveView('${view}')">
               ${icon(iconName)}
               <span>${label}</span>
+              ${view === 'teams' ? `<b class="nav-count">${teamCount} 队</b>` : ''}
             </button>
           `).join('')}
         </nav>

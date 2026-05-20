@@ -190,6 +190,28 @@ select:focus-visible {
   text-align: left;
 }
 
+.nav-item span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nav-count {
+  margin-left: auto;
+  min-width: 42px;
+  border: 1px solid rgba(25, 212, 240, 0.26);
+  border-radius: 999px;
+  background: rgba(25, 212, 240, 0.09);
+  color: #a9effa;
+  padding: 2px 8px;
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1.4;
+  text-align: center;
+  white-space: nowrap;
+}
+
 .nav-item.active {
   background: linear-gradient(90deg, rgba(0, 184, 216, 0.38), rgba(0, 184, 216, 0.1));
   border-color: rgba(25, 212, 240, 0.34);
