@@ -113,7 +113,7 @@
   function topbar() {
     const time = new Date().toLocaleTimeString('zh-CN', { hour12: false });
     const captain = Hexcore2.selectors.currentCaptain();
-    const tier = captain ? Hexcore2.poolEngine.effectiveTier(captain.id) : Math.max(1, Math.min(4, Hexcore2.state.draft.round));
+    const tier = captain ? Hexcore2.poolEngine.effectiveTier(captain.id) : Hexcore2.selectors.roundTier(Hexcore2.state.draft.round);
     const tierName = Hexcore2.state.settings.tierNames[tier];
     const statusText = Hexcore2.state.draft.phase === 'completed'
       ? '选秀已完成'
@@ -162,7 +162,7 @@
     const selected = Hexcore2.state.draft.selectedSlot;
     const blinded = captain ? Hexcore2.hexcoreEngine.isBlinded(captain.id) : false;
     const infoBoost = captain ? Hexcore2.hexcoreEngine.infoBoostFor(captain.id) : null;
-    const tier = captain ? Hexcore2.poolEngine.effectiveTier(captain.id) : Math.max(1, Math.min(4, Hexcore2.state.draft.round));
+    const tier = captain ? Hexcore2.poolEngine.effectiveTier(captain.id) : Hexcore2.selectors.roundTier(Hexcore2.state.draft.round);
     const draw = Hexcore2.state.draft.currentDraw;
     function teamOwnerName(player) {
       if (!player || !player.teamId) return '';
@@ -200,7 +200,7 @@
             </button>
           `).join('')}
         </div>
-        <p class="hint">提示：${captain ? `${draw && draw.pickMode === 'open_pick' ? '开饭啦已展开当前池全部可选选手，' : ''}${draw && draw.pickMode === 'hellhound' ? `本段限时 ${draw.timeLimitSeconds} 秒，超时可随机分配，` : ''}请选择一名选手加入 ${escapeHtml(captain.name)} 的队伍（${Hexcore2.selectors.teamSize(captain.id)}/4）` : '当前没有可操作队长'}</p>
+        <p class="hint">提示：${captain ? `${draw && draw.pickMode === 'open_pick' ? '开饭啦已展开当前池全部可选选手，' : ''}${draw && draw.pickMode === 'hellhound' ? `本段限时 ${draw.timeLimitSeconds} 秒，超时可随机分配，` : ''}请选择一名选手加入 ${escapeHtml(captain.name)} 的队伍（${Hexcore2.selectors.teamSize(captain.id)}/${Hexcore2.state.settings.playersPerTeam}）` : '当前没有可操作队长'}</p>
       </section>
     `;
   }
@@ -258,39 +258,40 @@
         <h2>${escapeHtml(captain.name)} 的海克斯</h2>
         <div class="hex-list">
           ${hexcores.map(hex => {
+            const globallyDisabled = !Hexcore2.selectors.isHexcoreEnabled(hex.id);
             const blindUsed = hex.id === 'blind' && Hexcore2.hexcoreEngine.blindUsedBy(captain.id);
             const snowUsed = hex.id === 'snow-cat' && Hexcore2.hexcoreEngine.snowCatUsedBy(captain.id);
             const pandoraDisabled = Hexcore2.hexcoreEngine.isDisabledByPandora(captain.id, hex.id);
-            const isUsed = hex.mode === 'passive' || (hex.status === 'used' && hex.id !== 'blind' && hex.id !== 'snow-cat') || blindUsed || snowUsed || pandoraDisabled;
+            const isUsed = globallyDisabled || hex.mode === 'passive' || (hex.status === 'used' && hex.id !== 'blind' && hex.id !== 'snow-cat') || blindUsed || snowUsed || pandoraDisabled;
             return `
               <div class="hex-row ${hex.type} ${hex.id === 'blind' || hex.id === 'order-swap' || hex.id === 'decompose-knowledge' || hex.id === 'lock-contract' ? 'targetable' : ''}">
                 <div class="hex-symbol">${Hexcore2.icon('hex')}</div>
                 <div>
                   <strong>${escapeHtml(hex.name)}</strong>
                   <p>${escapeHtml(hex.desc)}</p>
-                  <span>${pandoraDisabled ? '潘多拉魔盒：该效果失效' : (hex.mode === 'passive' ? '被动规则：自动生效' : (hex.id === 'blind' ? (blindUsed ? '本轮已使用' : '本轮可指定目标') : (hex.id === 'snow-cat' ? (snowUsed ? '本轮已使用' : '本轮可用') : `可用次数：${hex.status === 'used' ? 0 : hex.uses}`)))}</span>
-                  ${hex.id === 'blind' && !blindUsed ? `
+                  <span>${globallyDisabled ? '规则设置：已禁用' : (pandoraDisabled ? '潘多拉魔盒：该效果失效' : (hex.mode === 'passive' ? '被动规则：自动生效' : (hex.id === 'blind' ? (blindUsed ? '本轮已使用' : '本轮可指定目标') : (hex.id === 'snow-cat' ? (snowUsed ? '本轮已使用' : '本轮可用') : `可用次数：${hex.status === 'used' ? 0 : hex.uses}`))))}</span>
+                  ${hex.id === 'blind' && !blindUsed && !globallyDisabled ? `
                     <div class="target-grid">
                       ${blindTargets.map(target => `
                         <button onclick='window.hexcoreUI.useHexcore(${safeJsonString(hex.id)}, ${safeJsonString(target.id)})'>${escapeHtml(target.name)}</button>
                       `).join('') || '<span>本轮没有可致盲目标</span>'}
                     </div>
                   ` : ''}
-                  ${hex.id === 'order-swap' && hex.status !== 'used' ? `
+                  ${hex.id === 'order-swap' && hex.status !== 'used' && !globallyDisabled ? `
                     <div class="target-grid pair-grid">
                       ${swapPairs.map(([first, second]) => `
                         <button onclick='window.hexcoreUI.useHexcore(${safeJsonString(hex.id)}, ${safeJsonString(first.id)}, ${safeJsonString(second.id)})'>${escapeHtml(first.name)} ↔ ${escapeHtml(second.name)}</button>
                       `).join('')}
                     </div>
                   ` : ''}
-                  ${hex.id === 'decompose-knowledge' && hex.status !== 'used' ? `
+                  ${hex.id === 'decompose-knowledge' && hex.status !== 'used' && !globallyDisabled ? `
                     <div class="target-grid">
                       ${teamPlayers.map(player => `
                         <button onclick='window.hexcoreUI.useHexcore(${safeJsonString(hex.id)}, ${safeJsonString(player.id)})'>${escapeHtml(player.name)}</button>
                       `).join('') || '<span>至少拥有1名选手后可用</span>'}
                     </div>
                   ` : ''}
-                  ${hex.id === 'lock-contract' && hex.status !== 'used' ? `
+                  ${hex.id === 'lock-contract' && hex.status !== 'used' && !globallyDisabled ? `
                     <div class="target-grid pair-grid">
                       ${lockPairs.map(([first, second]) => `
                         <button onclick='window.hexcoreUI.useHexcore(${safeJsonString(hex.id)}, ${safeJsonString(first.id)}, ${safeJsonString(second.id)})'>${escapeHtml(first.name)} ↔ ${escapeHtml(second.name)}</button>
@@ -298,7 +299,7 @@
                     </div>
                   ` : ''}
                 </div>
-                <button class="${isUsed ? 'used' : ''}" ${hex.mode === 'passive' || blindUsed || snowUsed || pandoraDisabled || hex.id === 'blind' || hex.id === 'order-swap' || hex.id === 'decompose-knowledge' || hex.id === 'lock-contract' ? 'disabled' : ''} onclick='window.hexcoreUI.useHexcore(${safeJsonString(hex.id)})'>${hex.mode === 'passive' ? '被动' : (isUsed ? (pandoraDisabled ? '失效' : '已使用') : (hex.id === 'blind' || hex.id === 'order-swap' || hex.id === 'decompose-knowledge' || hex.id === 'lock-contract' ? '选下方' : '使用'))}</button>
+                <button class="${isUsed ? 'used' : ''}" ${globallyDisabled || hex.mode === 'passive' || blindUsed || snowUsed || pandoraDisabled || hex.id === 'blind' || hex.id === 'order-swap' || hex.id === 'decompose-knowledge' || hex.id === 'lock-contract' ? 'disabled' : ''} onclick='window.hexcoreUI.useHexcore(${safeJsonString(hex.id)})'>${globallyDisabled ? '已禁用' : (hex.mode === 'passive' ? '被动' : (isUsed ? (pandoraDisabled ? '失效' : '已使用') : (hex.id === 'blind' || hex.id === 'order-swap' || hex.id === 'decompose-knowledge' || hex.id === 'lock-contract' ? '选下方' : '使用')))}</button>
               </div>
             `;
           }).join('')}
@@ -377,9 +378,9 @@
           ${Hexcore2.state.captains.map((captain, index) => `
             <div class="team-mini ${currentCaptain && captain.id === currentCaptain.id ? 'active' : ''}">
               <div><span>${index + 1}</span><strong>${escapeHtml(captain.name)}</strong></div>
-              <p>${captain.team.length}/4</p>
+              <p>${captain.team.length}/${Hexcore2.state.settings.playersPerTeam}</p>
               <div class="slots">
-                ${Array.from({ length: 4 }, (_, slot) => `<i class="${slot < captain.team.length ? 'filled' : ''}"></i>`).join('')}
+                ${Array.from({ length: Hexcore2.state.settings.playersPerTeam }, (_, slot) => `<i class="${slot < captain.team.length ? 'filled' : ''}"></i>`).join('')}
               </div>
             </div>
           `).join('')}
@@ -402,6 +403,16 @@
 
   function teamsPage() {
     const currentCaptain = Hexcore2.selectors.currentCaptain();
+    const availablePlayers = Hexcore2.state.players
+      .filter(player => player.status === 'available')
+      .sort((a, b) => b.score - a.score);
+    function teamStatus(captain) {
+      if (captain.team.length > Hexcore2.state.settings.playersPerTeam) return { label: '异常：超员', className: 'warn' };
+      const missingPlayers = captain.team.filter(playerId => !playerById(playerId));
+      if (missingPlayers.length) return { label: '异常：缺失选手', className: 'warn' };
+      if (captain.team.length === Hexcore2.state.settings.playersPerTeam) return { label: '满员', className: 'done' };
+      return { label: `缺员 ${Hexcore2.state.settings.playersPerTeam - captain.team.length}`, className: 'pending' };
+    }
     return `
       ${pageHeader('队伍管理', '裁判可调整队伍、切换当前队长、重命名队长并处理队员归属。')}
       <section class="data-panel">
@@ -410,10 +421,23 @@
             <strong>当前 ${Hexcore2.selectors.teamCount()} 队，允许 ${Hexcore2.state.settings.minTeams}-${Hexcore2.state.settings.maxTeams} 队</strong>
             <span>队伍增删会重算基础顺位，并清空当前抽卡结果。</span>
           </div>
-          <button class="primary-btn" onclick="window.hexcoreUI.addCaptain()">${Hexcore2.icon('team')}新增队伍</button>
+          <div class="toolbar-actions">
+            <input id="teams-team-count" type="number" min="${Hexcore2.state.settings.minTeams}" max="${Hexcore2.state.settings.maxTeams}" value="${Hexcore2.selectors.teamCount()}" aria-label="队伍数量">
+            <button class="subtle-btn" onclick="window.hexcoreUI.updateTeamCountFromTeams()">应用数量</button>
+            <button class="primary-btn" onclick="window.hexcoreUI.addCaptain()">${Hexcore2.icon('team')}新增队伍</button>
+          </div>
+        </div>
+        <div class="metrics-grid">
+          <div><span>满员队伍</span><strong>${Hexcore2.state.captains.filter(captain => captain.team.length === Hexcore2.state.settings.playersPerTeam).length}</strong></div>
+          <div><span>缺员队伍</span><strong>${Hexcore2.state.captains.filter(captain => captain.team.length < Hexcore2.state.settings.playersPerTeam).length}</strong></div>
+          <div><span>异常队伍</span><strong>${Hexcore2.state.captains.filter(captain => captain.team.length > Hexcore2.state.settings.playersPerTeam || captain.team.some(playerId => !playerById(playerId))).length}</strong></div>
+          <div><span>可补录选手</span><strong>${availablePlayers.length}</strong></div>
         </div>
         <div class="data-grid team-grid">
-          ${Hexcore2.state.captains.map((captain, index) => `
+          ${Hexcore2.state.captains.map((captain, index) => {
+            const basePosition = Hexcore2.state.draft.baseOrder.indexOf(captain.id) + 1;
+            const status = teamStatus(captain);
+            return `
             <article class="data-card ${currentCaptain && currentCaptain.id === captain.id ? 'active-card' : ''}">
               <div class="data-card-head">
                 <span>${index + 1}</span>
@@ -422,8 +446,15 @@
                   <input id="captain-name-${captain.id}" value="${escapeHtml(captain.name)}" aria-label="${escapeHtml(captain.name)} 队长名称">
                 </label>
               </div>
-              <p>顺位记录：${escapeHtml(captain.record)}</p>
+              <p>状态：<em class="${status.className}">${escapeHtml(status.label)}</em></p>
+              <p>顺位记录：${escapeHtml(captain.record)} / 基础顺位第 ${basePosition}</p>
               <p>队伍人数：${captain.team.length}/${Hexcore2.state.settings.playersPerTeam}</p>
+              <div class="order-tools">
+                <button onclick="window.hexcoreUI.moveCaptainOrder('${captain.id}', 'up')">上移</button>
+                <button onclick="window.hexcoreUI.moveCaptainOrder('${captain.id}', 'down')">下移</button>
+                <label><small>设为第</small><input id="captain-order-${captain.id}" type="number" min="1" max="${Hexcore2.state.captains.length}" value="${basePosition}"></label>
+                <button onclick="window.hexcoreUI.setCaptainOrderPosition('${captain.id}')">应用顺位</button>
+              </div>
               <div class="member-list">
                 ${captain.team.map(playerId => {
                   const player = playerById(playerId);
@@ -435,13 +466,21 @@
                   ` : '';
                 }).join('') || '<span>暂无队员</span>'}
               </div>
+              <div class="backfill-tools">
+                <select id="team-add-player-${captain.id}" aria-label="${escapeHtml(captain.name)} 补录选手">
+                  <option value="">选择可补录选手</option>
+                  ${availablePlayers.map(player => `<option value="${player.id}">${escapeHtml(player.name)} · ${escapeHtml(player.lane || '未知')} · ${escapeHtml(Hexcore2.state.settings.tierNames[player.tier])} · ${player.score}</option>`).join('')}
+                </select>
+                <button onclick="window.hexcoreUI.assignPlayerToTeam('${captain.id}')">补录队员</button>
+              </div>
               <div class="card-actions">
                 <button onclick="window.hexcoreUI.setCurrentCaptain('${captain.id}')">设为当前</button>
                 <button onclick="window.hexcoreUI.saveCaptainName('${captain.id}')">保存名称</button>
                 <button class="danger-inline" onclick="window.hexcoreUI.removeCaptain('${captain.id}')">删除</button>
               </div>
             </article>
-          `).join('')}
+          `;
+          }).join('')}
         </div>
       </section>
     `;
@@ -586,12 +625,12 @@
         </div>
         ${turnOrder()}
         <div class="schedule-matrix">
-          <div class="schedule-row schedule-head">
+          <div class="schedule-row schedule-head" style="grid-template-columns: minmax(160px, 1.2fr) repeat(${Hexcore2.state.draft.maxRounds}, minmax(120px, 1fr));">
             <strong>队长</strong>
             ${Array.from({ length: Hexcore2.state.draft.maxRounds }, (_, index) => `<strong>第 ${index + 1} 轮</strong>`).join('')}
           </div>
           ${Hexcore2.state.captains.map(captain => `
-            <div class="schedule-row">
+            <div class="schedule-row" style="grid-template-columns: minmax(160px, 1.2fr) repeat(${Hexcore2.state.draft.maxRounds}, minmax(120px, 1fr));">
               <strong>${escapeHtml(captain.name)}</strong>
               ${Array.from({ length: Hexcore2.state.draft.maxRounds }, (_, index) => {
                 const round = index + 1;
@@ -611,6 +650,8 @@
   }
 
   function rulesPage() {
+    const tierOptions = [1, 2, 3, 4].map(tier => `<option value="${tier}">${escapeHtml(Hexcore2.state.settings.tierNames[tier])}</option>`).join('');
+    const disabledHexcores = new Set(Hexcore2.state.settings.disabledHexcores || []);
     return `
       ${pageHeader('规则设置', '当前版本固定为裁判代执行，保留多人登录鉴权与队长自抽扩展口。')}
       <section class="data-panel">
@@ -624,16 +665,83 @@
             <input id="rules-players-per-team" type="number" min="1" max="8" value="${Hexcore2.state.settings.playersPerTeam}">
           </label>
           <label>
+            <span>最大轮数</span>
+            <input id="rules-max-rounds" type="number" min="1" max="8" value="${Hexcore2.state.draft.maxRounds}">
+          </label>
+          <label>
             <span>当前轮次</span>
             <input id="rules-current-round" type="number" min="1" max="${Hexcore2.state.draft.maxRounds}" value="${Hexcore2.state.draft.round}">
           </label>
+          <label>
+            <span>基础抽卡张数</span>
+            <input id="rules-draw-count" type="number" min="1" max="8" value="${Hexcore2.state.settings.drawCount}">
+          </label>
+          <label>
+            <span>自动随机策略</span>
+            <select id="rules-auto-random-strategy">
+              <option value="balanced" ${Hexcore2.state.settings.autoRandomStrategy === 'balanced' ? 'selected' : ''}>均衡随机</option>
+              <option value="top_scored" ${Hexcore2.state.settings.autoRandomStrategy === 'top_scored' ? 'selected' : ''}>优先高分</option>
+              <option value="low_scored" ${Hexcore2.state.settings.autoRandomStrategy === 'low_scored' ? 'selected' : ''}>优先低分</option>
+            </select>
+          </label>
+          <label>
+            <span>超时策略</span>
+            <select id="rules-timeout-strategy">
+              <option value="random_available" ${Hexcore2.state.settings.timeoutStrategy === 'random_available' ? 'selected' : ''}>随机可选</option>
+              <option value="highest_score" ${Hexcore2.state.settings.timeoutStrategy === 'highest_score' ? 'selected' : ''}>最高评分</option>
+              <option value="lowest_score" ${Hexcore2.state.settings.timeoutStrategy === 'lowest_score' ? 'selected' : ''}>最低评分</option>
+            </select>
+          </label>
           <button class="primary-btn" onclick="window.hexcoreUI.updateRules()">保存规则并重算流程</button>
+          <button class="subtle-btn" onclick="window.hexcoreUI.saveRuleTemplate()">保存为模板</button>
+        </div>
+        <div class="round-tier-editor">
+          <h2>每轮卡池顺序</h2>
+          <div class="round-tier-grid">
+            ${Array.from({ length: Hexcore2.state.draft.maxRounds }, (_, index) => {
+              const round = index + 1;
+              const tier = Hexcore2.selectors.roundTier(round);
+              return `
+                <label>
+                  <span>第 ${round} 轮</span>
+                  <select id="rules-round-tier-${round}">
+                    ${tierOptions.replace(`value="${tier}"`, `value="${tier}" selected`)}
+                  </select>
+                </label>
+              `;
+            }).join('')}
+          </div>
         </div>
         <div class="rules-grid">
           <div class="rule-block"><strong>队伍数量</strong><span>${Hexcore2.state.settings.minTeams}-${Hexcore2.state.settings.maxTeams} 队，当前 ${Hexcore2.selectors.teamCount()} 队。</span></div>
           <div class="rule-block"><strong>队伍容量</strong><span>每队 ${Hexcore2.state.settings.playersPerTeam} 名选手。</span></div>
+          <div class="rule-block"><strong>基础抽卡</strong><span>每次基础抽 ${Hexcore2.state.settings.drawCount} 张，海克斯可继续叠加。</span></div>
           <div class="rule-block"><strong>执行模式</strong><span>当前由裁判代抽、代选、代用海克斯。</span></div>
           <div class="rule-block"><strong>旧购买逻辑</strong><span>已取消资源购买卡牌流程，抽卡只由规则、顺位、卡池和海克斯效果驱动。</span></div>
+        </div>
+        <div class="hex-toggle-panel">
+          <h2>海克斯启用控制</h2>
+          <div class="hex-toggle-grid">
+            ${Hexcore2.sampleData.hexcores.map(hex => `
+              <article class="hex-toggle-card ${disabledHexcores.has(hex.id) ? 'disabled-player' : ''}">
+                <div>
+                  <strong>${escapeHtml(hex.name)}</strong>
+                  <span>${disabledHexcores.has(hex.id) ? '已禁用' : '启用中'} / ${hex.mode === 'passive' ? '被动' : '手动'}</span>
+                </div>
+                <p>${escapeHtml(hex.desc)}</p>
+                <button class="${disabledHexcores.has(hex.id) ? '' : 'danger-inline'}" onclick="window.hexcoreUI.toggleHexcoreEnabled('${hex.id}')">${disabledHexcores.has(hex.id) ? '启用' : '禁用'}</button>
+              </article>
+            `).join('')}
+          </div>
+        </div>
+        <div class="rule-template-panel">
+          <h2>已保存模板</h2>
+          ${(Hexcore2.state.settings.ruleTemplates || []).map(template => `
+            <div class="template-row">
+              <strong>${escapeHtml(template.name)}</strong>
+              <span>${escapeHtml(template.savedAt)} / ${template.teamCount} 队 / 每队 ${template.playersPerTeam} 人 / ${template.maxRounds} 轮</span>
+            </div>
+          `).join('') || '<div class="empty-log">暂无模板</div>'}
         </div>
       </section>
     `;

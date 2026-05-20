@@ -96,7 +96,7 @@
 
       const tier = Hexcore2.poolEngine.effectiveTier(captain.id);
       const drawReasons = Hexcore2.hexcoreEngine.drawReasons(captain.id);
-      const drawCount = 3 + Hexcore2.hexcoreEngine.extraDrawCount(captain.id);
+      const drawCount = Hexcore2.state.settings.drawCount + Hexcore2.hexcoreEngine.extraDrawCount(captain.id);
       Hexcore2.state.draft.currentDraw = Hexcore2.probabilityEngine.draw(captain.id, tier, drawCount);
       Hexcore2.state.draft.currentDraw.reason = drawReasons.join('；');
       Hexcore2.state.draft.selectedSlot = 0;
@@ -315,6 +315,7 @@
       const owned = new Set((Hexcore2.state.hexcoreAssignments[captain.id] || []).map(hex => hex.id));
       const candidates = Hexcore2.sampleData.hexcores
         .filter(hex => !owned.has(hex.id))
+        .filter(hex => Hexcore2.selectors.isHexcoreEnabled(hex.id))
         .filter(hex => hex.status !== 'passive' || hex.mode === 'passive');
       if (!candidates.length) {
         Hexcore2.eventStore.append('抽取海克斯失败', `${captain.name} 没有可抽取的新海克斯`, 'warn');
@@ -499,15 +500,134 @@
       renderAndPersist();
     },
 
-    updateRules() {
-      const teamCountInput = document.getElementById('rules-team-count');
-      const playersPerTeamInput = document.getElementById('rules-players-per-team');
-      const roundInput = document.getElementById('rules-current-round');
-      const teamCount = Number(teamCountInput && teamCountInput.value);
-      const playersPerTeam = Number(playersPerTeamInput && playersPerTeamInput.value);
-      const round = Number(roundInput && roundInput.value);
+    assignPlayerToTeam(captainId, playerId) {
+      const captain = Hexcore2.state.captains.find(item => item.id === captainId);
+      const selectedPlayerId = playerId || (document.getElementById(`team-add-player-${captainId}`) || {}).value;
+      const player = Hexcore2.state.players.find(item => item.id === selectedPlayerId);
+      if (!captain || !player) {
+        Hexcore2.eventStore.append('补录队员失败', '请选择有效队伍和选手', 'warn');
+        Hexcore2.ui.render();
+        return;
+      }
+      if (captain.team.length >= Hexcore2.state.settings.playersPerTeam) {
+        Hexcore2.eventStore.append('补录队员失败', `${captain.name} 已满员`, 'warn');
+        Hexcore2.ui.render();
+        return;
+      }
+      if (player.status !== 'available') {
+        Hexcore2.eventStore.append('补录队员失败', `${player.name} 当前不可选`, 'warn');
+        Hexcore2.ui.render();
+        return;
+      }
+
+      snapshot(`补录队员前：${captain.name}`);
+      Hexcore2.assignmentEngine.assign(captain.id, player.id, 'manual_backfill');
+      Hexcore2.eventStore.append('队伍管理', `裁判为 ${captain.name} 补录队员 ${player.name}`, 'success');
+      renderAndPersist();
+    },
+
+    moveCaptainOrder(captainId, direction) {
+      const order = Hexcore2.state.draft.baseOrder;
+      const index = order.indexOf(captainId);
+      const targetIndex = direction === 'up' ? index - 1 : index + 1;
+      const captain = Hexcore2.state.captains.find(item => item.id === captainId);
+      if (index < 0 || targetIndex < 0 || targetIndex >= order.length || !captain) {
+        Hexcore2.eventStore.append('顺位调整失败', '目标顺位无效', 'warn');
+        Hexcore2.ui.render();
+        return;
+      }
+
+      snapshot(`调整基础顺位前：${captain.name}`);
+      const [item] = order.splice(index, 1);
+      order.splice(targetIndex, 0, item);
+      normalizeAfterConfigChange();
+      Hexcore2.eventStore.append('队伍管理', `${captain.name} 基础顺位调整为第 ${targetIndex + 1}`, 'warn');
+      renderAndPersist();
+    },
+
+    setCaptainOrderPosition(captainId) {
+      const input = document.getElementById(`captain-order-${captainId}`);
+      const position = Number(input && input.value);
+      const order = Hexcore2.state.draft.baseOrder;
+      const index = order.indexOf(captainId);
+      const captain = Hexcore2.state.captains.find(item => item.id === captainId);
+      if (!Number.isInteger(position) || position < 1 || position > order.length || index < 0 || !captain) {
+        Hexcore2.eventStore.append('顺位调整失败', `基础顺位必须在 1-${order.length} 之间`, 'warn');
+        Hexcore2.ui.render();
+        return;
+      }
+
+      snapshot(`设置基础顺位前：${captain.name}`);
+      const [item] = order.splice(index, 1);
+      order.splice(position - 1, 0, item);
+      normalizeAfterConfigChange();
+      Hexcore2.eventStore.append('队伍管理', `${captain.name} 基础顺位设置为第 ${position}`, 'warn');
+      renderAndPersist();
+    },
+
+    updateTeamCountFromTeams() {
+      const input = document.getElementById('teams-team-count');
+      const teamCount = Number(input && input.value);
       const minTeams = Hexcore2.state.settings.minTeams;
       const maxTeams = Hexcore2.state.settings.maxTeams;
+      if (!Number.isInteger(teamCount) || teamCount < minTeams || teamCount > maxTeams) {
+        Hexcore2.eventStore.append('队伍数量失败', `队伍数量必须在 ${minTeams}-${maxTeams} 之间`, 'warn');
+        Hexcore2.ui.render();
+        return;
+      }
+      const confirmed = typeof confirm === 'function'
+        ? confirm('队伍数量修改会重算流程并清空当前抽卡结果，确认保存？')
+        : true;
+      if (!confirmed) return;
+
+      snapshot('队伍数量调整前');
+      while (Hexcore2.state.captains.length < teamCount) {
+        const number = nextCaptainNumber();
+        const captain = { id: `c${number}`, name: `C${number} 新队长`, record: '待定', team: [] };
+        Hexcore2.state.captains.push(captain);
+        Hexcore2.state.hexcoreAssignments[captain.id] = [];
+        Hexcore2.state.draft.baseOrder.push(captain.id);
+      }
+      while (Hexcore2.state.captains.length > teamCount) {
+        const captain = Hexcore2.state.captains[Hexcore2.state.captains.length - 1];
+        captain.team.forEach(playerId => {
+          const player = Hexcore2.state.players.find(item => item.id === playerId);
+          if (player) {
+            player.status = 'available';
+            delete player.teamId;
+          }
+        });
+        Hexcore2.state.captains.pop();
+        delete Hexcore2.state.hexcoreAssignments[captain.id];
+        Hexcore2.state.draft.baseOrder = Hexcore2.state.draft.baseOrder.filter(id => id !== captain.id);
+      }
+      normalizeAfterConfigChange();
+      Hexcore2.eventStore.append('队伍管理', `队伍数量调整为 ${teamCount} 队`, 'success');
+      renderAndPersist();
+    },
+
+    updateRules(fromTeamPage = false) {
+      const teamCountInput = document.getElementById('rules-team-count');
+      const teamPageCountInput = document.getElementById('teams-team-count');
+      const playersPerTeamInput = document.getElementById('rules-players-per-team');
+      const roundInput = document.getElementById('rules-current-round');
+      const maxRoundsInput = document.getElementById('rules-max-rounds');
+      const drawCountInput = document.getElementById('rules-draw-count');
+      const autoRandomStrategyInput = document.getElementById('rules-auto-random-strategy');
+      const timeoutStrategyInput = document.getElementById('rules-timeout-strategy');
+      const teamCount = Number((teamCountInput && teamCountInput.value) || (teamPageCountInput && teamPageCountInput.value));
+      const playersPerTeam = Number(playersPerTeamInput && playersPerTeamInput.value);
+      const round = Number(roundInput && roundInput.value);
+      const maxRounds = Number(maxRoundsInput && maxRoundsInput.value);
+      const drawCount = Number(drawCountInput && drawCountInput.value);
+      const minTeams = Hexcore2.state.settings.minTeams;
+      const maxTeams = Hexcore2.state.settings.maxTeams;
+      const nextMaxRounds = Number.isInteger(maxRounds) ? maxRounds : Hexcore2.state.draft.maxRounds;
+      const nextDrawCount = Number.isInteger(drawCount) ? drawCount : Hexcore2.state.settings.drawCount;
+      const roundTiers = Array.from({ length: nextMaxRounds }, (_, index) => {
+        const input = document.getElementById(`rules-round-tier-${index + 1}`);
+        return Number(input && input.value) || Hexcore2.selectors.roundTier(index + 1);
+      });
 
       if (!Number.isInteger(teamCount) || teamCount < minTeams || teamCount > maxTeams) {
         Hexcore2.eventStore.append('规则保存失败', `队伍数量必须在 ${minTeams}-${maxTeams} 之间`, 'warn');
@@ -519,11 +639,30 @@
         Hexcore2.ui.render();
         return;
       }
-      if (!Number.isInteger(round) || round < 1 || round > Hexcore2.state.draft.maxRounds) {
-        Hexcore2.eventStore.append('规则保存失败', `当前轮次必须在 1-${Hexcore2.state.draft.maxRounds} 之间`, 'warn');
+      if (!Number.isInteger(nextMaxRounds) || nextMaxRounds < 1 || nextMaxRounds > 8) {
+        Hexcore2.eventStore.append('规则保存失败', '最大轮数必须在 1-8 之间', 'warn');
         Hexcore2.ui.render();
         return;
       }
+      if (!Number.isInteger(round) || round < 1 || round > nextMaxRounds) {
+        Hexcore2.eventStore.append('规则保存失败', `当前轮次必须在 1-${nextMaxRounds} 之间`, 'warn');
+        Hexcore2.ui.render();
+        return;
+      }
+      if (!Number.isInteger(nextDrawCount) || nextDrawCount < 1 || nextDrawCount > 8) {
+        Hexcore2.eventStore.append('规则保存失败', '基础抽卡张数必须在 1-8 之间', 'warn');
+        Hexcore2.ui.render();
+        return;
+      }
+      if (roundTiers.some(tier => !Number.isInteger(tier) || tier < 1 || tier > 4)) {
+        Hexcore2.eventStore.append('规则保存失败', '每轮卡池必须在 1-4 之间', 'warn');
+        Hexcore2.ui.render();
+        return;
+      }
+      const confirmed = typeof confirm === 'function'
+        ? confirm(`${fromTeamPage ? '队伍数量' : '规则'}修改会重算流程并清空当前抽卡结果，确认保存？`)
+        : true;
+      if (!confirmed) return;
 
       snapshot('规则设置保存前');
       while (Hexcore2.state.captains.length < teamCount) {
@@ -547,9 +686,53 @@
         Hexcore2.state.draft.baseOrder = Hexcore2.state.draft.baseOrder.filter(id => id !== captain.id);
       }
       Hexcore2.state.settings.playersPerTeam = playersPerTeam;
+      Hexcore2.state.settings.drawCount = nextDrawCount;
+      Hexcore2.state.settings.roundTiers = roundTiers;
+      Hexcore2.state.settings.autoRandomStrategy = (autoRandomStrategyInput && autoRandomStrategyInput.value) || Hexcore2.state.settings.autoRandomStrategy;
+      Hexcore2.state.settings.timeoutStrategy = (timeoutStrategyInput && timeoutStrategyInput.value) || Hexcore2.state.settings.timeoutStrategy;
       Hexcore2.state.draft.round = round;
+      Hexcore2.state.draft.maxRounds = nextMaxRounds;
       normalizeAfterConfigChange();
-      Hexcore2.eventStore.append('规则设置', `保存规则：${teamCount} 队，每队 ${playersPerTeam} 人，当前第 ${round} 轮`, 'success');
+      Hexcore2.eventStore.append('规则设置', `保存规则：${teamCount} 队，每队 ${playersPerTeam} 人，${nextMaxRounds} 轮，基础抽 ${nextDrawCount} 张`, 'success');
+      renderAndPersist();
+    },
+
+    toggleHexcoreEnabled(hexcoreId) {
+      const hexcore = Hexcore2.sampleData.hexcores.find(item => item.id === hexcoreId);
+      if (!hexcore) return;
+      const disabled = new Set(Hexcore2.state.settings.disabledHexcores || []);
+      const willDisable = !disabled.has(hexcoreId);
+      const confirmed = typeof confirm === 'function'
+        ? confirm(`${willDisable ? '禁用' : '启用'}【${hexcore.name}】会影响后续海克斯执行，确认修改？`)
+        : true;
+      if (!confirmed) return;
+
+      snapshot(`切换海克斯启用状态前：${hexcore.name}`);
+      if (willDisable) disabled.add(hexcoreId);
+      else disabled.delete(hexcoreId);
+      Hexcore2.state.settings.disabledHexcores = Array.from(disabled);
+      Hexcore2.turnOrderEngine.recompute();
+      Hexcore2.eventStore.append('规则设置', `${willDisable ? '禁用' : '启用'}海克斯【${hexcore.name}】`, willDisable ? 'warn' : 'success');
+      renderAndPersist();
+    },
+
+    saveRuleTemplate() {
+      const name = prompt('请输入规则模板名称', `规则模板 ${new Date().toLocaleTimeString('zh-CN', { hour12: false })}`);
+      if (!name || !name.trim()) return;
+      snapshot('保存规则模板前');
+      Hexcore2.state.settings.ruleTemplates = Hexcore2.state.settings.ruleTemplates || [];
+      Hexcore2.state.settings.ruleTemplates.unshift({
+        name: name.trim(),
+        savedAt: new Date().toLocaleString('zh-CN', { hour12: false }),
+        teamCount: Hexcore2.selectors.teamCount(),
+        playersPerTeam: Hexcore2.state.settings.playersPerTeam,
+        maxRounds: Hexcore2.state.draft.maxRounds,
+        drawCount: Hexcore2.state.settings.drawCount,
+        roundTiers: [...Hexcore2.state.settings.roundTiers],
+        disabledHexcores: [...Hexcore2.state.settings.disabledHexcores],
+      });
+      Hexcore2.state.settings.ruleTemplates = Hexcore2.state.settings.ruleTemplates.slice(0, 8);
+      Hexcore2.eventStore.append('规则设置', `保存规则模板「${name.trim()}」`, 'success');
       renderAndPersist();
     },
 

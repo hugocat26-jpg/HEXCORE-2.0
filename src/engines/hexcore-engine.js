@@ -19,7 +19,8 @@
   ];
 
   function hasHexcore(captainId, hexcoreId) {
-    return (Hexcore2.state.hexcoreAssignments[captainId] || []).some(hexcore => hexcore.id === hexcoreId);
+    return Hexcore2.selectors.isHexcoreEnabled(hexcoreId)
+      && (Hexcore2.state.hexcoreAssignments[captainId] || []).some(hexcore => hexcore.id === hexcoreId);
   }
 
   function blindEffectForSource(captainId) {
@@ -67,6 +68,10 @@
 
       const hexcore = (state.hexcoreAssignments[captain.id] || []).find(item => item.id === hexcoreId);
       if (!hexcore || hexcore.mode === 'passive') return { ok: false };
+      if (!Hexcore2.selectors.isHexcoreEnabled(hexcore.id)) {
+        Hexcore2.eventStore.append('海克斯执行失败', `【${hexcore.name}】已被规则设置禁用`, 'warn');
+        return { ok: false };
+      }
       if (hexcore.status === 'used' && hexcore.id !== 'blind' && hexcore.id !== 'snow-cat') return { ok: false };
       if (this.isDisabledByPandora(captain.id, hexcore.id)) {
         Hexcore2.eventStore.append('海克斯执行失败', `潘多拉魔盒禁用了【${hexcore.name}】这类自主选人或抽卡效果`, 'warn');

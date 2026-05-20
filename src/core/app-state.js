@@ -35,6 +35,12 @@
       maxTeams: 20,
       totalTeams: seed.captains.length,
       playersPerTeam: 4,
+      drawCount: 3,
+      roundTiers: [1, 2, 3, 4],
+      autoRandomStrategy: 'balanced',
+      timeoutStrategy: 'random_available',
+      disabledHexcores: [],
+      ruleTemplates: [],
       tierNames: { 1: '侏儒马', 2: '中等马', 3: '上等马', 4: '猛犸' },
     },
     captains: clone(seed.captains),
@@ -68,6 +74,14 @@
     state.settings.minTeams = state.settings.minTeams || defaultState.settings.minTeams;
     state.settings.maxTeams = state.settings.maxTeams || defaultState.settings.maxTeams;
     state.settings.playersPerTeam = state.settings.playersPerTeam || defaultState.settings.playersPerTeam;
+    state.settings.drawCount = state.settings.drawCount || defaultState.settings.drawCount;
+    state.settings.roundTiers = Array.isArray(state.settings.roundTiers) && state.settings.roundTiers.length
+      ? state.settings.roundTiers.map(tier => Math.max(1, Math.min(4, Number(tier) || 1)))
+      : [...defaultState.settings.roundTiers];
+    state.settings.autoRandomStrategy = state.settings.autoRandomStrategy || defaultState.settings.autoRandomStrategy;
+    state.settings.timeoutStrategy = state.settings.timeoutStrategy || defaultState.settings.timeoutStrategy;
+    state.settings.disabledHexcores = Array.isArray(state.settings.disabledHexcores) ? state.settings.disabledHexcores : [];
+    state.settings.ruleTemplates = Array.isArray(state.settings.ruleTemplates) ? state.settings.ruleTemplates : [];
     state.captains = state.captains || clone(defaultState.captains);
     state.settings.totalTeams = state.captains.length;
     state.players = state.players || clone(defaultState.players);
@@ -76,6 +90,14 @@
     state.draft = state.draft || clone(defaultState.draft);
     state.draft.baseOrder = reconcileBaseOrder(state.captains, state.draft.baseOrder);
     state.draft.maxRounds = state.draft.maxRounds || defaultState.draft.maxRounds;
+    if (state.settings.roundTiers.length < state.draft.maxRounds) {
+      while (state.settings.roundTiers.length < state.draft.maxRounds) {
+        state.settings.roundTiers.push(Math.min(4, state.settings.roundTiers.length + 1));
+      }
+    }
+    if (state.settings.roundTiers.length > state.draft.maxRounds) {
+      state.settings.roundTiers = state.settings.roundTiers.slice(0, state.draft.maxRounds);
+    }
     state.draft.phase = state.draft.phase || 'captain_action';
     state.draft.currentOrder = state.draft.currentOrder || [...state.draft.baseOrder];
     state.draft.currentIndex = Number.isInteger(state.draft.currentIndex) ? state.draft.currentIndex : 0;
@@ -114,6 +136,14 @@
     },
     teamCount() {
       return Hexcore2.state.captains.length;
+    },
+    isHexcoreEnabled(hexcoreId) {
+      return !(Hexcore2.state.settings.disabledHexcores || []).includes(hexcoreId);
+    },
+    roundTier(round) {
+      const tiers = Hexcore2.state.settings.roundTiers || [1, 2, 3, 4];
+      const tier = tiers[Math.max(0, Number(round) - 1)] || Math.min(4, Number(round) || 1);
+      return Math.max(1, Math.min(4, Number(tier) || 1));
     },
   };
 })(window);

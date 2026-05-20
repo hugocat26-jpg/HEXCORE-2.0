@@ -2,7 +2,8 @@
   const Hexcore2 = global.Hexcore2 || (global.Hexcore2 = {});
 
   function hasHexcore(captainId, hexcoreId) {
-    return (Hexcore2.state.hexcoreAssignments[captainId] || []).some(hexcore => hexcore.id === hexcoreId);
+    return Hexcore2.selectors.isHexcoreEnabled(hexcoreId)
+      && (Hexcore2.state.hexcoreAssignments[captainId] || []).some(hexcore => hexcore.id === hexcoreId);
   }
 
   function swappedRound(round) {
@@ -16,17 +17,18 @@
   function effectiveTierAtRound(captainId, round) {
     const state = Hexcore2.state;
     const baseRound = swappedRound(round);
+    const baseTierByRule = Hexcore2.selectors.roundTier(baseRound);
     if (hasHexcore(captainId, 'giant-slayer')) {
-      if (baseRound === 1) return 4;
-      if (baseRound === 4) return 1;
+      if (baseTierByRule === 1) return 4;
+      if (baseTierByRule === 4) return 1;
     }
 
     const reverseEffect = state.draft.runtimeEffects.find(effect =>
       effect.type === 'reverse_pool_order' && effect.captainId === captainId
     );
     const tier = (reverseEffect || hasHexcore(captainId, 'ballroom-queen'))
-      ? 5 - baseRound
-      : baseRound;
+      ? 5 - baseTierByRule
+      : baseTierByRule;
     return Math.max(1, Math.min(4, tier));
   }
 
@@ -42,9 +44,9 @@
     explain(captainId) {
       const state = Hexcore2.state;
       const roundAfterGlobal = swappedRound(state.draft.round);
-      const baseTier = Math.max(1, Math.min(4, roundAfterGlobal));
+      const baseTier = Hexcore2.selectors.roundTier(roundAfterGlobal);
       const effectiveTier = this.effectiveTier(captainId);
-      const reasons = [`基础卡池：第 ${state.draft.round} 轮对应${state.settings.tierNames[Math.max(1, Math.min(4, state.draft.round))]}池`];
+      const reasons = [`基础卡池：第 ${state.draft.round} 轮对应${state.settings.tierNames[Hexcore2.selectors.roundTier(state.draft.round)]}池`];
 
       if (roundAfterGlobal !== state.draft.round) {
         reasons.push(`摄影艺术家：本轮与下轮卡池互换，当前按${state.settings.tierNames[baseTier]}池执行`);

@@ -31,7 +31,8 @@
   }
 
   function hasHexcore(captainId, hexcoreId) {
-    return (Hexcore2.state.hexcoreAssignments[captainId] || []).some(hexcore => hexcore.id === hexcoreId);
+    return Hexcore2.selectors.isHexcoreEnabled(hexcoreId)
+      && (Hexcore2.state.hexcoreAssignments[captainId] || []).some(hexcore => hexcore.id === hexcoreId);
   }
 
   function applyModifier(order, explanations, modifier) {
