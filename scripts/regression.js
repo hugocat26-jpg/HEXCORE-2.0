@@ -258,6 +258,13 @@ function testUiNavigationAndHexButtons() {
   elements[`player-heroes-${newPlayer.id}`] = { value: '洛、锤石、牛头' };
   H.actions.savePlayer(newPlayer.id);
   assert(newPlayer.manifesto === '今天只打关键团' && newPlayer.lane === '辅助' && newPlayer.heroes.includes('锤石'), '选手库应能保存参赛宣言、擅长英雄和基础信息');
+  H.state.ui.playerFilter = 'all';
+  H.ui.render();
+  H.actions.editPlayerGameId(newPlayer.id);
+  assert(H.state.ui.editingGameIdPlayerId === newPlayer.id && app.innerHTML.includes('player-game-id-'), '点击游戏ID编辑按钮应进入内联编辑态');
+  elements[`player-game-id-${newPlayer.id}`] = { value: 'REG_NEW_RENAMED', focus() {}, select() {} };
+  H.actions.savePlayerGameId(newPlayer.id);
+  assert(newPlayer.gameId === 'REG_NEW_RENAMED' && !H.state.ui.editingGameIdPlayerId, '回车保存游戏ID应更新选手并退出编辑态');
   H.actions.togglePlayerDisabled(newPlayer.id);
   assert(newPlayer.status === 'disabled', '选手库应能禁用可选选手');
   H.actions.togglePlayerDisabled(newPlayer.id);

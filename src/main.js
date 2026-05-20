@@ -1226,6 +1226,58 @@
       renderAndPersist();
     },
 
+    editPlayerGameId(playerId) {
+      const player = Hexcore2.state.players.find(item => item.id === playerId);
+      if (!player) return;
+      Hexcore2.state.ui.editingGameIdPlayerId = playerId;
+      Hexcore2.ui.render();
+      setTimeout(() => {
+        const input = document.getElementById(`player-game-id-${playerId}`);
+        if (input) {
+          input.focus();
+          input.select();
+        }
+      }, 0);
+    },
+
+    cancelPlayerGameIdEdit() {
+      Hexcore2.state.ui.editingGameIdPlayerId = '';
+      Hexcore2.ui.render();
+    },
+
+    savePlayerGameId(playerId) {
+      const player = Hexcore2.state.players.find(item => item.id === playerId);
+      const input = document.getElementById(`player-game-id-${playerId}`);
+      if (!player || !input) return;
+      const nextGameId = String(input.value || '').trim().slice(0, 40);
+      if (!nextGameId) {
+        Hexcore2.eventStore.append('保存游戏ID失败', '游戏ID不能为空', 'warn');
+        Hexcore2.ui.render();
+        return;
+      }
+      const duplicated = Hexcore2.state.players.some(item =>
+        item.id !== player.id && String(item.gameId || '').toLowerCase() === nextGameId.toLowerCase()
+      );
+      if (duplicated) {
+        Hexcore2.eventStore.append('保存游戏ID失败', `游戏ID「${nextGameId}」已存在`, 'warn');
+        Hexcore2.ui.render();
+        return;
+      }
+
+      snapshot(`保存游戏ID前：${player.name}`);
+      const oldGameId = player.gameId || '';
+      player.gameId = nextGameId;
+      Hexcore2.state.captains.forEach(captain => {
+        if (captain.playerId === player.id || captain.playerGameId === oldGameId) {
+          captain.playerGameId = nextGameId;
+        }
+      });
+      Hexcore2.state.ui.editingGameIdPlayerId = '';
+      if (Hexcore2.normalizeState) Hexcore2.normalizeState(Hexcore2.state);
+      Hexcore2.eventStore.append('选手库', `${player.name} 游戏ID更新为 ${player.gameId}`, 'success');
+      renderAndPersist();
+    },
+
     togglePlayerDisabled(playerId) {
       const player = Hexcore2.state.players.find(item => item.id === playerId);
       if (!player) return;

@@ -1569,6 +1569,7 @@ h2 span {
   display: grid;
   gap: 3px;
   min-width: 0;
+  flex: 1 1 auto;
 }
 
 .player-card-head strong {
@@ -1583,6 +1584,44 @@ h2 span {
   font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.game-id-display {
+  max-width: 100%;
+}
+
+.game-id-edit-btn {
+  display: inline-grid;
+  flex: 0 0 24px;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  margin-top: -1px;
+  opacity: 0;
+  border: 1px solid rgba(25, 212, 240, 0.34);
+  border-radius: 5px;
+  background: rgba(25, 212, 240, 0.08);
+  color: var(--cyan);
+  transition: opacity 0.16s ease, background 0.16s ease, border-color 0.16s ease;
+}
+
+.game-id-edit-btn svg {
+  width: 13px;
+  height: 13px;
+}
+
+.player-row:hover .game-id-edit-btn {
+  opacity: 1;
+}
+
+.game-id-edit-btn:hover {
+  border-color: rgba(25, 212, 240, 0.72);
+  background: rgba(25, 212, 240, 0.16);
+}
+
+.player-card-head .game-id-editor {
+  min-height: 24px;
+  font-size: 12px;
 }
 
 .player-edit-grid {
