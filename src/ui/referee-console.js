@@ -122,6 +122,53 @@
     `;
   }
 
+  function addPlayerModal() {
+    const ui = Hexcore2.state.ui || {};
+    if (!ui.addPlayerModal) return '';
+    const tierOptions = [1, 2, 3, 4].map(tier => `
+      <option value="${tier}">${escapeHtml(Hexcore2.state.settings.tierNames[tier])}</option>
+    `).join('');
+    return `
+      <div class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="add-player-title">
+        <section class="form-modal">
+          <div class="modal-head">
+            <div>
+              <h2 id="add-player-title">新增选手</h2>
+              <p>填写选手基础信息后再加入选手库。</p>
+            </div>
+            <button class="icon-close" aria-label="关闭新增选手弹窗" onclick="window.hexcoreUI.cancelAddPlayer()">×</button>
+          </div>
+          <div class="modal-form-grid">
+            <label>
+              <span>选手名称</span>
+              <input id="add-player-name" placeholder="请输入选手名称">
+            </label>
+            <label>
+              <span>位置</span>
+              <input id="add-player-lane" placeholder="上路 / 打野 / 中路 / 下路 / 辅助">
+            </label>
+            <label>
+              <span>卡池等级</span>
+              <select id="add-player-tier">${tierOptions}</select>
+            </label>
+            <label>
+              <span>评分</span>
+              <input id="add-player-score" type="number" min="0" max="120" value="60">
+            </label>
+            <label class="modal-wide">
+              <span>游戏ID</span>
+              <input id="add-player-game-id" placeholder="可选，不填则系统自动生成">
+            </label>
+          </div>
+          <div class="modal-actions">
+            <button class="subtle-btn" onclick="window.hexcoreUI.cancelAddPlayer()">取消</button>
+            <button class="primary-btn" onclick="window.hexcoreUI.confirmAddPlayer()">确认新增</button>
+          </div>
+        </section>
+      </div>
+    `;
+  }
+
   function topbar() {
     const time = new Date().toLocaleTimeString('zh-CN', { hour12: false });
     const captain = Hexcore2.selectors.currentCaptain();
@@ -996,6 +1043,7 @@
         ${topbar()}
         ${activePage()}
       </div>
+      ${addPlayerModal()}
       ${feedbackToast()}
     `;
   }

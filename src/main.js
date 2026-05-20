@@ -1011,23 +1011,58 @@
     },
 
     addPlayer() {
+      Hexcore2.state.ui = Hexcore2.state.ui || {};
+      Hexcore2.state.ui.addPlayerModal = true;
+      renderAndPersist();
+    },
+
+    cancelAddPlayer() {
+      Hexcore2.state.ui = Hexcore2.state.ui || {};
+      Hexcore2.state.ui.addPlayerModal = false;
+      renderAndPersist();
+    },
+
+    confirmAddPlayer() {
+      const nameInput = document.getElementById('add-player-name');
+      const laneInput = document.getElementById('add-player-lane');
+      const tierInput = document.getElementById('add-player-tier');
+      const scoreInput = document.getElementById('add-player-score');
+      const gameIdInput = document.getElementById('add-player-game-id');
+      const name = nameInput ? nameInput.value.trim() : '';
+      const lane = laneInput ? laneInput.value.trim() : '';
+      const tier = Number(tierInput && tierInput.value);
+      const score = Number(scoreInput && scoreInput.value);
+      const gameId = gameIdInput ? gameIdInput.value.trim() : '';
+
+      if (!name || !lane || !Number.isInteger(tier) || tier < 1 || tier > 4 || !Number.isInteger(score) || score < 0 || score > 120) {
+        Hexcore2.eventStore.append('新增选手失败', '请填写有效的姓名、位置、卡池和评分', 'warn');
+        Hexcore2.ui.render();
+        return;
+      }
+      if (gameId && Hexcore2.state.players.some(player => String(player.gameId || '').toLowerCase() === gameId.toLowerCase())) {
+        Hexcore2.eventStore.append('新增选手失败', `游戏ID「${gameId}」已存在`, 'warn');
+        Hexcore2.ui.render();
+        return;
+      }
+
       const number = nextPlayerId();
       const player = {
         id: `p${number}`,
-        lane: '未分配',
-        name: `新选手${number}`,
-        gameId: `NEW_${number}`,
-        score: 60,
-        tier: 1,
+        lane,
+        name,
+        gameId: gameId || `NEW_${number}`,
+        score,
+        tier,
         kda: '0.0',
         damage: '0K',
         winRate: '0%',
-        heroes: ['待', '定', '位'],
+        heroes: [lane.slice(0, 1) || '待', '定', '位'],
         status: 'available',
       };
 
       snapshot('新增选手前');
       Hexcore2.state.players.push(player);
+      Hexcore2.state.ui.addPlayerModal = false;
       Hexcore2.eventStore.append('选手库', `新增选手 ${player.name}`, 'success');
       renderAndPersist();
     },
