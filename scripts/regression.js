@@ -215,8 +215,11 @@ function testDecomposeKnowledge() {
   assert(H.state.draft.paused && !H.state.draft.currentDraw.timeoutEndsAt && H.state.draft.currentDraw.timeoutPausedRemainingMs > 0, '暂停后应冻结超时倒计时');
   H.ui.render();
   assert(app.innerHTML.includes('已暂停') && app.innerHTML.includes('恢复后倒计时继续'), '暂停后 UI 应提示倒计时已冻结');
+  assert(app.innerHTML.includes('<strong>继续</strong>') && app.innerHTML.includes('继续选人流程'), '暂停后按钮应切换为继续');
   H.actions.pause();
   assert(!H.state.draft.paused && H.state.draft.currentDraw.timeoutEndsAt && H.state.draft.currentDraw.timeoutEndsAt !== timeoutBeforePause, '恢复后应按剩余时间继续倒计时');
+  H.ui.render();
+  assert(app.innerHTML.includes('<strong>暂停</strong>') && app.innerHTML.includes('暂停选人流程'), '继续后按钮应切回暂停');
   const drawnPlayerIds = H.state.draft.currentDraw.cards.map(card => card.playerId);
   H.actions.timeoutRandomPick(true);
   const pickedFromDraw = H.state.captains.find(captain => captain.id === 'c1').team.some(playerId => drawnPlayerIds.includes(playerId));
@@ -438,6 +441,17 @@ function testSecurityHardening() {
   assert(staticServer.resolveRequestPath('/%E0%A4%A') === null, '静态服务应拒绝非法URL编码');
 
   const { H, app } = createHarness();
+  H.state.captains[0].id = "c1');window.__xss_fired=1;//";
+  H.state.captains[0].team = ["p101');window.__xss_fired=1;//"];
+  H.state.players[0].id = "p201');window.__xss_fired=1;//";
+  H.state.players[1].id = '<img src=x onerror=window.__xss_fired=1>';
+  H.state.draft.baseOrder = ["c1');window.__xss_fired=1;//"];
+  H.normalizeState(H.state);
+  H.actions.setActiveView('teams');
+  assert(H.state.captains.every(captain => /^[A-Za-z0-9_-]{1,48}$/.test(captain.id)), '状态恢复应规范化队长ID');
+  assert(H.state.players.every(player => /^[A-Za-z0-9_-]{1,48}$/.test(player.id)), '状态恢复应规范化选手ID');
+  assert(!app.innerHTML.includes('window.__xss_fired') && !app.innerHTML.includes('<img src=x'), '恶意状态ID不应进入渲染后的HTML或内联事件');
+
   H.state.settings.ruleTemplates = [{
     name: '<b>模板</b>',
     savedAt: '2026-05-20',

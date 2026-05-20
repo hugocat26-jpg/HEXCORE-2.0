@@ -316,7 +316,7 @@
           <button class="action-btn amber ${canTimeoutPick ? '' : 'disabled'}" onclick="window.hexcoreUI.timeoutRandomPick()"><span class="fast-icon">⏱</span><strong>超时随机${timeoutRemaining !== null ? ` ${timeoutRemaining}s` : ''}</strong><span>从当前卡组随机</span></button>
           <button class="action-btn amber" onclick="window.hexcoreUI.skipTurn()"><span class="fast-icon">»</span><strong>跳过本轮</strong><span>不选择，跳过此轮</span></button>
           <button class="action-btn blue" onclick="window.hexcoreUI.nextCaptain()">${icon('team')}<strong>下一位</strong><span>交给下一队长</span></button>
-          <button class="action-btn muted" onclick="window.hexcoreUI.pause()">${icon('pause')}<strong>${Hexcore2.state.draft.paused ? '恢复' : '暂停'}</strong><span>${Hexcore2.state.draft.paused ? '继续倒计时' : '暂停选人流程'}</span></button>
+          <button class="action-btn muted" onclick="window.hexcoreUI.pause()">${icon('pause')}<strong>${Hexcore2.state.draft.paused ? '继续' : '暂停'}</strong><span>${Hexcore2.state.draft.paused ? '继续选人流程' : '暂停选人流程'}</span></button>
           <button class="action-btn muted ${(Hexcore2.state.undoStack || []).length === 0 ? 'disabled' : ''}" onclick="window.hexcoreUI.undo()">${icon('undo')}<strong>撤销上一步</strong><span>可撤销 ${(Hexcore2.state.undoStack || []).length} 步</span></button>
         </div>
       </section>
@@ -553,7 +553,7 @@
                 <span>${index + 1}</span>
                 <label class="captain-name-field">
                   <small>队伍名称</small>
-                  <input id="captain-name-${captain.id}" value="${escapeHtml(captain.name)}" aria-label="${escapeHtml(captain.name)} 队伍名称">
+                  <input id="captain-name-${escapeHtml(captain.id)}" value="${escapeHtml(captain.name)}" aria-label="${escapeHtml(captain.name)} 队伍名称">
                 </label>
               </div>
               <p>状态：<em class="${status.className}">${escapeHtml(status.label)}</em></p>
@@ -565,13 +565,13 @@
                   <strong>第 ${basePosition} 位</strong>
                 </div>
                 <div class="order-button-row">
-                  <button class="subtle-btn icon-order-btn" title="顺位上移" onclick="window.hexcoreUI.moveCaptainOrder('${captain.id}', 'up')">${Hexcore2.icon('arrowUp')}</button>
-                  <button class="subtle-btn icon-order-btn" title="顺位下移" onclick="window.hexcoreUI.moveCaptainOrder('${captain.id}', 'down')">${Hexcore2.icon('arrowDown')}</button>
+                  <button class="subtle-btn icon-order-btn" title="顺位上移" onclick='window.hexcoreUI.moveCaptainOrder(${safeJsonString(captain.id)}, "up")'>${Hexcore2.icon('arrowUp')}</button>
+                  <button class="subtle-btn icon-order-btn" title="顺位下移" onclick='window.hexcoreUI.moveCaptainOrder(${safeJsonString(captain.id)}, "down")'>${Hexcore2.icon('arrowDown')}</button>
                   <label class="order-position-field">
                     <small>设为</small>
-                    <input id="captain-order-${captain.id}" type="number" min="1" max="${Hexcore2.state.captains.length}" value="${basePosition}">
+                    <input id="captain-order-${escapeHtml(captain.id)}" type="number" min="1" max="${Hexcore2.state.captains.length}" value="${basePosition}">
                   </label>
-                  <button class="subtle-btn order-apply-btn" onclick="window.hexcoreUI.setCaptainOrderPosition('${captain.id}')">应用</button>
+                  <button class="subtle-btn order-apply-btn" onclick='window.hexcoreUI.setCaptainOrderPosition(${safeJsonString(captain.id)})'>应用</button>
                 </div>
               </div>
               <div class="member-list">
@@ -592,7 +592,7 @@
                         <span>${escapeHtml(player.lane || '未知')} · ${escapeHtml(Hexcore2.state.settings.tierNames[player.tier] || '未知卡池')} · 评分 ${player.score}</span>
                         <small>ID：${escapeHtml(player.gameId || player.id)}</small>
                       </div>
-                      <button onclick="window.hexcoreUI.removePlayerFromTeam('${captain.id}', '${player.id}')">移回池</button>
+                      <button onclick='window.hexcoreUI.removePlayerFromTeam(${safeJsonString(captain.id)}, ${safeJsonString(player.id)})'>移回池</button>
                     </article>
                   ` : `
                     <article class="team-member empty-member">
@@ -606,16 +606,16 @@
                 }).join('')}
               </div>
               <div class="backfill-tools">
-                <select id="team-add-player-${captain.id}" aria-label="${escapeHtml(captain.name)} 补录选手">
+                <select id="team-add-player-${escapeHtml(captain.id)}" aria-label="${escapeHtml(captain.name)} 补录选手">
                   <option value="">选择可补录选手</option>
                   ${availablePlayers.map(player => `<option value="${player.id}">${escapeHtml(player.name)} · ${escapeHtml(player.lane || '未知')} · ${escapeHtml(Hexcore2.state.settings.tierNames[player.tier])} · ${player.score}</option>`).join('')}
                 </select>
-                <button onclick="window.hexcoreUI.assignPlayerToTeam('${captain.id}')">补录队员</button>
+                <button onclick='window.hexcoreUI.assignPlayerToTeam(${safeJsonString(captain.id)})'>补录队员</button>
               </div>
               <div class="card-actions">
-                <button onclick="window.hexcoreUI.setCurrentCaptain('${captain.id}')">设为当前</button>
-                <button onclick="window.hexcoreUI.saveCaptainName('${captain.id}')">保存名称</button>
-                <button class="danger-inline" onclick="window.hexcoreUI.removeCaptain('${captain.id}')">删除</button>
+                <button onclick='window.hexcoreUI.setCurrentCaptain(${safeJsonString(captain.id)})'>设为当前</button>
+                <button onclick='window.hexcoreUI.saveCaptainName(${safeJsonString(captain.id)})'>保存名称</button>
+                <button class="danger-inline" onclick='window.hexcoreUI.removeCaptain(${safeJsonString(captain.id)})'>删除</button>
               </div>
             </article>
           `;
@@ -704,33 +704,33 @@
                       <div>
                         <span class="player-name-line">
                           ${editingName ? `
-                            <input class="player-name-editor" id="player-display-name-${player.id}" value="${escapeHtml(player.name || '')}" onblur="window.hexcoreUI.savePlayerName('${player.id}')" onkeydown="if(event.key==='Enter') window.hexcoreUI.savePlayerName('${player.id}'); if(event.key==='Escape') window.hexcoreUI.cancelPlayerNameEdit()">
+                            <input class="player-name-editor" id="player-display-name-${escapeHtml(player.id)}" value="${escapeHtml(player.name || '')}" onblur='window.hexcoreUI.savePlayerName(${safeJsonString(player.id)})' onkeydown='if(event.key==="Enter") window.hexcoreUI.savePlayerName(${safeJsonString(player.id)}); if(event.key==="Escape") window.hexcoreUI.cancelPlayerNameEdit()'>
                           ` : `
                             <strong>${escapeHtml(player.name)}</strong>
                           `}
-                          ${editingName ? '' : `<button class="inline-edit-btn name-edit-btn" title="编辑选手名称" onclick="window.hexcoreUI.editPlayerName('${player.id}')">${Hexcore2.icon('edit')}</button>`}
+                          ${editingName ? '' : `<button class="inline-edit-btn name-edit-btn" title="编辑选手名称" onclick='window.hexcoreUI.editPlayerName(${safeJsonString(player.id)})'>${Hexcore2.icon('edit')}</button>`}
                         </span>
                         ${editingGameId ? `
-                          <input class="game-id-editor" id="player-game-id-${player.id}" value="${escapeHtml(player.gameId || '')}" onblur="window.hexcoreUI.savePlayerGameId('${player.id}')" onkeydown="if(event.key==='Enter') window.hexcoreUI.savePlayerGameId('${player.id}'); if(event.key==='Escape') window.hexcoreUI.cancelPlayerGameIdEdit()">
+                          <input class="game-id-editor" id="player-game-id-${escapeHtml(player.id)}" value="${escapeHtml(player.gameId || '')}" onblur='window.hexcoreUI.savePlayerGameId(${safeJsonString(player.id)})' onkeydown='if(event.key==="Enter") window.hexcoreUI.savePlayerGameId(${safeJsonString(player.id)}); if(event.key==="Escape") window.hexcoreUI.cancelPlayerGameIdEdit()'>
                         ` : `
                           <span class="game-id-line">
                             <span class="game-id-display">${escapeHtml(player.gameId || '无游戏ID')}</span>
-                            <button class="inline-edit-btn game-id-edit-btn" title="编辑游戏ID" onclick="window.hexcoreUI.editPlayerGameId('${player.id}')">${Hexcore2.icon('edit')}</button>
+                            <button class="inline-edit-btn game-id-edit-btn" title="编辑游戏ID" onclick='window.hexcoreUI.editPlayerGameId(${safeJsonString(player.id)})'>${Hexcore2.icon('edit')}</button>
                           </span>
                         `}
                       </div>
                       <em class="${isCaptain ? 'captain' : (player.status === 'available' ? 'available' : (player.status === 'disabled' ? 'disabled' : 'drafted'))}">${isCaptain ? '队长专属' : (player.status === 'available' ? '可选' : (player.status === 'disabled' ? '已禁用' : `已入队${owner ? `：${escapeHtml(owner.name)}` : ''}`))}</em>
                     </div>
                     <div class="player-edit-grid">
-                      <label><small>偏好位置</small><input id="player-lane-${player.id}" value="${escapeHtml(player.lane || '未知')}" onblur="window.hexcoreUI.autoSavePlayerIfChanged('${player.id}')" onkeydown="if(event.key==='Enter') window.hexcoreUI.savePlayer('${player.id}')"></label>
-                      <label><small>绝活英雄</small><input id="player-heroes-${player.id}" value="${escapeHtml((player.heroes || []).join('、'))}" placeholder="用顿号分隔" onblur="window.hexcoreUI.autoSavePlayerIfChanged('${player.id}')" onkeydown="if(event.key==='Enter') window.hexcoreUI.savePlayer('${player.id}')"></label>
-                      <label class="manifesto-field"><small>参赛宣言</small><textarea id="player-manifesto-${player.id}" rows="2" placeholder="填写这名选手的参赛宣言" onblur="window.hexcoreUI.autoSavePlayerIfChanged('${player.id}')">${escapeHtml(player.manifesto || '')}</textarea></label>
+                      <label><small>偏好位置</small><input id="player-lane-${escapeHtml(player.id)}" value="${escapeHtml(player.lane || '未知')}" onblur='window.hexcoreUI.autoSavePlayerIfChanged(${safeJsonString(player.id)})' onkeydown='if(event.key==="Enter") window.hexcoreUI.savePlayer(${safeJsonString(player.id)})'></label>
+                      <label><small>绝活英雄</small><input id="player-heroes-${escapeHtml(player.id)}" value="${escapeHtml((player.heroes || []).join('、'))}" placeholder="用顿号分隔" onblur='window.hexcoreUI.autoSavePlayerIfChanged(${safeJsonString(player.id)})' onkeydown='if(event.key==="Enter") window.hexcoreUI.savePlayer(${safeJsonString(player.id)})'></label>
+                      <label class="manifesto-field"><small>参赛宣言</small><textarea id="player-manifesto-${escapeHtml(player.id)}" rows="2" placeholder="填写这名选手的参赛宣言" onblur='window.hexcoreUI.autoSavePlayerIfChanged(${safeJsonString(player.id)})'>${escapeHtml(player.manifesto || '')}</textarea></label>
                       <div class="readonly-score"><span>评分</span><strong>${escapeHtml(player.score || 0)}</strong></div>
                     </div>
                     <div class="player-actions">
-                      ${canPromote ? `<button class="promote-inline" onclick="window.hexcoreUI.promotePlayerToCaptain('${player.id}')">设为队长</button>` : '<button disabled>队长锁定</button>'}
-                      ${isCaptain ? '' : `<button class="${player.status === 'disabled' ? '' : 'danger-inline'}" onclick="window.hexcoreUI.togglePlayerDisabled('${player.id}')">${player.status === 'disabled' ? '恢复' : '禁用'}</button>`}
-                      <button class="danger-inline" onclick="window.hexcoreUI.deletePlayer('${player.id}')">删除</button>
+                      ${canPromote ? `<button class="promote-inline" onclick='window.hexcoreUI.promotePlayerToCaptain(${safeJsonString(player.id)})'>设为队长</button>` : '<button disabled>队长锁定</button>'}
+                      ${isCaptain ? '' : `<button class="${player.status === 'disabled' ? '' : 'danger-inline'}" onclick='window.hexcoreUI.togglePlayerDisabled(${safeJsonString(player.id)})'>${player.status === 'disabled' ? '恢复' : '禁用'}</button>`}
+                      <button class="danger-inline" onclick='window.hexcoreUI.deletePlayer(${safeJsonString(player.id)})'>删除</button>
                     </div>
                   </article>
                 `;
@@ -780,7 +780,7 @@
               <option value="amber" ${hexFilter === 'amber' ? 'selected' : ''}>黄金/干扰</option>
               <option value="violet" ${hexFilter === 'violet' ? 'selected' : ''}>棱彩/强力</option>
             </select>
-            <button class="primary-btn" onclick="window.hexcoreUI.drawHexcoreForCaptain('${selectedCaptain ? selectedCaptain.id : ''}')">${Hexcore2.icon('hex')}抽取 3 个候选</button>
+            <button class="primary-btn" onclick='window.hexcoreUI.drawHexcoreForCaptain(${safeJsonString(selectedCaptain ? selectedCaptain.id : '')})'>${Hexcore2.icon('hex')}抽取 3 个候选</button>
             <button class="subtle-btn" onclick="window.hexcoreUI.randomizeHexcoreDrawOrder()">制定抽取顺序</button>
             <button class="danger-inline" onclick="window.hexcoreUI.resetAllHexcores()">重置所有海克斯</button>
           </div>
@@ -809,7 +809,7 @@
                     <button class="hex-refresh-btn" ${session.refreshUsed ? 'disabled' : ''} onclick="window.hexcoreUI.refreshHexcoreSlot(${index})">刷新</button>
                     <div><strong>${escapeHtml(hex.name)}</strong><span>${hex.mode === 'passive' ? '被动自动' : '裁判手动'}</span></div>
                     <p>${escapeHtml(hex.desc)}</p>
-                    <button class="primary-btn" onclick="window.hexcoreUI.selectHexcoreFromDraw('${selectedCaptain.id}', '${hex.id}')">选择这个海克斯</button>
+                    <button class="primary-btn" onclick='window.hexcoreUI.selectHexcoreFromDraw(${safeJsonString(selectedCaptain.id)}, ${safeJsonString(hex.id)})'>选择这个海克斯</button>
                   </article>
                 `;
               }).join('')}
@@ -824,7 +824,7 @@
           <h2>已持有海克斯</h2>
           <div class="owned-hex-list">
             ${ownedHexcores.map(hex => `
-              <span>${escapeHtml(hex.name)} <button onclick="window.hexcoreUI.removeHexcore('${selectedCaptain.id}', '${hex.id}')">移除</button></span>
+              <span>${escapeHtml(hex.name)} <button onclick='window.hexcoreUI.removeHexcore(${safeJsonString(selectedCaptain.id)}, ${safeJsonString(hex.id)})'>移除</button></span>
             `).join('') || '<em>暂无海克斯</em>'}
           </div>
         </div>
@@ -836,7 +836,7 @@
                 <span>${hex.mode === 'passive' ? '被动自动' : '裁判手动'}</span>
               </div>
               <p>${escapeHtml(hex.desc)}</p>
-              <button onclick="window.hexcoreUI.assignHexcoreToCaptain('${selectedCaptain ? selectedCaptain.id : ''}', '${hex.id}')">裁判兜底分配</button>
+              <button onclick='window.hexcoreUI.assignHexcoreToCaptain(${safeJsonString(selectedCaptain ? selectedCaptain.id : '')}, ${safeJsonString(hex.id)})'>裁判兜底分配</button>
             </article>
           `).join('')}
         </div>
@@ -876,7 +876,7 @@
                 const round = index + 1;
                 const status = roundStatus(captain, round);
                 return `
-                  <button class="schedule-cell ${status.className}" onclick="window.hexcoreUI.jumpToScheduleSlot(${round}, '${captain.id}')">
+                  <button class="schedule-cell ${status.className}" onclick='window.hexcoreUI.jumpToScheduleSlot(${round}, ${safeJsonString(captain.id)})'>
                     <span>${status.label}</span>
                     <small>跳转</small>
                   </button>
@@ -943,7 +943,7 @@
                       </div>
                       <div class="match-actions">
                         <span>晋级：${escapeHtml(winnerName)}</span>
-                        <button class="subtle-btn" ${hasBye ? 'disabled' : ''} onclick="window.hexcoreUI.saveTournamentScore('${escapeHtml(round.id)}', '${escapeHtml(match.id)}')">保存比分</button>
+                        <button class="subtle-btn" ${hasBye ? 'disabled' : ''} onclick='window.hexcoreUI.saveTournamentScore(${safeJsonString(round.id)}, ${safeJsonString(match.id)})'>保存比分</button>
                       </div>
                     </article>
                   `;

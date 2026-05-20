@@ -67,6 +67,172 @@
     return Math.max(min, Math.min(max, Math.round(number)));
   }
 
+  const SAFE_ID_PATTERN = /^[A-Za-z0-9_-]{1,48}$/;
+
+  function sanitizeText(value, fallback, maxLength) {
+    const text = String(value ?? fallback ?? '').trim();
+    return (text || String(fallback ?? '')).slice(0, maxLength);
+  }
+
+  function safeId(value, fallback, usedIds) {
+    const raw = String(value ?? '').trim();
+    const candidate = SAFE_ID_PATTERN.test(raw) ? raw : fallback;
+    let id = SAFE_ID_PATTERN.test(candidate) ? candidate : fallback;
+    let suffix = 2;
+    while (usedIds.has(id)) {
+      id = `${fallback}_${suffix}`;
+      suffix += 1;
+    }
+    usedIds.add(id);
+    return id;
+  }
+
+  function remapId(id, idMap) {
+    return idMap.get(String(id ?? '').trim()) || '';
+  }
+
+  function sanitizePlayers(players, playerIdMap) {
+    const source = Array.isArray(players) && players.length ? players : clone(defaultState.players);
+    const usedIds = new Set();
+    return source.slice(0, 600).map((player, index) => {
+      const item = player && typeof player === 'object' ? player : {};
+      const oldId = String(item.id ?? '').trim();
+      const id = safeId(oldId, `p${index + 1}`, usedIds);
+      if (oldId) playerIdMap.set(oldId, id);
+      playerIdMap.set(id, id);
+      const status = ['available', 'drafted', 'disabled', 'captain'].includes(item.status) ? item.status : 'available';
+      const normalized = {
+        id,
+        lane: sanitizeText(item.lane, '未分配', 16),
+        name: sanitizeText(item.name, `选手${index + 1}`, 32),
+        gameId: sanitizeText(item.gameId, id, 40),
+        score: clampNumber(item.score, 0, 120, 60),
+        tier: clampNumber(item.tier, 0, 4, 1),
+        kda: sanitizeText(item.kda, '0.0', 12),
+        damage: sanitizeText(item.damage, '0K', 12),
+        winRate: sanitizeText(item.winRate, '0%', 12),
+        heroes: Array.isArray(item.heroes)
+          ? item.heroes.map(hero => sanitizeText(hero, '', 8)).filter(Boolean).slice(0, 5)
+          : sanitizeText(item.heroes, '待,定,位', 40).split(/[，,、|/]/).map(hero => hero.trim()).filter(Boolean).slice(0, 5),
+        manifesto: sanitizeText(item.manifesto, '', 80),
+        status,
+        teamId: sanitizeText(item.teamId, '', 48),
+        isCaptain: Boolean(item.isCaptain),
+        role: item.role === 'captain' ? 'captain' : undefined,
+      };
+      return player && typeof player === 'object' ? Object.assign(player, normalized) : normalized;
+    });
+  }
+
+  function sanitizeCaptains(captains, captainIdMap, playerIdMap, playersPerTeam) {
+    const source = Array.isArray(captains) && captains.length ? captains : clone(defaultState.captains);
+    const usedIds = new Set();
+    return source.slice(0, defaultState.settings.maxTeams).map((captain, index) => {
+      const item = captain && typeof captain === 'object' ? captain : {};
+      const oldId = String(item.id ?? '').trim();
+      const id = safeId(oldId, `c${index + 1}`, usedIds);
+      if (oldId) captainIdMap.set(oldId, id);
+      captainIdMap.set(id, id);
+      const normalized = {
+        id,
+        name: sanitizeText(item.name, `C${index + 1} 队伍`, 40),
+        record: sanitizeText(item.record, '待定', 24),
+        team: (Array.isArray(item.team) ? item.team : [])
+          .map(playerId => remapId(playerId, playerIdMap))
+          .filter(Boolean)
+          .filter((playerId, playerIndex, all) => all.indexOf(playerId) === playerIndex)
+          .slice(0, playersPerTeam),
+        playerId: remapId(item.playerId, playerIdMap),
+        playerGameId: sanitizeText(item.playerGameId || item.gameId, '', 40),
+      };
+      return captain && typeof captain === 'object' ? Object.assign(captain, normalized) : normalized;
+    });
+  }
+
+  function normalizeEvents(events) {
+    const source = Array.isArray(events) ? events : [];
+    return source.slice(0, 80).map(event => {
+      const item = event && typeof event === 'object' ? event : {};
+      return {
+        time: sanitizeText(item.time, '', 16),
+        title: sanitizeText(item.title, '事件', 40),
+        body: sanitizeText(item.body, '', 240),
+        level: ['info', 'draw', 'warn', 'success'].includes(item.level) ? item.level : 'info',
+        payload: item.payload && typeof item.payload === 'object' && !Array.isArray(item.payload) ? item.payload : {},
+      };
+    });
+  }
+
+  function normalizeHexcoreAssignments(assignments, captains) {
+    const source = assignments && typeof assignments === 'object' && !Array.isArray(assignments) ? assignments : {};
+    const hexcoreById = new Map(seed.hexcores.map(hexcore => [hexcore.id, hexcore]));
+    return captains.reduce((result, captain) => {
+      const assigned = Array.isArray(source[captain.id]) ? source[captain.id] : [];
+      result[captain.id] = assigned
+        .map(hexcore => hexcoreById.get(String(hexcore && hexcore.id ? hexcore.id : hexcore)))
+        .filter(Boolean)
+        .filter((hexcore, index, all) => all.findIndex(item => item.id === hexcore.id) === index)
+        .slice(0, 8)
+        .map(hexcore => ({ ...hexcore }));
+      return result;
+    }, {});
+  }
+
+  function normalizeDraft(draft, captains, playerIdMap, captainIdMap) {
+    const source = draft && typeof draft === 'object' ? draft : {};
+    const captainIds = new Set(captains.map(captain => captain.id));
+    const remapCaptain = value => {
+      const id = remapId(value, captainIdMap);
+      return captainIds.has(id) ? id : '';
+    };
+    const normalizeCards = cards => (Array.isArray(cards) ? cards : []).slice(0, 12).map(card => {
+      const item = card && typeof card === 'object' ? card : {};
+      return {
+        ...item,
+        playerId: remapId(item.playerId, playerIdMap),
+        displayPlayerId: remapId(item.displayPlayerId, playerIdMap) || remapId(item.playerId, playerIdMap),
+      };
+    }).filter(card => card.playerId);
+
+    const currentDraw = source.currentDraw && typeof source.currentDraw === 'object'
+      ? {
+        ...source.currentDraw,
+        cards: normalizeCards(source.currentDraw.cards),
+        reason: sanitizeText(source.currentDraw.reason, '', 120),
+        pickMode: sanitizeText(source.currentDraw.pickMode, 'normal', 32),
+        tier: clampNumber(source.currentDraw.tier, 1, 4, 1),
+      }
+      : null;
+
+    return {
+      ...clone(defaultState.draft),
+      ...source,
+      phase: ['setup', 'round_start', 'captain_action', 'completed'].includes(source.phase) ? source.phase : 'captain_action',
+      round: clampNumber(source.round, 1, 8, defaultState.draft.round),
+      maxRounds: clampNumber(source.maxRounds, 1, 8, defaultState.draft.maxRounds),
+      baseOrder: reconcileBaseOrder(captains, Array.isArray(source.baseOrder) ? source.baseOrder.map(remapCaptain).filter(Boolean) : []),
+      currentOrder: Array.isArray(source.currentOrder) ? source.currentOrder.map(remapCaptain).filter(Boolean) : [],
+      currentIndex: clampNumber(source.currentIndex, 0, Math.max(0, captains.length - 1), 0),
+      selectedSlot: clampNumber(source.selectedSlot, 0, 12, 0),
+      currentDraw,
+      runtimeEffects: Array.isArray(source.runtimeEffects) ? source.runtimeEffects.slice(0, 80).map(effect => {
+        const item = effect && typeof effect === 'object' ? { ...effect } : {};
+        ['captainId', 'sourceCaptainId', 'targetCaptainId', 'firstCaptainId', 'secondCaptainId'].forEach(key => {
+          if (key in item) item[key] = remapCaptain(item[key]);
+        });
+        ['playerId', 'targetPlayerId', 'firstPlayerId', 'secondPlayerId'].forEach(key => {
+          if (key in item) item[key] = remapId(item[key], playerIdMap);
+        });
+        item.type = sanitizeText(item.type, 'effect', 32);
+        item.reason = sanitizeText(item.reason, '', 120);
+        return item;
+      }) : [],
+      explanations: [],
+      pickedThisTurn: Boolean(source.pickedThisTurn),
+      paused: Boolean(source.paused),
+    };
+  }
+
   function normalizeRuleTemplate(template) {
     const source = template && typeof template === 'object' ? template : {};
     const maxRounds = clampNumber(source.maxRounds, 1, 8, defaultState.draft.maxRounds);
@@ -169,13 +335,14 @@
   };
 
   Hexcore2.normalizeState = function normalizeState(state) {
+    if (!state || typeof state !== 'object') state = clone(defaultState);
     state.settings = state.settings || clone(defaultState.settings);
     state.settings.tierNames = state.settings.tierNames || clone(defaultState.settings.tierNames);
     state.settings.tierNames[0] = state.settings.tierNames[0] || defaultState.settings.tierNames[0];
-    state.settings.minTeams = state.settings.minTeams || defaultState.settings.minTeams;
-    state.settings.maxTeams = state.settings.maxTeams || defaultState.settings.maxTeams;
-    state.settings.playersPerTeam = state.settings.playersPerTeam || defaultState.settings.playersPerTeam;
-    state.settings.drawCount = state.settings.drawCount || defaultState.settings.drawCount;
+    state.settings.minTeams = clampNumber(state.settings.minTeams, 5, 20, defaultState.settings.minTeams);
+    state.settings.maxTeams = clampNumber(state.settings.maxTeams, state.settings.minTeams, 20, defaultState.settings.maxTeams);
+    state.settings.playersPerTeam = clampNumber(state.settings.playersPerTeam, 1, 8, defaultState.settings.playersPerTeam);
+    state.settings.drawCount = clampNumber(state.settings.drawCount, 1, 8, defaultState.settings.drawCount);
     state.settings.pickTimeoutSeconds = clampNumber(state.settings.pickTimeoutSeconds, 1, 300, defaultState.settings.pickTimeoutSeconds);
     state.settings.roundTiers = Array.isArray(state.settings.roundTiers) && state.settings.roundTiers.length
       ? state.settings.roundTiers.map(tier => Math.max(1, Math.min(4, Number(tier) || 1)))
@@ -186,24 +353,35 @@
     state.settings.ruleTemplates = Array.isArray(state.settings.ruleTemplates)
       ? state.settings.ruleTemplates.slice(0, 8).map(normalizeRuleTemplate)
       : [];
-    state.captains = state.captains || clone(defaultState.captains);
+
+    const captainIdMap = new Map();
+    const playerIdMap = new Map();
+    state.players = sanitizePlayers(state.players, playerIdMap);
+    state.captains = sanitizeCaptains(state.captains, captainIdMap, playerIdMap, state.settings.playersPerTeam);
     state.settings.totalTeams = state.captains.length;
-    state.players = state.players || clone(defaultState.players);
     reconcilePlayerTeamIds(state.captains, state.players);
     rebalancePlayerTiers(state.captains, state.players);
-    state.hexcoreAssignments = state.hexcoreAssignments || {};
-    state.hexcoreDraft = state.hexcoreDraft || clone(defaultState.hexcoreDraft);
-    state.hexcoreDraft.captainId = state.hexcoreDraft.captainId || '';
-    state.hexcoreDraft.slots = Array.isArray(state.hexcoreDraft.slots) ? state.hexcoreDraft.slots : [];
-    state.hexcoreDraft.chosen = Array.isArray(state.hexcoreDraft.chosen) ? state.hexcoreDraft.chosen : [];
-    state.hexcoreDraft.seenIds = Array.isArray(state.hexcoreDraft.seenIds) ? state.hexcoreDraft.seenIds : [];
-    state.hexcoreDraft.refreshUsed = Boolean(state.hexcoreDraft.refreshUsed);
-    state.hexcoreDraft.drawOrder = Array.isArray(state.hexcoreDraft.drawOrder)
-      ? state.hexcoreDraft.drawOrder.filter(id => state.captains.some(captain => captain.id === id))
-      : [];
-    state.draft = state.draft || clone(defaultState.draft);
+    state.hexcoreAssignments = normalizeHexcoreAssignments(state.hexcoreAssignments, state.captains);
+
+    const hexcoreDraft = state.hexcoreDraft && typeof state.hexcoreDraft === 'object' ? state.hexcoreDraft : clone(defaultState.hexcoreDraft);
+    state.hexcoreDraft = {
+      captainId: captainIdMap.get(String(hexcoreDraft.captainId || '')) || '',
+      slots: Array.isArray(hexcoreDraft.slots) ? hexcoreDraft.slots.map(id => String(id || '').trim()).filter(Boolean).slice(0, 6) : [],
+      chosen: Array.isArray(hexcoreDraft.chosen) ? hexcoreDraft.chosen.map(id => String(id || '').trim()).filter(Boolean).slice(0, 12) : [],
+      seenIds: Array.isArray(hexcoreDraft.seenIds) ? hexcoreDraft.seenIds.map(id => String(id || '').trim()).filter(Boolean).slice(0, 80) : [],
+      refreshUsed: Boolean(hexcoreDraft.refreshUsed),
+      drawOrder: Array.isArray(hexcoreDraft.drawOrder)
+        ? hexcoreDraft.drawOrder.map(id => captainIdMap.get(String(id || ''))).filter(id => state.captains.some(captain => captain.id === id))
+        : [],
+    };
+    state.draft = normalizeDraft(state.draft, state.captains, playerIdMap, captainIdMap);
+    if (!state.draft.currentOrder.length) state.draft.currentOrder = [...state.draft.baseOrder];
+    if (state.draft.currentIndex >= state.draft.currentOrder.length) {
+      state.draft.currentIndex = Math.max(0, state.draft.currentOrder.length - 1);
+    }
     state.draft.baseOrder = reconcileBaseOrder(state.captains, state.draft.baseOrder);
-    state.draft.maxRounds = state.draft.maxRounds || defaultState.draft.maxRounds;
+    state.draft.maxRounds = clampNumber(state.draft.maxRounds, 1, 8, defaultState.draft.maxRounds);
+    state.draft.round = clampNumber(state.draft.round, 1, state.draft.maxRounds, defaultState.draft.round);
     if (state.settings.roundTiers.length < state.draft.maxRounds) {
       while (state.settings.roundTiers.length < state.draft.maxRounds) {
         state.settings.roundTiers.push(Math.min(4, state.settings.roundTiers.length + 1));
@@ -212,20 +390,24 @@
     if (state.settings.roundTiers.length > state.draft.maxRounds) {
       state.settings.roundTiers = state.settings.roundTiers.slice(0, state.draft.maxRounds);
     }
-    state.draft.phase = state.draft.phase || 'captain_action';
-    state.draft.currentOrder = state.draft.currentOrder || [...state.draft.baseOrder];
-    state.draft.currentIndex = Number.isInteger(state.draft.currentIndex) ? state.draft.currentIndex : 0;
-    state.draft.selectedSlot = Number.isInteger(state.draft.selectedSlot) ? state.draft.selectedSlot : 0;
-    state.draft.runtimeEffects = state.draft.runtimeEffects || [];
-    state.draft.explanations = state.draft.explanations || [];
-    state.draft.pickedThisTurn = Boolean(state.draft.pickedThisTurn);
-    state.draft.paused = Boolean(state.draft.paused);
-    state.events = state.events || [];
+    state.events = normalizeEvents(state.events);
     state.tournament = normalizeTournament(state.tournament, state.captains);
-    state.undoStack = state.undoStack || [];
-    state.ui = state.ui || { activeView: 'draft', eventFilter: 'all' };
-    state.ui.activeView = state.ui.activeView || 'draft';
-    state.ui.eventFilter = state.ui.eventFilter || 'all';
+    state.undoStack = Array.isArray(state.undoStack) ? state.undoStack.slice(0, 30) : [];
+    state.ui = state.ui && typeof state.ui === 'object' ? state.ui : { activeView: 'draft', eventFilter: 'all' };
+    state.ui.activeView = ['draft', 'teams', 'players', 'hexcores', 'schedule', 'tournament', 'rules', 'logs', 'settings'].includes(state.ui.activeView)
+      ? state.ui.activeView
+      : 'draft';
+    state.ui.eventFilter = ['all', 'hexcore', 'team', 'warning', 'draw'].includes(state.ui.eventFilter)
+      ? state.ui.eventFilter
+      : 'all';
+    state.ui.eventCaptainFilter = typeof state.ui.eventCaptainFilter === 'string' ? state.ui.eventCaptainFilter.slice(0, 48) : 'all';
+    state.ui.eventSearch = typeof state.ui.eventSearch === 'string' ? state.ui.eventSearch.slice(0, 80) : '';
+    state.ui.playerFilter = typeof state.ui.playerFilter === 'string' ? state.ui.playerFilter.slice(0, 32) : 'all';
+    state.ui.hexFilter = typeof state.ui.hexFilter === 'string' ? state.ui.hexFilter.slice(0, 32) : 'all';
+    state.ui.hexCaptainId = captainIdMap.get(String(state.ui.hexCaptainId || '')) || '';
+    state.ui.editingNamePlayerId = playerIdMap.get(String(state.ui.editingNamePlayerId || '')) || '';
+    state.ui.editingGameIdPlayerId = playerIdMap.get(String(state.ui.editingGameIdPlayerId || '')) || '';
+    state.ui.addPlayerModal = Boolean(state.ui.addPlayerModal);
     return state;
   };
 
