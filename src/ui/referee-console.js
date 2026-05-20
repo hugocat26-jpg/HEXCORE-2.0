@@ -713,7 +713,6 @@
                     </div>
                     <div class="player-actions">
                       ${canPromote ? `<button class="promote-inline" onclick="window.hexcoreUI.promotePlayerToCaptain('${player.id}')">设为队长</button>` : '<button disabled>队长锁定</button>'}
-                      <button onclick="window.hexcoreUI.savePlayer('${player.id}')">保存</button>
                       ${isCaptain ? '' : `<button class="${player.status === 'disabled' ? '' : 'danger-inline'}" onclick="window.hexcoreUI.togglePlayerDisabled('${player.id}')">${player.status === 'disabled' ? '恢复' : '禁用'}</button>`}
                       <button class="danger-inline" onclick="window.hexcoreUI.deletePlayer('${player.id}')">删除</button>
                     </div>

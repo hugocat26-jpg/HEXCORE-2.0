@@ -221,6 +221,7 @@ function testUiNavigationAndHexButtons() {
   assert(app.innerHTML.includes('导入 JSON/CSV') && app.innerHTML.includes('pool-health-grid'), '选手库应提供导入和卡池容量检测');
   assert(app.innerHTML.includes('队长专属池') && app.innerHTML.includes('卡池等级不可手动设置') && !app.innerHTML.includes('player-tier-'), '选手库应说明系统分池且不允许手动设置卡池');
   assert(app.innerHTML.includes('参赛宣言') && app.innerHTML.includes('player-manifesto-') && app.innerHTML.includes('player-lane-') && app.innerHTML.includes('player-heroes-') && app.innerHTML.includes('autoSavePlayerIfChanged') && app.innerHTML.includes('偏好位置') && app.innerHTML.includes('绝活英雄') && app.innerHTML.includes('readonly-score') && !app.innerHTML.includes('id="player-name-') && !app.innerHTML.includes('player-score-'), '选手卡片应按名字、ID、偏好位置、绝活英雄、参赛宣言、评分展示并支持失焦自动保存');
+  assert(!app.innerHTML.includes('>保存</button>'), '选手卡片不应再显示手动保存按钮');
   H.state.captains[0].playerId = 'captain-test-player';
   H.state.players.push({ id: 'captain-test-player', name: '队长测试选手', lane: '中路', gameId: 'CAPTAIN_TEST', score: 120, tier: 4, status: 'available' });
   H.normalizeState(H.state);
