@@ -300,7 +300,7 @@ function testUiNavigationAndHexButtons() {
   H.actions.deletePlayer(importedPlayer.id);
   assert(!H.state.players.some(player => player.id === importedPlayer.id), '选手库应能删除选手');
   H.actions.setActiveView('hexcores');
-  assert(app.innerHTML.includes('抽取 3 个候选') && app.innerHTML.includes('removeHexcore') && app.innerHTML.includes('assignHexcoreToCaptain'), '海克斯库页面应提供三选一抽取、移除和兜底分配入口');
+  assert(app.innerHTML.includes('抽取 3 个候选') && app.innerHTML.includes('重置所有海克斯') && app.innerHTML.includes('resetAllHexcores') && app.innerHTML.includes('removeHexcore') && app.innerHTML.includes('assignHexcoreToCaptain'), '海克斯库页面应提供三选一抽取、移除、重置和兜底分配入口');
   H.actions.setHexFilter('manual');
   assert(H.state.ui.hexFilter === 'manual', '海克斯库应能筛选手动效果');
   H.actions.setHexCaptain('c2');
@@ -320,6 +320,11 @@ function testUiNavigationAndHexButtons() {
   assert(H.state.hexcoreAssignments.c2.length === c2HexBefore + 1, '海克斯库应能指定分配海克斯');
   H.actions.randomizeHexcoreDrawOrder();
   assert(H.state.hexcoreDraft.drawOrder.length === H.state.captains.length, '海克斯库应能随机制定抽取顺序');
+  H.state.draft.runtimeEffects = [{ type: 'blind', sourceCaptainId: 'c2' }];
+  H.actions.resetAllHexcores();
+  assert(H.state.captains.every(captain => Array.isArray(H.state.hexcoreAssignments[captain.id]) && H.state.hexcoreAssignments[captain.id].length === 0), '重置所有海克斯应清空每个队长持有列表');
+  assert(!H.state.hexcoreDraft.captainId && H.state.hexcoreDraft.slots.length === 0 && H.state.hexcoreDraft.drawOrder.length === 0, '重置所有海克斯应清空当前抽取会话和抽取顺序');
+  assert(H.state.draft.runtimeEffects.length === 0, '重置所有海克斯应清空运行中的海克斯效果');
   H.actions.setActiveView('teams');
   assert(app.innerHTML.includes('新增队伍') && app.innerHTML.includes('saveCaptainName') && app.innerHTML.includes('待指定队长'), '队伍管理页面应提供实质操作，并对空队伍显示待指定队长');
   H.actions.setActiveView('rules');

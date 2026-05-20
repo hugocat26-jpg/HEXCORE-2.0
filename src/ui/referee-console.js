@@ -767,6 +767,7 @@
             </select>
             <button class="primary-btn" onclick="window.hexcoreUI.drawHexcoreForCaptain('${selectedCaptain ? selectedCaptain.id : ''}')">${Hexcore2.icon('hex')}抽取 3 个候选</button>
             <button class="subtle-btn" onclick="window.hexcoreUI.randomizeHexcoreDrawOrder()">制定抽取顺序</button>
+            <button class="danger-inline" onclick="window.hexcoreUI.resetAllHexcores()">重置所有海克斯</button>
           </div>
         </div>
         ${drawOrder.length ? `

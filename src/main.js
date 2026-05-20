@@ -588,6 +588,25 @@
       renderAndPersist();
     },
 
+    resetAllHexcores() {
+      const confirmed = typeof confirm === 'function'
+        ? confirm('确认重置所有队长的海克斯？该操作会移除所有队长已持有海克斯，并清空当前海克斯抽取会话。')
+        : true;
+      if (!confirmed) return;
+
+      snapshot('重置所有海克斯前');
+      Hexcore2.state.hexcoreAssignments = {};
+      Hexcore2.state.captains.forEach(captain => {
+        Hexcore2.state.hexcoreAssignments[captain.id] = [];
+      });
+      resetHexcoreSession();
+      Hexcore2.state.hexcoreDraft.drawOrder = [];
+      Hexcore2.state.draft.runtimeEffects = [];
+      Hexcore2.state.ui.hexCaptainId = Hexcore2.state.captains[0] ? Hexcore2.state.captains[0].id : '';
+      Hexcore2.eventStore.append('海克斯重置', '裁判已移除所有队长持有海克斯，并清空当前抽取会话', 'warn');
+      renderAndPersist();
+    },
+
     advanceToNextHexcoreCaptain(captainId) {
       const captain = Hexcore2.state.captains.find(item => item.id === captainId);
       if (!captain) return;
