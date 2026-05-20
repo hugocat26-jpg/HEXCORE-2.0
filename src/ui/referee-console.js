@@ -436,8 +436,8 @@
     }
     return `
       ${pageHeader('队伍管理', '裁判可调整队伍、切换当前队长、重命名队长并处理队员归属。')}
-      <section class="data-panel">
-        <div class="toolbar-row">
+      <section class="data-panel teams-panel">
+        <div class="toolbar-row team-toolbar">
           <div>
             <strong>当前 ${Hexcore2.selectors.teamCount()} 队，允许 ${Hexcore2.state.settings.minTeams}-${Hexcore2.state.settings.maxTeams} 队</strong>
             <span>队伍增删会重算基础顺位，并清空当前抽卡结果。</span>
@@ -480,12 +480,16 @@
                 ${captain.team.map(playerId => {
                   const player = playerById(playerId);
                   return player ? `
-                    <span>
-                      ${escapeHtml(player.name)} · ${escapeHtml(player.lane || '未知')}
+                    <article class="team-member">
+                      <div>
+                        <strong>${escapeHtml(player.name)}</strong>
+                        <span>${escapeHtml(player.lane || '未知')} · ${escapeHtml(Hexcore2.state.settings.tierNames[player.tier] || '未知卡池')} · 评分 ${player.score}</span>
+                        <small>ID：${escapeHtml(player.gameId || player.id)}</small>
+                      </div>
                       <button onclick="window.hexcoreUI.removePlayerFromTeam('${captain.id}', '${player.id}')">移回池</button>
-                    </span>
+                    </article>
                   ` : '';
-                }).join('') || '<span>暂无队员</span>'}
+                }).join('') || '<article class="team-member empty-member"><div><strong>暂无队员</strong><span>可通过补录或抽卡加入队伍</span></div></article>'}
               </div>
               <div class="backfill-tools">
                 <select id="team-add-player-${captain.id}" aria-label="${escapeHtml(captain.name)} 补录选手">
