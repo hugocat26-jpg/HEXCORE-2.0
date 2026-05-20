@@ -50,6 +50,7 @@
   function sidebar() {
     const icon = Hexcore2.icon;
     const teamCount = Hexcore2.selectors.teamCount();
+    const playerCount = Hexcore2.state.players.length;
     const activeView = (Hexcore2.state.ui && Hexcore2.state.ui.activeView) || 'draft';
     const items = [
       ['draft', 'draft', '实时抽选'],
@@ -75,6 +76,7 @@
               ${icon(iconName)}
               <span>${label}</span>
               ${view === 'teams' ? `<b class="nav-count">${teamCount} 队</b>` : ''}
+              ${view === 'players' ? `<b class="nav-count">${playerCount} 人</b>` : ''}
             </button>
           `).join('')}
         </nav>
