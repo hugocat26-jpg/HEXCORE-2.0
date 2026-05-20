@@ -704,12 +704,8 @@
                       <em class="${isCaptain ? 'captain' : (player.status === 'available' ? 'available' : (player.status === 'disabled' ? 'disabled' : 'drafted'))}">${isCaptain ? '队长专属' : (player.status === 'available' ? '可选' : (player.status === 'disabled' ? '已禁用' : `已入队${owner ? `：${escapeHtml(owner.name)}` : ''}`))}</em>
                     </div>
                     <div class="player-edit-grid">
-                      <label class="manifesto-field">
-                        <small>参赛宣言</small>
-                        <textarea id="player-manifesto-${player.id}" rows="2" placeholder="填写这名选手的参赛宣言">${escapeHtml(player.manifesto || '')}</textarea>
-                      </label>
                       <label><small>偏好位置</small><input id="player-lane-${player.id}" value="${escapeHtml(player.lane || '未知')}" onkeydown="if(event.key==='Enter') window.hexcoreUI.savePlayer('${player.id}')"></label>
-                      <label><small>擅长英雄</small><input id="player-heroes-${player.id}" value="${escapeHtml((player.heroes || []).join('、'))}" placeholder="用顿号分隔"></label>
+                      <label><small>绝活英雄</small><input id="player-heroes-${player.id}" value="${escapeHtml((player.heroes || []).join('、'))}" placeholder="用顿号分隔"></label>
                       <div class="readonly-score"><span>评分</span><strong>${escapeHtml(player.score || 0)}</strong></div>
                     </div>
                     <div class="player-actions">
