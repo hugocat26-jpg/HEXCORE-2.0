@@ -220,7 +220,7 @@ function testUiNavigationAndHexButtons() {
   assert(app.innerHTML.includes('选手库') && app.innerHTML.includes('侏儒马池') && app.innerHTML.includes('setPlayerFilter'), '选手库页面应可筛选');
   assert(app.innerHTML.includes('导入 JSON/CSV') && app.innerHTML.includes('pool-health-grid'), '选手库应提供导入和卡池容量检测');
   assert(app.innerHTML.includes('队长专属池') && app.innerHTML.includes('卡池等级不可手动设置') && !app.innerHTML.includes('player-tier-'), '选手库应说明系统分池且不允许手动设置卡池');
-  assert(app.innerHTML.includes('参赛宣言') && app.innerHTML.includes('player-manifesto-') && app.innerHTML.includes('擅长英雄') && !app.innerHTML.includes('id="player-name-'), '选手卡片应使用参赛宣言和擅长英雄替代名称编辑栏');
+  assert(app.innerHTML.includes('参赛宣言') && app.innerHTML.includes('player-manifesto-') && app.innerHTML.includes('偏好位置') && app.innerHTML.includes('擅长英雄') && !app.innerHTML.includes('id="player-name-'), '选手卡片应使用参赛宣言、偏好位置和擅长英雄替代名称编辑栏');
   H.state.captains[0].playerId = 'captain-test-player';
   H.state.players.push({ id: 'captain-test-player', name: '队长测试选手', lane: '中路', gameId: 'CAPTAIN_TEST', score: 120, tier: 4, status: 'available' });
   H.normalizeState(H.state);
