@@ -51,6 +51,9 @@
     const icon = Hexcore2.icon;
     const teamCount = Hexcore2.selectors.teamCount();
     const playerCount = Hexcore2.state.players.length;
+    const roundProgressLabel = Hexcore2.state.draft.phase === 'completed'
+      ? '完成'
+      : `${Hexcore2.state.draft.round}/${Hexcore2.state.draft.maxRounds}`;
     const activeView = (Hexcore2.state.ui && Hexcore2.state.ui.activeView) || 'draft';
     const items = [
       ['draft', 'draft', '实时抽选'],
@@ -77,6 +80,7 @@
               <span>${label}</span>
               ${view === 'teams' ? `<b class="nav-count">${teamCount} 队</b>` : ''}
               ${view === 'players' ? `<b class="nav-count">${playerCount} 人</b>` : ''}
+              ${view === 'schedule' ? `<b class="nav-count">${roundProgressLabel}</b>` : ''}
             </button>
           `).join('')}
         </nav>
