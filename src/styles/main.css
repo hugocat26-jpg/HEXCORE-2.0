@@ -1531,13 +1531,60 @@ h2 span {
 
 .player-row {
   display: grid;
-  gap: 4px;
-  border-top: 1px solid var(--line-soft);
-  padding: 10px 0;
+  gap: 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: 7px;
+  background: rgba(12, 31, 42, 0.72);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.18);
+  margin-bottom: 10px;
+  padding: 10px;
+}
+
+.player-row:hover {
+  border-color: rgba(25, 212, 240, 0.34);
+  background: rgba(15, 42, 56, 0.86);
+}
+
+.player-row.captain-player-row {
+  border-color: rgba(244, 182, 42, 0.34);
+  background: rgba(244, 182, 42, 0.07);
 }
 
 .player-row.disabled-player {
   opacity: 0.66;
+}
+
+.player-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  border-bottom: 1px solid var(--line-soft);
+  padding-bottom: 8px;
+}
+
+.player-card-head div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.player-card-head strong {
+  color: var(--text);
+  font-size: 14px;
+}
+
+.player-card-head span {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.player-edit-grid {
+  display: grid;
+  gap: 8px;
 }
 
 .player-row label {
@@ -1604,11 +1651,12 @@ h2 span {
 
 .player-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 7px;
 }
 
 .player-actions button {
-  flex: 1 1 0;
+  flex: 1 1 72px;
   min-height: 28px;
   border: 1px solid rgba(25, 212, 240, 0.36);
   border-radius: 5px;
@@ -1616,6 +1664,22 @@ h2 span {
   color: #c9f7ff;
   font-size: 12px;
   font-weight: 800;
+}
+
+.player-actions button:hover:not(:disabled) {
+  border-color: rgba(25, 212, 240, 0.76);
+  background: rgba(25, 212, 240, 0.16);
+  transform: translateY(-1px);
+}
+
+.player-actions button:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.player-actions button.promote-inline {
+  border-color: rgba(244, 182, 42, 0.5);
+  background: rgba(244, 182, 42, 0.11);
+  color: #ffe3a3;
 }
 
 .player-actions button.danger-inline {

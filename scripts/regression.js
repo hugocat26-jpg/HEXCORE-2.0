@@ -225,6 +225,20 @@ function testUiNavigationAndHexButtons() {
   H.normalizeState(H.state);
   assert(H.state.players.find(player => player.id === 'captain-test-player').tier === 0, '被选为队长的选手应进入队长专属卡池');
   assert(H.state.players.filter(player => player.id !== 'captain-test-player').every(player => player.tier >= 1 && player.tier <= 4), '非队长选手应被系统分配到四个普通卡池');
+  const teamCountBeforePromote = H.state.captains.length;
+  const freePromotePlayer = H.state.players.find(player => player.status === 'available' && player.id !== 'captain-test-player');
+  assert(app.innerHTML.includes('设为队长') && app.innerHTML.includes('player-card-head'), '选手库每名非队长选手应有独立卡片和设为队长入口');
+  H.actions.promotePlayerToCaptain(freePromotePlayer.id);
+  assert(H.state.captains.length === teamCountBeforePromote + 1, '自由选手设为队长时应新建队伍');
+  assert(H.state.players.find(player => player.id === freePromotePlayer.id).tier === 0, '自由选手设为队长后应进入队长专属池');
+  const draftedPromotePlayer = H.state.players.find(player => player.status === 'drafted' && player.teamId);
+  const ownerBeforePromote = H.state.captains.find(captain => captain.id === draftedPromotePlayer.teamId);
+  H.state.players.push({ id: 'old-captain-player', name: '旧队长测试', lane: '辅助', gameId: 'OLD_CAPTAIN', score: 76, tier: 3, status: 'available' });
+  ownerBeforePromote.playerId = 'old-captain-player';
+  H.normalizeState(H.state);
+  H.actions.promotePlayerToCaptain(draftedPromotePlayer.id);
+  assert(ownerBeforePromote.playerId === draftedPromotePlayer.id && !ownerBeforePromote.team.includes(draftedPromotePlayer.id), '已入队队员晋升队长时应替换所在队伍队长且不占队员名额');
+  assert(H.state.players.find(player => player.id === 'old-captain-player').status === 'available', '原队长应回到自由选手池');
   const beforePlayers = H.state.players.length;
   H.actions.addPlayer();
   assert(H.state.players.length === beforePlayers, '点击新增选手不应直接写入选手库');
@@ -280,7 +294,8 @@ function testUiNavigationAndHexButtons() {
   assert(H.state.captains.find(captain => captain.id === 'c1').name === 'C1 回归改名', '队伍管理应能通过输入框保存改名');
 
   const beforeCount = H.state.captains.length;
-  elements['rules-team-count'] = { value: '13' };
+  const targetTeamCount = Math.min(H.state.settings.maxTeams, beforeCount + 1);
+  elements['rules-team-count'] = { value: String(targetTeamCount) };
   elements['rules-players-per-team'] = { value: '4' };
   elements['rules-max-rounds'] = { value: '4' };
   elements['rules-current-round'] = { value: '3' };
@@ -292,11 +307,11 @@ function testUiNavigationAndHexButtons() {
   elements['rules-round-tier-3'] = { value: '4' };
   elements['rules-round-tier-4'] = { value: '3' };
   H.actions.updateRules();
-  assert(H.state.captains.length === 13, '规则设置应能调整队伍数量');
+  assert(H.state.captains.length === targetTeamCount, '规则设置应能调整队伍数量');
   assert(H.state.draft.round === 3, '规则设置应能调整当前轮次');
   assert(H.state.settings.drawCount === 4, '规则设置应能调整基础抽卡张数');
   assert(H.selectors.roundTier(3) === 4, '规则设置应能调整每轮卡池顺序');
-  assert(H.state.captains.length === beforeCount + 1, '规则设置应新增缺失队伍');
+  assert(H.state.captains.length === targetTeamCount, '规则设置应新增缺失队伍');
   const oldOrderIndex = H.state.draft.baseOrder.indexOf('c2');
   H.actions.moveCaptainOrder('c2', 'up');
   assert(H.state.draft.baseOrder.indexOf('c2') === oldOrderIndex - 1, '队伍管理应能上移基础顺位');

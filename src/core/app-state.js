@@ -30,7 +30,7 @@
 
   function isCaptainPoolPlayer(player, captains) {
     if (!player) return false;
-    if (player.isCaptain || player.role === 'captain' || player.status === 'captain') return true;
+    if (player.isCaptain || player.role === 'captain') return true;
     return captains.some(captain =>
       captain.playerId === player.id
       || captain.playerGameId === player.gameId

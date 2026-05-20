@@ -678,19 +678,30 @@
               <h2>${escapeHtml(tierNames[tier])}池</h2>
               ${Hexcore2.state.players.filter(player => player.tier === tier && visiblePlayer(player)).map(player => {
                 const owner = player.teamId ? Hexcore2.state.captains.find(captain => captain.id === player.teamId) : null;
+                const isCaptain = player.status === 'captain';
+                const canPromote = player.status !== 'disabled' && !isCaptain;
                 return `
-                  <div class="player-row ${player.status === 'disabled' ? 'disabled-player' : ''}">
-                    <label><small>名称</small><input id="player-name-${player.id}" value="${escapeHtml(player.name)}"></label>
-                    <label><small>位置</small><input id="player-lane-${player.id}" value="${escapeHtml(player.lane || '未知')}"></label>
-                    <div class="derived-pool-field"><small>系统卡池</small><strong>${escapeHtml(tierNames[player.tier] || '未知')}</strong></div>
-                    <label><small>评分</small><input id="player-score-${player.id}" type="number" min="0" max="120" value="${player.score || 0}"></label>
-                    <em class="${player.status === 'captain' ? 'captain' : (player.status === 'available' ? 'available' : (player.status === 'disabled' ? 'disabled' : 'drafted'))}">${player.status === 'captain' ? '队长专属' : (player.status === 'available' ? '可选' : (player.status === 'disabled' ? '已禁用' : `已入队${owner ? `：${escapeHtml(owner.name)}` : ''}`))}</em>
+                  <article class="player-row ${player.status === 'disabled' ? 'disabled-player' : ''} ${isCaptain ? 'captain-player-row' : ''}">
+                    <div class="player-card-head">
+                      <div>
+                        <strong>${escapeHtml(player.name)}</strong>
+                        <span>${escapeHtml(player.gameId || '无游戏ID')}</span>
+                      </div>
+                      <em class="${isCaptain ? 'captain' : (player.status === 'available' ? 'available' : (player.status === 'disabled' ? 'disabled' : 'drafted'))}">${isCaptain ? '队长专属' : (player.status === 'available' ? '可选' : (player.status === 'disabled' ? '已禁用' : `已入队${owner ? `：${escapeHtml(owner.name)}` : ''}`))}</em>
+                    </div>
+                    <div class="player-edit-grid">
+                      <label><small>名称</small><input id="player-name-${player.id}" value="${escapeHtml(player.name)}"></label>
+                      <label><small>位置</small><input id="player-lane-${player.id}" value="${escapeHtml(player.lane || '未知')}"></label>
+                      <div class="derived-pool-field"><small>系统卡池</small><strong>${escapeHtml(tierNames[player.tier] || '未知')}</strong></div>
+                      <label><small>评分</small><input id="player-score-${player.id}" type="number" min="0" max="120" value="${player.score || 0}"></label>
+                    </div>
                     <div class="player-actions">
+                      ${canPromote ? `<button class="promote-inline" onclick="window.hexcoreUI.promotePlayerToCaptain('${player.id}')">设为队长</button>` : '<button disabled>队长锁定</button>'}
                       <button onclick="window.hexcoreUI.savePlayer('${player.id}')">保存</button>
-                      ${player.status === 'captain' ? '<button disabled>队长锁定</button>' : `<button class="${player.status === 'disabled' ? '' : 'danger-inline'}" onclick="window.hexcoreUI.togglePlayerDisabled('${player.id}')">${player.status === 'disabled' ? '恢复' : '禁用'}</button>`}
+                      ${isCaptain ? '' : `<button class="${player.status === 'disabled' ? '' : 'danger-inline'}" onclick="window.hexcoreUI.togglePlayerDisabled('${player.id}')">${player.status === 'disabled' ? '恢复' : '禁用'}</button>`}
                       <button class="danger-inline" onclick="window.hexcoreUI.deletePlayer('${player.id}')">删除</button>
                     </div>
-                  </div>
+                  </article>
                 `;
               }).join('') || '<div class="empty-log">暂无选手</div>'}
             </div>

@@ -797,6 +797,82 @@
       renderAndPersist();
     },
 
+    promotePlayerToCaptain(playerId) {
+      const player = Hexcore2.state.players.find(item => item.id === playerId);
+      if (!player) {
+        Hexcore2.eventStore.append('设为队长失败', '目标选手不存在', 'warn');
+        Hexcore2.ui.render();
+        return;
+      }
+      if (player.status === 'disabled') {
+        Hexcore2.eventStore.append('设为队长失败', `${player.name} 当前已禁用，不能设为队长`, 'warn');
+        Hexcore2.ui.render();
+        return;
+      }
+      if (player.status === 'captain' || Hexcore2.state.captains.some(captain => captain.playerId === player.id)) {
+        Hexcore2.eventStore.append('设为队长失败', `${player.name} 已经是队长`, 'warn');
+        Hexcore2.ui.render();
+        return;
+      }
+
+      const owner = Hexcore2.state.captains.find(captain =>
+        captain.id === player.teamId || (captain.team || []).includes(player.id)
+      );
+      if (!owner && Hexcore2.state.captains.length >= Hexcore2.state.settings.maxTeams) {
+        Hexcore2.eventStore.append('设为队长失败', `队伍数量不能超过 ${Hexcore2.state.settings.maxTeams}，请先删除或替换现有队伍`, 'warn');
+        Hexcore2.ui.render();
+        return;
+      }
+
+      snapshot(`设为队长前：${player.name}`);
+      const targetCaptain = owner || (() => {
+        const number = nextCaptainNumber();
+        const captain = {
+          id: `c${number}`,
+          name: `${player.name}队`,
+          record: '待定',
+          team: [],
+        };
+        Hexcore2.state.captains.push(captain);
+        Hexcore2.state.hexcoreAssignments[captain.id] = [];
+        Hexcore2.state.draft.baseOrder.push(captain.id);
+        return captain;
+      })();
+
+      const oldCaptainPlayer = Hexcore2.state.players.find(item =>
+        item.id === targetCaptain.playerId
+        || (targetCaptain.playerGameId && item.gameId === targetCaptain.playerGameId)
+      );
+      if (oldCaptainPlayer && oldCaptainPlayer.id !== player.id) {
+        oldCaptainPlayer.status = 'available';
+        delete oldCaptainPlayer.teamId;
+        delete oldCaptainPlayer.isCaptain;
+        delete oldCaptainPlayer.role;
+      }
+
+      Hexcore2.state.captains.forEach(captain => {
+        captain.team = (captain.team || []).filter(id => id !== player.id);
+        if (captain.id !== targetCaptain.id && captain.playerId === player.id) {
+          delete captain.playerId;
+          delete captain.playerGameId;
+        }
+      });
+      targetCaptain.playerId = player.id;
+      targetCaptain.playerGameId = player.gameId || '';
+      player.status = 'captain';
+      delete player.teamId;
+      Hexcore2.state.ui.playerFilter = '0';
+      normalizeAfterConfigChange();
+      Hexcore2.eventStore.append(
+        '队长设置',
+        owner
+          ? `${player.name} 晋升为 ${targetCaptain.name} 的队长${oldCaptainPlayer && oldCaptainPlayer.id !== player.id ? `，${oldCaptainPlayer.name} 回到自由选手池` : ''}`
+          : `${player.name} 设为队长并新建队伍 ${targetCaptain.name}`,
+        'success'
+      );
+      renderAndPersist();
+    },
+
     moveCaptainOrder(captainId, direction) {
       const order = Hexcore2.state.draft.baseOrder;
       const index = order.indexOf(captainId);
