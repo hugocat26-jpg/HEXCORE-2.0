@@ -1014,7 +1014,6 @@
           <div class="rule-block"><strong>队伍容量</strong><span>每队 ${Hexcore2.state.settings.playersPerTeam} 名选手。</span></div>
           <div class="rule-block"><strong>基础抽卡</strong><span>每次基础抽 ${Hexcore2.state.settings.drawCount} 张，海克斯可继续叠加。</span></div>
           <div class="rule-block"><strong>执行模式</strong><span>当前由裁判代抽、代选、代用海克斯。</span></div>
-          <div class="rule-block"><strong>旧购买逻辑</strong><span>已取消资源购买卡牌流程，抽卡只由规则、顺位、卡池和海克斯效果驱动。</span></div>
         </div>
         <div class="hex-toggle-panel">
           <h2>海克斯启用控制</h2>

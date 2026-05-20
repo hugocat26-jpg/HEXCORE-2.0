@@ -329,6 +329,7 @@ function testUiNavigationAndHexButtons() {
   assert(app.innerHTML.includes('新增队伍') && app.innerHTML.includes('saveCaptainName') && app.innerHTML.includes('待指定队长'), '队伍管理页面应提供实质操作，并对空队伍显示待指定队长');
   H.actions.setActiveView('rules');
   assert(app.innerHTML.includes('保存规则并重算流程'), '规则设置页面应提供保存入口');
+  assert(!app.innerHTML.includes('旧购买逻辑') && !app.innerHTML.includes('资源购买卡牌'), '规则设置不应显示旧购买逻辑说明');
   elements['captain-name-c1'] = { value: 'C1 回归改名' };
   H.actions.saveCaptainName('c1');
   assert(H.state.captains.find(captain => captain.id === 'c1').name === 'C1 回归改名', '队伍管理应能通过输入框保存改名');
