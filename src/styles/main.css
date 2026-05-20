@@ -1234,14 +1234,17 @@ h2 span {
 }
 
 .data-card-head span {
-  width: 28px;
-  height: 28px;
+  width: 42px;
+  height: 42px;
   display: grid;
   place-items: center;
-  border-radius: 5px;
-  background: rgba(25, 212, 240, 0.13);
+  border: 1px solid rgba(25, 212, 240, 0.32);
+  border-radius: 8px;
+  background: linear-gradient(180deg, rgba(25, 212, 240, 0.22), rgba(25, 212, 240, 0.08));
   color: var(--cyan);
+  font-size: 20px;
   font-weight: 900;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
 }
 
 .captain-name-field {
