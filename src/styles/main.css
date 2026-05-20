@@ -1676,6 +1676,116 @@ h2 span {
   border-color: rgba(25, 212, 240, 0.25);
 }
 
+.tournament-board {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  align-items: start;
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.tournament-round {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: linear-gradient(180deg, rgba(17, 35, 45, 0.96), rgba(9, 20, 28, 0.96));
+  box-shadow: var(--shadow);
+  padding: 14px;
+}
+
+.tournament-round h2 {
+  margin-bottom: 12px;
+  color: var(--cyan);
+}
+
+.tournament-match-list {
+  display: grid;
+  gap: 10px;
+}
+
+.tournament-match {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.025);
+  padding: 12px;
+}
+
+.tournament-match.completed {
+  border-color: rgba(85, 200, 121, 0.38);
+  background: rgba(85, 200, 121, 0.08);
+}
+
+.tournament-match.bye {
+  border-color: rgba(244, 182, 42, 0.38);
+  background: rgba(244, 182, 42, 0.08);
+}
+
+.match-head,
+.match-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.match-head span,
+.match-actions span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.match-score-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 34px minmax(0, 1fr);
+  align-items: end;
+  gap: 10px;
+}
+
+.match-score-row label {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+}
+
+.match-score-row label span {
+  overflow: hidden;
+  color: #dce9ef;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.match-score-row input {
+  width: 100%;
+  height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #09151d;
+  color: #d6e5ec;
+  padding: 0 10px;
+}
+
+.match-score-row em {
+  align-self: center;
+  color: var(--faint);
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 900;
+  text-align: center;
+}
+
+.empty-tournament {
+  margin-top: 14px;
+}
+
+.empty-tournament p {
+  margin: 10px 0 0;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
 .rules-grid {
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
 }

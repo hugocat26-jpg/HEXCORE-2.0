@@ -54,6 +54,9 @@
     const roundProgressLabel = Hexcore2.state.draft.phase === 'completed'
       ? '完成'
       : `${Hexcore2.state.draft.round}/${Hexcore2.state.draft.maxRounds}`;
+    const tournamentLabel = Hexcore2.state.tournament.status === 'completed'
+      ? '完成'
+      : (Hexcore2.state.tournament.rounds.length ? `${Hexcore2.state.tournament.rounds.length}轮` : '未排');
     const activeView = (Hexcore2.state.ui && Hexcore2.state.ui.activeView) || 'draft';
     const items = [
       ['draft', 'draft', '实时抽选'],
@@ -61,6 +64,7 @@
       ['users', 'players', '选手库'],
       ['hex', 'hexcores', '海克斯库'],
       ['calendar', 'schedule', '轮次进度'],
+      ['trophy', 'tournament', '赛程'],
       ['rule', 'rules', '规则设置'],
       ['log', 'logs', '日志导出'],
       ['cog', 'settings', '系统设置'],
@@ -81,6 +85,7 @@
               ${view === 'teams' ? `<b class="nav-count">${teamCount} 队</b>` : ''}
               ${view === 'players' ? `<b class="nav-count">${playerCount} 人</b>` : ''}
               ${view === 'schedule' ? `<b class="nav-count">${roundProgressLabel}</b>` : ''}
+              ${view === 'tournament' ? `<b class="nav-count">${tournamentLabel}</b>` : ''}
             </button>
           `).join('')}
         </nav>
@@ -731,6 +736,78 @@
     `;
   }
 
+  function tournamentPage() {
+    const tournament = Hexcore2.state.tournament || { status: 'empty', rounds: [], championId: '' };
+    const captainName = captainId => {
+      const captain = Hexcore2.state.captains.find(item => item.id === captainId);
+      return captain ? captain.name : '待定';
+    };
+    const completedMatches = tournament.rounds.reduce((sum, round) =>
+      sum + round.matches.filter(match => match.status === 'completed' || match.status === 'bye').length, 0);
+    const totalMatches = tournament.rounds.reduce((sum, round) => sum + round.matches.length, 0);
+    const championName = tournament.championId ? captainName(tournament.championId) : '未产生';
+    const statusText = tournament.status === 'completed' ? '已完成' : (tournament.rounds.length ? '进行中' : '未排赛程');
+
+    return `
+      ${pageHeader('赛程', '为抽卡选人结束后的队伍安排淘汰赛赛程，录入比分后系统自动晋级胜者。')}
+      <section class="data-panel">
+        <div class="metrics-grid">
+          <div><span>参赛队伍</span><strong>${Hexcore2.selectors.teamCount()}</strong></div>
+          <div><span>赛程状态</span><strong>${statusText}</strong></div>
+          <div><span>已完成场次</span><strong>${completedMatches}/${totalMatches || 0}</strong></div>
+          <div><span>冠军队伍</span><strong>${escapeHtml(championName)}</strong></div>
+        </div>
+        <div class="toolbar-row">
+          <button class="primary-btn" onclick="window.hexcoreUI.generateTournamentSchedule()">生成淘汰赛赛程</button>
+          <button class="danger-btn" onclick="window.hexcoreUI.resetTournamentSchedule()">清空赛程</button>
+        </div>
+      </section>
+      ${tournament.rounds.length ? `
+        <section class="tournament-board">
+          ${tournament.rounds.map((round, roundIndex) => `
+            <div class="tournament-round">
+              <h2>${escapeHtml(round.name)}</h2>
+              <div class="tournament-match-list">
+                ${round.matches.map(match => {
+                  const hasBye = Boolean(match.teamAId && !match.teamBId);
+                  const winnerName = match.winnerId ? captainName(match.winnerId) : '待定';
+                  return `
+                    <article class="tournament-match ${match.status}">
+                      <div class="match-head">
+                        <strong>${escapeHtml(match.id.toUpperCase())}</strong>
+                        <span>${match.status === 'bye' ? '轮空晋级' : (match.status === 'completed' ? '已结束' : '待录分')}</span>
+                      </div>
+                      <div class="match-score-row">
+                        <label>
+                          <span>${escapeHtml(captainName(match.teamAId))}</span>
+                          <input id="tournament-score-${escapeHtml(round.id)}-${escapeHtml(match.id)}-a" type="number" min="0" value="${escapeHtml(match.scoreA)}" ${hasBye ? 'disabled' : ''}>
+                        </label>
+                        <em>VS</em>
+                        <label>
+                          <span>${escapeHtml(match.teamBId ? captainName(match.teamBId) : '轮空')}</span>
+                          <input id="tournament-score-${escapeHtml(round.id)}-${escapeHtml(match.id)}-b" type="number" min="0" value="${escapeHtml(match.scoreB)}" ${hasBye ? 'disabled' : ''}>
+                        </label>
+                      </div>
+                      <div class="match-actions">
+                        <span>晋级：${escapeHtml(winnerName)}</span>
+                        <button class="subtle-btn" ${hasBye ? 'disabled' : ''} onclick="window.hexcoreUI.saveTournamentScore('${escapeHtml(round.id)}', '${escapeHtml(match.id)}')">保存比分</button>
+                      </div>
+                    </article>
+                  `;
+                }).join('')}
+              </div>
+            </div>
+          `).join('')}
+        </section>
+      ` : `
+        <section class="data-panel empty-tournament">
+          <h2>暂无赛程</h2>
+          <p>点击“生成淘汰赛赛程”后，系统会按当前基础顺位为所有队伍自动配对。选人抽卡流程不会被赛程页面修改。</p>
+        </section>
+      `}
+    `;
+  }
+
   function rulesPage() {
     const tierOptions = [1, 2, 3, 4].map(tier => `<option value="${tier}">${escapeHtml(Hexcore2.state.settings.tierNames[tier])}</option>`).join('');
     const disabledHexcores = new Set(Hexcore2.state.settings.disabledHexcores || []);
@@ -874,6 +951,7 @@
     if (activeView === 'players') return `<main class="workspace-main page-workspace">${playersPage()}</main>`;
     if (activeView === 'hexcores') return `<main class="workspace-main page-workspace">${hexcoresPage()}</main>`;
     if (activeView === 'schedule') return `<main class="workspace-main page-workspace">${schedulePage()}</main>`;
+    if (activeView === 'tournament') return `<main class="workspace-main page-workspace">${tournamentPage()}</main>`;
     if (activeView === 'rules') return `<main class="workspace-main page-workspace">${rulesPage()}</main>`;
     if (activeView === 'logs') return `<main class="workspace-main page-workspace">${logsPage()}</main>`;
     if (activeView === 'settings') return `<main class="workspace-main page-workspace">${settingsPage()}</main>`;

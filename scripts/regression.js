@@ -276,6 +276,25 @@ function testUiNavigationAndHexButtons() {
   assert(app.innerHTML.includes('轮次进度') && app.innerHTML.includes('schedule-cell') && app.innerHTML.includes('jumpToScheduleSlot'), '轮次进度页面应提供跳转入口');
   H.actions.jumpToScheduleSlot(2, 'c2');
   assert(H.state.draft.round === 2 && H.selectors.currentCaptain().id === 'c2', '轮次跳转应切换轮次和当前队长');
+  H.actions.setActiveView('tournament');
+  assert(app.innerHTML.includes('赛程') && app.innerHTML.includes('generateTournamentSchedule'), '赛程页面应提供生成入口');
+  H.actions.generateTournamentSchedule();
+  assert(H.state.tournament.rounds.length >= 1 && H.state.tournament.rounds[0].matches.length >= 1, '赛程页面应能生成首轮对阵');
+  const firstMatch = H.state.tournament.rounds[0].matches.find(match => match.teamAId && match.teamBId);
+  elements[`tournament-score-r1-${firstMatch.id}-a`] = { value: '2' };
+  elements[`tournament-score-r1-${firstMatch.id}-b`] = { value: '0' };
+  H.actions.saveTournamentScore('r1', firstMatch.id);
+  assert(firstMatch.winnerId === firstMatch.teamAId && firstMatch.status === 'completed', '录入比分后应自动判定晋级队伍');
+  H.state.tournament.rounds[0].matches.forEach(match => {
+    if (match.status === 'pending') {
+      elements[`tournament-score-r1-${match.id}-a`] = { value: '1' };
+      elements[`tournament-score-r1-${match.id}-b`] = { value: '0' };
+      H.actions.saveTournamentScore('r1', match.id);
+    }
+  });
+  assert(H.state.tournament.rounds.length >= 2, '首轮全部结束后应自动生成下一轮');
+  H.actions.resetTournamentSchedule();
+  assert(H.state.tournament.status === 'empty' && H.state.tournament.rounds.length === 0, '赛程页面应能清空赛程');
   H.actions.setActiveView('logs');
   assert(app.innerHTML.includes('exportEventsJson') && app.innerHTML.includes('exportRecapText'), '日志页面应提供 JSON 和复盘文本导出');
   elements['event-search'] = { value: '海克斯' };

@@ -90,6 +90,81 @@
     Hexcore2.state.hexcoreDraft.refreshUsed = false;
   }
 
+  function captainName(captainId) {
+    const captain = Hexcore2.state.captains.find(item => item.id === captainId);
+    return captain ? captain.name : '待定';
+  }
+
+  function buildTournamentRound(roundNumber, entrants, oldRound) {
+    const matches = [];
+    const half = Math.ceil(entrants.length / 2);
+    for (let index = 0; index < half; index += 1) {
+      const teamAId = entrants[index] || '';
+      const teamBId = entrants[entrants.length - 1 - index] || '';
+      const id = `r${roundNumber}m${index + 1}`;
+      const oldMatch = oldRound && oldRound.matches
+        ? oldRound.matches.find(match => match.id === id && match.teamAId === teamAId && match.teamBId === teamBId)
+        : null;
+      const isBye = Boolean(teamAId && !teamBId);
+      matches.push(oldMatch ? { ...oldMatch } : {
+        id,
+        teamAId,
+        teamBId,
+        scoreA: '',
+        scoreB: '',
+        winnerId: isBye ? teamAId : '',
+        status: isBye ? 'bye' : 'pending',
+      });
+    }
+    return {
+      id: `r${roundNumber}`,
+      name: entrants.length <= 2 ? '决赛' : `第 ${roundNumber} 轮`,
+      matches,
+    };
+  }
+
+  function recomputeTournamentAdvancement() {
+    const tournament = Hexcore2.state.tournament || { status: 'empty', championId: '', rounds: [] };
+    if (!tournament.rounds.length) {
+      tournament.status = 'empty';
+      tournament.championId = '';
+      Hexcore2.state.tournament = tournament;
+      return;
+    }
+
+    tournament.status = 'running';
+    tournament.championId = '';
+    for (let roundIndex = 0; roundIndex < tournament.rounds.length; roundIndex += 1) {
+      const round = tournament.rounds[roundIndex];
+      round.matches.forEach(match => {
+        if (match.teamAId && !match.teamBId) {
+          match.status = 'bye';
+          match.winnerId = match.teamAId;
+        }
+      });
+
+      const allDone = round.matches.length > 0 && round.matches.every(match =>
+        (match.status === 'completed' || match.status === 'bye') && match.winnerId
+      );
+      if (!allDone) {
+        tournament.rounds = tournament.rounds.slice(0, roundIndex + 1);
+        break;
+      }
+
+      const winners = round.matches.map(match => match.winnerId).filter(Boolean);
+      if (winners.length <= 1) {
+        tournament.status = 'completed';
+        tournament.championId = winners[0] || '';
+        tournament.rounds = tournament.rounds.slice(0, roundIndex + 1);
+        break;
+      }
+
+      const oldNextRound = tournament.rounds[roundIndex + 1];
+      tournament.rounds[roundIndex + 1] = buildTournamentRound(roundIndex + 2, winners, oldNextRound);
+    }
+    Hexcore2.state.tournament = tournament;
+  }
+
   function findNextHexcoreCaptain(currentCaptainId) {
     const order = (Hexcore2.state.hexcoreDraft && Hexcore2.state.hexcoreDraft.drawOrder && Hexcore2.state.hexcoreDraft.drawOrder.length)
       ? Hexcore2.state.hexcoreDraft.drawOrder
@@ -341,6 +416,7 @@
         Hexcore2.state.hexcoreDraft = state.hexcoreDraft || {};
         Hexcore2.state.draft = state.draft;
         Hexcore2.state.events = state.events || [];
+        Hexcore2.state.tournament = state.tournament || {};
         Hexcore2.state.undoStack = state.undoStack || [];
         Hexcore2.state.ui = state.ui || { activeView: 'draft', eventFilter: 'all' };
         if (Hexcore2.normalizeState) Hexcore2.normalizeState(Hexcore2.state);
@@ -1055,6 +1131,88 @@
         effect.playerId !== playerId && effect.firstPlayerId !== playerId && effect.secondPlayerId !== playerId
       );
       Hexcore2.eventStore.append('选手库', `删除选手 ${player.name}`, 'warn');
+      renderAndPersist();
+    },
+
+    generateTournamentSchedule() {
+      const entrants = Hexcore2.state.draft.baseOrder
+        .filter(id => Hexcore2.state.captains.some(captain => captain.id === id));
+      if (entrants.length < 2) {
+        Hexcore2.eventStore.append('生成赛程失败', '至少需要 2 支队伍才能生成赛程', 'warn');
+        Hexcore2.ui.render();
+        return;
+      }
+      if (Hexcore2.state.tournament && Hexcore2.state.tournament.rounds && Hexcore2.state.tournament.rounds.length) {
+        const confirmed = typeof confirm === 'function'
+          ? confirm('当前已有赛程，重新生成会清空现有比分和晋级结果。确认继续？')
+          : true;
+        if (!confirmed) return;
+      }
+
+      snapshot('生成赛程前');
+      Hexcore2.state.tournament = {
+        status: 'running',
+        championId: '',
+        rounds: [buildTournamentRound(1, entrants, null)],
+      };
+      recomputeTournamentAdvancement();
+      Hexcore2.eventStore.append('赛程生成', `已为 ${entrants.length} 支队伍生成淘汰赛赛程`, 'success');
+      renderAndPersist();
+    },
+
+    saveTournamentScore(roundId, matchId) {
+      const tournament = Hexcore2.state.tournament || {};
+      const round = (tournament.rounds || []).find(item => item.id === roundId);
+      const match = round && round.matches.find(item => item.id === matchId);
+      if (!round || !match || !match.teamAId || !match.teamBId) {
+        Hexcore2.eventStore.append('保存比分失败', '目标场次无效或为轮空场次', 'warn');
+        Hexcore2.ui.render();
+        return;
+      }
+
+      const inputA = document.getElementById(`tournament-score-${roundId}-${matchId}-a`);
+      const inputB = document.getElementById(`tournament-score-${roundId}-${matchId}-b`);
+      const scoreA = Number(inputA && inputA.value);
+      const scoreB = Number(inputB && inputB.value);
+      if (!Number.isInteger(scoreA) || !Number.isInteger(scoreB) || scoreA < 0 || scoreB < 0) {
+        Hexcore2.eventStore.append('保存比分失败', '比分必须是非负整数', 'warn');
+        Hexcore2.ui.render();
+        return;
+      }
+      if (scoreA === scoreB) {
+        Hexcore2.eventStore.append('保存比分失败', '淘汰赛比分不能相同，请录入胜负结果', 'warn');
+        Hexcore2.ui.render();
+        return;
+      }
+
+      snapshot(`保存赛程比分前：${match.id}`);
+      match.scoreA = scoreA;
+      match.scoreB = scoreB;
+      match.winnerId = scoreA > scoreB ? match.teamAId : match.teamBId;
+      match.status = 'completed';
+      recomputeTournamentAdvancement();
+      Hexcore2.eventStore.append(
+        '赛程比分',
+        `${captainName(match.teamAId)} ${scoreA}:${scoreB} ${captainName(match.teamBId)}，${captainName(match.winnerId)} 自动晋级`,
+        Hexcore2.state.tournament.status === 'completed' ? 'success' : 'info'
+      );
+      renderAndPersist();
+    },
+
+    resetTournamentSchedule() {
+      if (!Hexcore2.state.tournament || !Hexcore2.state.tournament.rounds.length) {
+        Hexcore2.eventStore.append('赛程清空', '当前没有可清空的赛程', 'info');
+        Hexcore2.ui.render();
+        return;
+      }
+      const confirmed = typeof confirm === 'function'
+        ? confirm('确认清空当前赛程、比分和晋级结果？')
+        : true;
+      if (!confirmed) return;
+
+      snapshot('清空赛程前');
+      Hexcore2.state.tournament = { status: 'empty', championId: '', rounds: [] };
+      Hexcore2.eventStore.append('赛程清空', '裁判清空了当前赛程', 'warn');
       renderAndPersist();
     },
 

@@ -58,6 +58,29 @@
     };
   }
 
+  function normalizeTournament(tournament, captains) {
+    const captainIds = new Set(captains.map(captain => captain.id));
+    const source = tournament && typeof tournament === 'object' ? tournament : {};
+    const rounds = Array.isArray(source.rounds) ? source.rounds : [];
+    return {
+      status: ['empty', 'running', 'completed'].includes(source.status) ? source.status : 'empty',
+      championId: captainIds.has(source.championId) ? source.championId : '',
+      rounds: rounds.slice(0, 8).map((round, roundIndex) => ({
+        id: String(round.id || `r${roundIndex + 1}`).slice(0, 24),
+        name: String(round.name || `第 ${roundIndex + 1} 轮`).slice(0, 32),
+        matches: (Array.isArray(round.matches) ? round.matches : []).slice(0, 32).map((match, matchIndex) => ({
+          id: String(match.id || `r${roundIndex + 1}m${matchIndex + 1}`).slice(0, 32),
+          teamAId: captainIds.has(match.teamAId) ? match.teamAId : '',
+          teamBId: captainIds.has(match.teamBId) ? match.teamBId : '',
+          scoreA: match.scoreA === '' || match.scoreA === undefined ? '' : Math.max(0, Number(match.scoreA) || 0),
+          scoreB: match.scoreB === '' || match.scoreB === undefined ? '' : Math.max(0, Number(match.scoreB) || 0),
+          winnerId: captainIds.has(match.winnerId) ? match.winnerId : '',
+          status: ['pending', 'bye', 'completed'].includes(match.status) ? match.status : 'pending',
+        })),
+      })),
+    };
+  }
+
   const defaultState = {
     mode: 'referee_single_client',
     settings: {
@@ -99,6 +122,11 @@
       paused: false,
     },
     events: [],
+    tournament: {
+      status: 'empty',
+      championId: '',
+      rounds: [],
+    },
     undoStack: [],
     ui: {
       activeView: 'draft',
@@ -156,6 +184,7 @@
     state.draft.pickedThisTurn = Boolean(state.draft.pickedThisTurn);
     state.draft.paused = Boolean(state.draft.paused);
     state.events = state.events || [];
+    state.tournament = normalizeTournament(state.tournament, state.captains);
     state.undoStack = state.undoStack || [];
     state.ui = state.ui || { activeView: 'draft', eventFilter: 'all' };
     state.ui.activeView = state.ui.activeView || 'draft';
