@@ -25,7 +25,11 @@
 
   function drawTimeoutRemaining() {
     const draw = Hexcore2.state.draft.currentDraw;
-    if (!draw || !draw.timeoutEndsAt || Hexcore2.state.draft.pickedThisTurn) return null;
+    if (!draw || Hexcore2.state.draft.pickedThisTurn) return null;
+    if (Hexcore2.state.draft.paused && draw.timeoutPausedRemainingMs !== undefined) {
+      return Math.max(0, Math.ceil(Number(draw.timeoutPausedRemainingMs) / 1000));
+    }
+    if (!draw.timeoutEndsAt) return null;
     return Math.max(0, Math.ceil((draw.timeoutEndsAt - Date.now()) / 1000));
   }
 
@@ -267,7 +271,7 @@
           <h2>${escapeHtml(currentDrawLabel())} <span>${escapeHtml(Hexcore2.state.settings.tierNames[tier])}池${draw && draw.reason ? ` / ${escapeHtml(draw.reason)}` : ''}</span></h2>
           <button class="subtle-btn" onclick="window.hexcoreUI.drawCards()">${Hexcore2.icon('refresh')}刷新池子</button>
         </div>
-        ${timeoutRemaining !== null ? `<div class="draw-timeout-bar"><strong>倒计时 ${timeoutRemaining}s</strong><span>结束未选择时，将从当前 ${cards.length} 张候选卡中随机入队</span></div>` : ''}
+        ${timeoutRemaining !== null ? `<div class="draw-timeout-bar ${Hexcore2.state.draft.paused ? 'paused' : ''}"><strong>${Hexcore2.state.draft.paused ? '已暂停' : '倒计时'} ${timeoutRemaining}s</strong><span>${Hexcore2.state.draft.paused ? '恢复后倒计时继续' : `结束未选择时，将从当前 ${cards.length} 张候选卡中随机入队`}</span></div>` : ''}
         <div class="cards-grid ${draw && draw.pickMode === 'open_pick' ? 'open-pick-grid' : ''}">
           ${cards.map(({ slot, player, realPlayer }, index) => `
             <button class="player-card ${index === selected ? 'selected' : ''} ${blinded ? 'blind-card' : ''} ${draw && draw.pickMode === 'mystery_swap' ? 'mystery-card' : ''}" onclick="window.hexcoreUI.selectCard(${index})">
@@ -312,7 +316,7 @@
           <button class="action-btn amber ${canTimeoutPick ? '' : 'disabled'}" onclick="window.hexcoreUI.timeoutRandomPick()"><span class="fast-icon">⏱</span><strong>超时随机${timeoutRemaining !== null ? ` ${timeoutRemaining}s` : ''}</strong><span>从当前卡组随机</span></button>
           <button class="action-btn amber" onclick="window.hexcoreUI.skipTurn()"><span class="fast-icon">»</span><strong>跳过本轮</strong><span>不选择，跳过此轮</span></button>
           <button class="action-btn blue" onclick="window.hexcoreUI.nextCaptain()">${icon('team')}<strong>下一位</strong><span>交给下一队长</span></button>
-          <button class="action-btn muted" onclick="window.hexcoreUI.pause()">${icon('pause')}<strong>暂停</strong><span>暂停选人流程</span></button>
+          <button class="action-btn muted" onclick="window.hexcoreUI.pause()">${icon('pause')}<strong>${Hexcore2.state.draft.paused ? '恢复' : '暂停'}</strong><span>${Hexcore2.state.draft.paused ? '继续倒计时' : '暂停选人流程'}</span></button>
           <button class="action-btn muted ${(Hexcore2.state.undoStack || []).length === 0 ? 'disabled' : ''}" onclick="window.hexcoreUI.undo()">${icon('undo')}<strong>撤销上一步</strong><span>可撤销 ${(Hexcore2.state.undoStack || []).length} 步</span></button>
         </div>
       </section>

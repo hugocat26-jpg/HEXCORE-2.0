@@ -210,6 +210,13 @@ function testDecomposeKnowledge() {
   H.ui.render();
   assert(app.innerHTML.includes('战力顺位'), '抽卡 UI 应显示战力顺位');
   assert(app.innerHTML.includes('倒计时') && app.innerHTML.includes('从当前卡组随机'), '抽卡后 UI 应显示超时倒计时和当前卡组随机提示');
+  const timeoutBeforePause = H.state.draft.currentDraw.timeoutEndsAt;
+  H.actions.pause();
+  assert(H.state.draft.paused && !H.state.draft.currentDraw.timeoutEndsAt && H.state.draft.currentDraw.timeoutPausedRemainingMs > 0, '暂停后应冻结超时倒计时');
+  H.ui.render();
+  assert(app.innerHTML.includes('已暂停') && app.innerHTML.includes('恢复后倒计时继续'), '暂停后 UI 应提示倒计时已冻结');
+  H.actions.pause();
+  assert(!H.state.draft.paused && H.state.draft.currentDraw.timeoutEndsAt && H.state.draft.currentDraw.timeoutEndsAt !== timeoutBeforePause, '恢复后应按剩余时间继续倒计时');
   const drawnPlayerIds = H.state.draft.currentDraw.cards.map(card => card.playerId);
   H.actions.timeoutRandomPick(true);
   const pickedFromDraw = H.state.captains.find(captain => captain.id === 'c1').team.some(playerId => drawnPlayerIds.includes(playerId));

@@ -112,6 +112,7 @@
       delete draw.timeoutStartedAt;
       delete draw.timeoutEndsAt;
       delete draw.timeoutSeconds;
+      delete draw.timeoutPausedRemainingMs;
     }
   }
 
@@ -126,7 +127,7 @@
     clearPickTimeout(false);
     Hexcore2.pickTimeoutTimer = global.setTimeout(() => {
       const draw = Hexcore2.state.draft.currentDraw;
-      if (!draw || Hexcore2.state.draft.pickedThisTurn || !draw.timeoutEndsAt) {
+      if (!draw || Hexcore2.state.draft.pickedThisTurn || !draw.timeoutEndsAt || Hexcore2.state.draft.paused) {
         clearPickTimeout(false);
         return;
       }
@@ -152,6 +153,25 @@
     draw.timeoutSeconds = seconds;
     draw.timeoutStartedAt = Date.now();
     draw.timeoutEndsAt = draw.timeoutStartedAt + seconds * 1000;
+    schedulePickTimeoutTick();
+  }
+
+  function pausePickTimeout() {
+    const draw = Hexcore2.state.draft.currentDraw;
+    if (!draw || !draw.timeoutEndsAt || Hexcore2.state.draft.pickedThisTurn) return;
+    draw.timeoutPausedRemainingMs = Math.max(0, draw.timeoutEndsAt - Date.now());
+    delete draw.timeoutEndsAt;
+    clearPickTimeout(false);
+  }
+
+  function resumePickTimeout() {
+    const draw = Hexcore2.state.draft.currentDraw;
+    if (!draw || !draw.cards || !draw.cards.length || Hexcore2.state.draft.pickedThisTurn) return;
+    const remainingMs = Math.max(0, Number(draw.timeoutPausedRemainingMs) || drawTimeoutSeconds(draw) * 1000);
+    draw.timeoutStartedAt = Date.now();
+    draw.timeoutEndsAt = draw.timeoutStartedAt + remainingMs;
+    draw.timeoutSeconds = Math.max(1, Math.ceil(remainingMs / 1000));
+    delete draw.timeoutPausedRemainingMs;
     schedulePickTimeoutTick();
   }
 
@@ -431,6 +451,11 @@
     pause() {
       snapshot('暂停状态切换前');
       Hexcore2.state.draft.paused = !Hexcore2.state.draft.paused;
+      if (Hexcore2.state.draft.paused) {
+        pausePickTimeout();
+      } else {
+        resumePickTimeout();
+      }
       Hexcore2.eventStore.append('裁判操作', Hexcore2.state.draft.paused ? '裁判暂停了选人流程' : '裁判恢复了选人流程', 'warn');
       Hexcore2.ui.render();
     },

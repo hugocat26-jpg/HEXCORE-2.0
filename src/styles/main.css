@@ -791,6 +791,15 @@ h2 span {
   font-size: 12px;
 }
 
+.draw-timeout-bar.paused {
+  border-color: rgba(78, 163, 255, 0.42);
+  background: rgba(78, 163, 255, 0.1);
+}
+
+.draw-timeout-bar.paused strong {
+  color: var(--blue);
+}
+
 .control-panel {
   margin-top: 12px;
 }
