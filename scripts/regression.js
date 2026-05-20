@@ -228,10 +228,12 @@ function testUiNavigationAndHexButtons() {
   assert(H.state.players.find(player => player.id === 'captain-test-player').tier === 0, '被选为队长的选手应进入队长专属卡池');
   assert(H.state.players.filter(player => player.id !== 'captain-test-player').every(player => player.tier >= 1 && player.tier <= 4), '非队长选手应被系统分配到四个普通卡池');
   const teamCountBeforePromote = H.state.captains.length;
+  const emptyCaptainBeforePromote = H.state.captains.find(captain => !captain.playerId && !captain.playerGameId);
   const freePromotePlayer = H.state.players.find(player => player.status === 'available' && player.id !== 'captain-test-player');
   assert(app.innerHTML.includes('设为队长') && app.innerHTML.includes('player-card-head'), '选手库每名非队长选手应有独立卡片和设为队长入口');
   H.actions.promotePlayerToCaptain(freePromotePlayer.id);
-  assert(H.state.captains.length === teamCountBeforePromote + 1, '自由选手设为队长时应新建队伍');
+  assert(H.state.captains.length === teamCountBeforePromote, '存在空队伍时自由选手设为队长应填入该队伍而不是新建队伍');
+  assert(emptyCaptainBeforePromote.playerId === freePromotePlayer.id, '自由选手应被指定为空队伍的队长');
   assert(H.state.players.find(player => player.id === freePromotePlayer.id).tier === 0, '自由选手设为队长后应进入队长专属池');
   const draftedPromotePlayer = H.state.players.find(player => player.status === 'drafted' && player.teamId);
   const ownerBeforePromote = H.state.captains.find(captain => captain.id === draftedPromotePlayer.teamId);
@@ -319,7 +321,7 @@ function testUiNavigationAndHexButtons() {
   H.actions.randomizeHexcoreDrawOrder();
   assert(H.state.hexcoreDraft.drawOrder.length === H.state.captains.length, '海克斯库应能随机制定抽取顺序');
   H.actions.setActiveView('teams');
-  assert(app.innerHTML.includes('新增队伍') && app.innerHTML.includes('saveCaptainName'), '队伍管理页面应提供实质操作');
+  assert(app.innerHTML.includes('新增队伍') && app.innerHTML.includes('saveCaptainName') && app.innerHTML.includes('待指定队长'), '队伍管理页面应提供实质操作，并对空队伍显示待指定队长');
   H.actions.setActiveView('rules');
   assert(app.innerHTML.includes('保存规则并重算流程'), '规则设置页面应提供保存入口');
   elements['captain-name-c1'] = { value: 'C1 回归改名' };

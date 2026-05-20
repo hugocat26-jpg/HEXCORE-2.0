@@ -818,14 +818,17 @@
       const owner = Hexcore2.state.captains.find(captain =>
         captain.id === player.teamId || (captain.team || []).includes(player.id)
       );
-      if (!owner && Hexcore2.state.captains.length >= Hexcore2.state.settings.maxTeams) {
+      const emptyCaptain = !owner
+        ? Hexcore2.state.captains.find(captain => !captain.playerId && !captain.playerGameId)
+        : null;
+      if (!owner && !emptyCaptain && Hexcore2.state.captains.length >= Hexcore2.state.settings.maxTeams) {
         Hexcore2.eventStore.append('设为队长失败', `队伍数量不能超过 ${Hexcore2.state.settings.maxTeams}，请先删除或替换现有队伍`, 'warn');
         Hexcore2.ui.render();
         return;
       }
 
       snapshot(`设为队长前：${player.name}`);
-      const targetCaptain = owner || (() => {
+      const targetCaptain = owner || emptyCaptain || (() => {
         const number = nextCaptainNumber();
         const captain = {
           id: `c${number}`,
@@ -867,6 +870,8 @@
         '队长设置',
         owner
           ? `${player.name} 晋升为 ${targetCaptain.name} 的队长${oldCaptainPlayer && oldCaptainPlayer.id !== player.id ? `，${oldCaptainPlayer.name} 回到自由选手池` : ''}`
+          : emptyCaptain
+            ? `${player.name} 设为 ${targetCaptain.name} 的队长`
           : `${player.name} 设为队长并新建队伍 ${targetCaptain.name}`,
         'success'
       );

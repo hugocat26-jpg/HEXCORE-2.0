@@ -1437,6 +1437,16 @@ h2 span {
   color: var(--amber);
 }
 
+.team-member.empty-captain-member {
+  border-style: dashed;
+  border-color: rgba(25, 212, 240, 0.32);
+  background: rgba(25, 212, 240, 0.05);
+}
+
+.team-member.empty-captain-member strong {
+  color: var(--cyan);
+}
+
 .member-list button,
 .card-actions button,
 .owned-hex-list button {

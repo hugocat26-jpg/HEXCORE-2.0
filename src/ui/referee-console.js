@@ -531,6 +531,7 @@
           ${Hexcore2.state.captains.map((captain, index) => {
             const basePosition = Hexcore2.state.draft.baseOrder.indexOf(captain.id) + 1;
             const status = teamStatus(captain);
+            const captainPlayer = playerById(captain.playerId);
             return `
             <article class="data-card ${currentCaptain && currentCaptain.id === captain.id ? 'active-card' : ''}">
               <div class="data-card-head">
@@ -559,11 +560,11 @@
                 </div>
               </div>
               <div class="member-list">
-                <article class="team-member captain-member">
+                <article class="team-member captain-member ${captainPlayer ? '' : 'empty-captain-member'}">
                   <div>
-                    <strong>${escapeHtml(captain.name)}</strong>
-                    <span>队长 · 固定第一位</span>
-                    <small>队伍编号：${escapeHtml(captain.id)}</small>
+                    <strong>${captainPlayer ? escapeHtml(captainPlayer.name) : '待指定队长'}</strong>
+                    <span>${captainPlayer ? '队长 · 固定第一位' : '尚未指定队长'}</span>
+                    <small>${captainPlayer ? `ID：${escapeHtml(captainPlayer.gameId || captainPlayer.id)}` : `队伍编号：${escapeHtml(captain.id)}`}</small>
                   </div>
                 </article>
                 ${Array.from({ length: Hexcore2.state.settings.playersPerTeam }, (_, slotIndex) => {
