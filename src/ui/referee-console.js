@@ -695,7 +695,7 @@
                         <textarea id="player-manifesto-${player.id}" rows="2" placeholder="填写这名选手的参赛宣言">${escapeHtml(player.manifesto || '')}</textarea>
                       </label>
                       <label><small>位置</small><input id="player-lane-${player.id}" value="${escapeHtml(player.lane || '未知')}"></label>
-                      <div class="derived-pool-field"><small>系统卡池</small><strong>${escapeHtml(tierNames[player.tier] || '未知')}</strong></div>
+                      <label><small>擅长英雄</small><input id="player-heroes-${player.id}" value="${escapeHtml((player.heroes || []).join('、'))}" placeholder="用顿号分隔"></label>
                       <label><small>评分</small><input id="player-score-${player.id}" type="number" min="0" max="120" value="${player.score || 0}"></label>
                     </div>
                     <div class="player-actions">

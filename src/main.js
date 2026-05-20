@@ -1200,10 +1200,14 @@
       const lane = document.getElementById(`player-lane-${playerId}`);
       const score = document.getElementById(`player-score-${playerId}`);
       const manifesto = document.getElementById(`player-manifesto-${playerId}`);
+      const heroes = document.getElementById(`player-heroes-${playerId}`);
       const nextName = player.name;
       const nextLane = lane ? lane.value.trim() : '';
       const nextScore = Number(score && score.value);
       const nextManifesto = manifesto ? manifesto.value.trim().slice(0, 80) : (player.manifesto || '');
+      const nextHeroes = heroes
+        ? heroes.value.split(/[，,、|/]/).map(hero => hero.trim()).filter(Boolean).slice(0, 5)
+        : (player.heroes || []);
 
       if (!nextName || !nextLane || !Number.isFinite(nextScore)) {
         Hexcore2.eventStore.append('保存选手失败', '选手名称、位置或评分无效', 'warn');
@@ -1216,6 +1220,7 @@
       player.lane = nextLane;
       player.score = Math.max(0, Math.min(120, Math.round(nextScore)));
       player.manifesto = nextManifesto;
+      player.heroes = nextHeroes.length ? nextHeroes : ['待', '定', '位'];
       if (Hexcore2.normalizeState) Hexcore2.normalizeState(Hexcore2.state);
       Hexcore2.eventStore.append('选手库', `保存选手 ${player.name} 的基础信息`, 'success');
       renderAndPersist();
