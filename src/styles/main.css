@@ -410,6 +410,60 @@ h2 span {
   margin-bottom: 14px;
 }
 
+.workflow-gate {
+  display: grid;
+  gap: 12px;
+  border: 1px solid rgba(244, 182, 42, 0.38);
+  border-radius: var(--radius);
+  background: rgba(244, 182, 42, 0.08);
+  box-shadow: var(--shadow);
+  margin-bottom: 14px;
+  padding: 14px 16px;
+}
+
+.workflow-gate strong {
+  color: var(--amber);
+  font-size: 16px;
+}
+
+.workflow-gate p {
+  margin: 6px 0 0;
+  color: #d7c79a;
+  line-height: 1.55;
+}
+
+.workflow-steps,
+.workflow-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.workflow-steps span {
+  border: 1px solid var(--line-soft);
+  border-radius: 999px;
+  padding: 5px 10px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.workflow-steps span.done {
+  border-color: rgba(85, 200, 121, 0.38);
+  background: var(--green-soft);
+  color: var(--green);
+}
+
+.workflow-steps span.pending {
+  border-color: rgba(244, 182, 42, 0.38);
+  background: rgba(244, 182, 42, 0.08);
+  color: var(--amber);
+}
+
+.workflow-missing {
+  font-size: 13px;
+}
+
 .turn-strip {
   display: grid;
   gap: 8px;
@@ -1120,6 +1174,29 @@ h2 span {
   padding: 0 10px;
 }
 
+.modal-derived-note,
+.derived-pool-field {
+  display: grid;
+  gap: 6px;
+  border: 1px solid var(--line-soft);
+  border-radius: 6px;
+  background: rgba(25, 212, 240, 0.06);
+  padding: 9px 10px;
+}
+
+.modal-derived-note strong,
+.derived-pool-field strong {
+  color: var(--cyan);
+  font-size: 13px;
+}
+
+.modal-derived-note span,
+.derived-pool-field small {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .modal-wide {
   grid-column: 1 / -1;
 }
@@ -1391,13 +1468,13 @@ h2 span {
 
 .pool-columns {
   display: grid;
-  grid-template-columns: repeat(4, minmax(180px, 1fr));
+  grid-template-columns: repeat(5, minmax(170px, 1fr));
   gap: 12px;
 }
 
 .pool-health-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(160px, 1fr));
+  grid-template-columns: repeat(5, minmax(150px, 1fr));
   gap: 10px;
   margin: 0 0 14px;
 }
@@ -1420,6 +1497,11 @@ h2 span {
   background: rgba(255, 193, 94, 0.07);
 }
 
+.pool-health-grid div.captain-pool-stat {
+  border-color: rgba(244, 182, 42, 0.38);
+  background: rgba(244, 182, 42, 0.08);
+}
+
 .pool-health-grid span,
 .pool-health-grid small {
   color: var(--muted);
@@ -1429,6 +1511,17 @@ h2 span {
 .pool-health-grid strong {
   color: var(--cyan);
   font-size: 18px;
+}
+
+.system-pool-note {
+  margin: 0 0 14px;
+  border: 1px solid var(--line-soft);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--muted);
+  padding: 10px 12px;
+  font-size: 13px;
+  line-height: 1.55;
 }
 
 .pool-column h2 {
@@ -1502,6 +1595,11 @@ h2 span {
 .player-row em.disabled {
   background: rgba(239, 93, 93, 0.1);
   color: #ffc7c7;
+}
+
+.player-row em.captain {
+  background: rgba(244, 182, 42, 0.12);
+  color: var(--amber);
 }
 
 .player-actions {

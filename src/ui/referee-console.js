@@ -125,9 +125,6 @@
   function addPlayerModal() {
     const ui = Hexcore2.state.ui || {};
     if (!ui.addPlayerModal) return '';
-    const tierOptions = [1, 2, 3, 4].map(tier => `
-      <option value="${tier}">${escapeHtml(Hexcore2.state.settings.tierNames[tier])}</option>
-    `).join('');
     return `
       <div class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="add-player-title">
         <section class="form-modal">
@@ -148,13 +145,13 @@
               <input id="add-player-lane" placeholder="上路 / 打野 / 中路 / 下路 / 辅助">
             </label>
             <label>
-              <span>卡池等级</span>
-              <select id="add-player-tier">${tierOptions}</select>
-            </label>
-            <label>
               <span>评分</span>
               <input id="add-player-score" type="number" min="0" max="120" value="60">
             </label>
+            <div class="modal-derived-note">
+              <strong>卡池由系统安排</strong>
+              <span>保存后系统会按所有非队长选手评分四等分，自动分配到四个卡池。</span>
+            </div>
             <label class="modal-wide">
               <span>游戏ID</span>
               <input id="add-player-game-id" placeholder="可选，不填则系统自动生成">
@@ -174,7 +171,10 @@
     const captain = Hexcore2.selectors.currentCaptain();
     const tier = captain ? Hexcore2.poolEngine.effectiveTier(captain.id) : Hexcore2.selectors.roundTier(Hexcore2.state.draft.round);
     const tierName = Hexcore2.state.settings.tierNames[tier];
-    const statusText = Hexcore2.state.draft.phase === 'completed'
+    const workflow = Hexcore2.selectors.workflowStatus();
+    const statusText = !workflow.playersDraftReady
+      ? '前置流程未完成'
+      : Hexcore2.state.draft.phase === 'completed'
       ? '选人已完成'
       : (Hexcore2.state.draft.paused ? '流程已暂停' : '选人进行中');
     return `
@@ -211,6 +211,32 @@
           }).join('')}
         </div>
         <div class="turn-note">顺位变更说明：${escapeHtml(currentExplanation().join('；') || '按基础蛇形顺位执行')}。</div>
+      </section>
+    `;
+  }
+
+  function workflowGatePanel() {
+    const workflow = Hexcore2.selectors.workflowStatus();
+    if (workflow.playersDraftReady) return '';
+    const missingCaptains = workflow.missingHexcoreCaptains
+      .map(id => Hexcore2.state.captains.find(captain => captain.id === id))
+      .filter(Boolean);
+    return `
+      <section class="workflow-gate">
+        <div>
+          <strong>实时抽选尚未开始</strong>
+          <p>流程顺序固定为：先确定全部队长/队伍，再让所有队长抽满 3 个海克斯，最后进入队员抽卡选人。</p>
+        </div>
+        <div class="workflow-steps">
+          <span class="${workflow.captainReady ? 'done' : 'pending'}">1 队长/队伍配置${workflow.captainReady ? '已完成' : '待完成'}</span>
+          <span class="${workflow.hexcoreReady ? 'done' : 'pending'}">2 全部队长海克斯${workflow.hexcoreReady ? '已完成' : `待完成 ${missingCaptains.length} 队`}</span>
+          <span class="pending">3 实时抽选队员</span>
+        </div>
+        ${missingCaptains.length ? `<p class="workflow-missing">未抽满海克斯：${missingCaptains.slice(0, 8).map(captain => escapeHtml(captain.name)).join('、')}${missingCaptains.length > 8 ? ' 等' : ''}</p>` : ''}
+        <div class="workflow-actions">
+          <button class="subtle-btn" onclick="window.hexcoreUI.setActiveView('teams')">检查队伍</button>
+          <button class="primary-btn" onclick="window.hexcoreUI.setActiveView('hexcores')">进入海克斯抽取</button>
+        </div>
       </section>
     `;
   }
@@ -591,6 +617,7 @@
       result[tier] = rounds * Hexcore2.selectors.teamCount();
       return result;
     }, {});
+    const captainPoolCount = Hexcore2.state.players.filter(player => player.tier === 0).length;
     const poolStats = [1, 2, 3, 4].map(tier => {
       const players = Hexcore2.state.players.filter(player => player.tier === tier);
       const enabled = players.filter(player => player.status !== 'disabled').length;
@@ -611,7 +638,7 @@
         <div class="toolbar-row">
           <div>
             <strong>选手总数：${Hexcore2.state.players.length}</strong>
-            <span>可选 ${Hexcore2.state.players.filter(player => player.status === 'available').length} 人，已入队 ${Hexcore2.state.players.filter(player => player.status === 'drafted').length} 人。</span>
+            <span>可选 ${Hexcore2.state.players.filter(player => player.status === 'available').length} 人，已入队 ${Hexcore2.state.players.filter(player => player.status === 'drafted').length} 人。卡池由系统按评分四等分自动安排。</span>
           </div>
           <div class="toolbar-actions">
             <select aria-label="选手筛选" onchange="window.hexcoreUI.setPlayerFilter(this.value)">
@@ -619,6 +646,7 @@
               <option value="available" ${filter === 'available' ? 'selected' : ''}>仅可选</option>
               <option value="drafted" ${filter === 'drafted' ? 'selected' : ''}>仅已入队</option>
               <option value="disabled" ${filter === 'disabled' ? 'selected' : ''}>仅禁用</option>
+              <option value="0" ${filter === '0' ? 'selected' : ''}>队长专属池</option>
               <option value="1" ${filter === '1' ? 'selected' : ''}>侏儒马池</option>
               <option value="2" ${filter === '2' ? 'selected' : ''}>中等马池</option>
               <option value="3" ${filter === '3' ? 'selected' : ''}>上等马池</option>
@@ -630,6 +658,11 @@
           </div>
         </div>
         <div class="pool-health-grid">
+          <div class="captain-pool-stat">
+            <span>${escapeHtml(tierNames[0])}</span>
+            <strong>${captainPoolCount}</strong>
+            <small>队长自动移出普通卡池</small>
+          </div>
           ${poolStats.map(stat => `
             <div class="${stat.ok ? 'ok' : 'warn'}">
               <span>${escapeHtml(tierNames[stat.tier])}</span>
@@ -638,8 +671,9 @@
             </div>
           `).join('')}
         </div>
+        <p class="system-pool-note">卡池等级不可手动设置。系统会先把队长选手移入队长专属卡池，再按剩余选手评分从高到低四等分：猛犸、上等马、中等马、侏儒马。</p>
         <div class="pool-columns">
-          ${[1, 2, 3, 4].map(tier => `
+          ${[0, 1, 2, 3, 4].map(tier => `
             <div class="pool-column">
               <h2>${escapeHtml(tierNames[tier])}池</h2>
               ${Hexcore2.state.players.filter(player => player.tier === tier && visiblePlayer(player)).map(player => {
@@ -648,12 +682,12 @@
                   <div class="player-row ${player.status === 'disabled' ? 'disabled-player' : ''}">
                     <label><small>名称</small><input id="player-name-${player.id}" value="${escapeHtml(player.name)}"></label>
                     <label><small>位置</small><input id="player-lane-${player.id}" value="${escapeHtml(player.lane || '未知')}"></label>
-                    <label><small>卡池</small><input id="player-tier-${player.id}" type="number" min="1" max="4" value="${player.tier}"></label>
+                    <div class="derived-pool-field"><small>系统卡池</small><strong>${escapeHtml(tierNames[player.tier] || '未知')}</strong></div>
                     <label><small>评分</small><input id="player-score-${player.id}" type="number" min="0" max="120" value="${player.score || 0}"></label>
-                    <em class="${player.status === 'available' ? 'available' : (player.status === 'disabled' ? 'disabled' : 'drafted')}">${player.status === 'available' ? '可选' : (player.status === 'disabled' ? '已禁用' : `已入队${owner ? `：${escapeHtml(owner.name)}` : ''}`)}</em>
+                    <em class="${player.status === 'captain' ? 'captain' : (player.status === 'available' ? 'available' : (player.status === 'disabled' ? 'disabled' : 'drafted'))}">${player.status === 'captain' ? '队长专属' : (player.status === 'available' ? '可选' : (player.status === 'disabled' ? '已禁用' : `已入队${owner ? `：${escapeHtml(owner.name)}` : ''}`))}</em>
                     <div class="player-actions">
                       <button onclick="window.hexcoreUI.savePlayer('${player.id}')">保存</button>
-                      <button class="${player.status === 'disabled' ? '' : 'danger-inline'}" onclick="window.hexcoreUI.togglePlayerDisabled('${player.id}')">${player.status === 'disabled' ? '恢复' : '禁用'}</button>
+                      ${player.status === 'captain' ? '<button disabled>队长锁定</button>' : `<button class="${player.status === 'disabled' ? '' : 'danger-inline'}" onclick="window.hexcoreUI.togglePlayerDisabled('${player.id}')">${player.status === 'disabled' ? '恢复' : '禁用'}</button>`}
                       <button class="danger-inline" onclick="window.hexcoreUI.deletePlayer('${player.id}')">删除</button>
                     </div>
                   </div>
@@ -1034,6 +1068,7 @@
     return `
       <main class="workspace">
         <div class="workspace-main">
+          ${workflowGatePanel()}
           ${turnOrder()}
           <div class="content-grid">
             <div>

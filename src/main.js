@@ -24,6 +24,11 @@
     Hexcore2.ui.render();
   }
 
+  function playersDraftReady() {
+    const workflow = Hexcore2.selectors.workflowStatus();
+    return workflow.playersDraftReady;
+  }
+
   function snapshot(label) {
     if (Hexcore2.historyService) Hexcore2.historyService.push(label);
   }
@@ -187,6 +192,11 @@
 
     drawCards() {
       const captain = Hexcore2.selectors.currentCaptain();
+      if (!playersDraftReady()) {
+        Hexcore2.eventStore.append('流程未就绪', '请先完成全部队伍配置，并让所有队伍抽满 3 个海克斯，再开始实时抽选队员', 'warn');
+        Hexcore2.ui.render();
+        return;
+      }
       if (Hexcore2.state.draft.phase === 'completed') {
         Hexcore2.eventStore.append('裁判操作', '选人流程已完成，无法继续抽卡', 'warn');
         Hexcore2.ui.render();
@@ -237,6 +247,11 @@
     },
 
     pickCard() {
+      if (!playersDraftReady()) {
+        Hexcore2.eventStore.append('流程未就绪', '海克斯抽取未完成，暂不能选择队员', 'warn');
+        Hexcore2.ui.render();
+        return;
+      }
       const draw = Hexcore2.state.draft.currentDraw;
       const captain = Hexcore2.selectors.currentCaptain();
       if (Hexcore2.state.draft.pickedThisTurn) return;
@@ -1025,17 +1040,15 @@
     confirmAddPlayer() {
       const nameInput = document.getElementById('add-player-name');
       const laneInput = document.getElementById('add-player-lane');
-      const tierInput = document.getElementById('add-player-tier');
       const scoreInput = document.getElementById('add-player-score');
       const gameIdInput = document.getElementById('add-player-game-id');
       const name = nameInput ? nameInput.value.trim() : '';
       const lane = laneInput ? laneInput.value.trim() : '';
-      const tier = Number(tierInput && tierInput.value);
       const score = Number(scoreInput && scoreInput.value);
       const gameId = gameIdInput ? gameIdInput.value.trim() : '';
 
-      if (!name || !lane || !Number.isInteger(tier) || tier < 1 || tier > 4 || !Number.isInteger(score) || score < 0 || score > 120) {
-        Hexcore2.eventStore.append('新增选手失败', '请填写有效的姓名、位置、卡池和评分', 'warn');
+      if (!name || !lane || !Number.isInteger(score) || score < 0 || score > 120) {
+        Hexcore2.eventStore.append('新增选手失败', '请填写有效的姓名、位置和评分', 'warn');
         Hexcore2.ui.render();
         return;
       }
@@ -1052,7 +1065,7 @@
         name,
         gameId: gameId || `NEW_${number}`,
         score,
-        tier,
+        tier: 1,
         kda: '0.0',
         damage: '0K',
         winRate: '0%',
@@ -1063,6 +1076,7 @@
       snapshot('新增选手前');
       Hexcore2.state.players.push(player);
       Hexcore2.state.ui.addPlayerModal = false;
+      if (Hexcore2.normalizeState) Hexcore2.normalizeState(Hexcore2.state);
       Hexcore2.eventStore.append('选手库', `新增选手 ${player.name}`, 'success');
       renderAndPersist();
     },
@@ -1109,15 +1123,13 @@
       if (!player) return;
       const name = document.getElementById(`player-name-${playerId}`);
       const lane = document.getElementById(`player-lane-${playerId}`);
-      const tier = document.getElementById(`player-tier-${playerId}`);
       const score = document.getElementById(`player-score-${playerId}`);
       const nextName = name ? name.value.trim() : '';
       const nextLane = lane ? lane.value.trim() : '';
-      const nextTier = Number(tier && tier.value);
       const nextScore = Number(score && score.value);
 
-      if (!nextName || !nextLane || !Number.isInteger(nextTier) || nextTier < 1 || nextTier > 4 || !Number.isFinite(nextScore)) {
-        Hexcore2.eventStore.append('保存选手失败', '选手名称、位置、卡池或评分无效', 'warn');
+      if (!nextName || !nextLane || !Number.isFinite(nextScore)) {
+        Hexcore2.eventStore.append('保存选手失败', '选手名称、位置或评分无效', 'warn');
         Hexcore2.ui.render();
         return;
       }
@@ -1125,8 +1137,8 @@
       snapshot(`保存选手前：${player.name}`);
       player.name = nextName;
       player.lane = nextLane;
-      player.tier = nextTier;
       player.score = Math.max(0, Math.min(120, Math.round(nextScore)));
+      if (Hexcore2.normalizeState) Hexcore2.normalizeState(Hexcore2.state);
       Hexcore2.eventStore.append('选手库', `保存选手 ${player.name} 的基础信息`, 'success');
       renderAndPersist();
     },
@@ -1134,6 +1146,11 @@
     togglePlayerDisabled(playerId) {
       const player = Hexcore2.state.players.find(item => item.id === playerId);
       if (!player) return;
+      if (player.status === 'captain') {
+        Hexcore2.eventStore.append('选手状态失败', '队长专属选手不能禁用', 'warn');
+        Hexcore2.ui.render();
+        return;
+      }
       if (player.status === 'drafted') {
         Hexcore2.eventStore.append('选手状态失败', '已入队选手不能直接禁用，请先从队伍移回可选池', 'warn');
         Hexcore2.ui.render();
@@ -1165,6 +1182,7 @@
       Hexcore2.state.draft.runtimeEffects = Hexcore2.state.draft.runtimeEffects.filter(effect =>
         effect.playerId !== playerId && effect.firstPlayerId !== playerId && effect.secondPlayerId !== playerId
       );
+      if (Hexcore2.normalizeState) Hexcore2.normalizeState(Hexcore2.state);
       Hexcore2.eventStore.append('选手库', `删除选手 ${player.name}`, 'warn');
       renderAndPersist();
     },
@@ -1311,7 +1329,9 @@
   global.hexcoreUI = Hexcore2.actions;
   if (Hexcore2.state.draft.currentDraw) {
     Hexcore2.ui.render();
-  } else {
+  } else if (playersDraftReady()) {
     Hexcore2.actions.drawCards();
+  } else {
+    Hexcore2.ui.render();
   }
 })(window);

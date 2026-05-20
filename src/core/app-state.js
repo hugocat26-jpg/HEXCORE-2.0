@@ -28,6 +28,39 @@
     });
   }
 
+  function isCaptainPoolPlayer(player, captains) {
+    if (!player) return false;
+    if (player.isCaptain || player.role === 'captain' || player.status === 'captain') return true;
+    return captains.some(captain =>
+      captain.playerId === player.id
+      || captain.playerGameId === player.gameId
+      || captain.gameId === player.gameId
+    );
+  }
+
+  function rebalancePlayerTiers(captains, players) {
+    const regularPlayers = [];
+    players.forEach(player => {
+      if (isCaptainPoolPlayer(player, captains)) {
+        player.tier = 0;
+        player.status = 'captain';
+        delete player.teamId;
+      } else {
+        if (player.status === 'captain') player.status = 'available';
+        regularPlayers.push(player);
+      }
+    });
+
+    const sorted = regularPlayers
+      .slice()
+      .sort((a, b) => (Number(b.score) || 0) - (Number(a.score) || 0) || String(a.id).localeCompare(String(b.id)));
+    const total = Math.max(1, sorted.length);
+    sorted.forEach((player, index) => {
+      const band = Math.floor((index * 4) / total);
+      player.tier = Math.max(1, Math.min(4, 4 - band));
+    });
+  }
+
   function clampNumber(value, min, max, fallback) {
     const number = Number(value);
     if (!Number.isFinite(number)) return fallback;
@@ -94,7 +127,7 @@
       timeoutStrategy: 'random_available',
       disabledHexcores: [],
       ruleTemplates: [],
-      tierNames: { 1: '侏儒马', 2: '中等马', 3: '上等马', 4: '猛犸' },
+      tierNames: { 0: '队长专属', 1: '侏儒马', 2: '中等马', 3: '上等马', 4: '猛犸' },
     },
     captains: clone(seed.captains),
     players: clone(seed.players),
@@ -137,6 +170,7 @@
   Hexcore2.normalizeState = function normalizeState(state) {
     state.settings = state.settings || clone(defaultState.settings);
     state.settings.tierNames = state.settings.tierNames || clone(defaultState.settings.tierNames);
+    state.settings.tierNames[0] = state.settings.tierNames[0] || defaultState.settings.tierNames[0];
     state.settings.minTeams = state.settings.minTeams || defaultState.settings.minTeams;
     state.settings.maxTeams = state.settings.maxTeams || defaultState.settings.maxTeams;
     state.settings.playersPerTeam = state.settings.playersPerTeam || defaultState.settings.playersPerTeam;
@@ -154,6 +188,7 @@
     state.settings.totalTeams = state.captains.length;
     state.players = state.players || clone(defaultState.players);
     reconcilePlayerTeamIds(state.captains, state.players);
+    rebalancePlayerTiers(state.captains, state.players);
     state.hexcoreAssignments = state.hexcoreAssignments || {};
     state.hexcoreDraft = state.hexcoreDraft || clone(defaultState.hexcoreDraft);
     state.hexcoreDraft.captainId = state.hexcoreDraft.captainId || '';
@@ -222,6 +257,23 @@
       const tiers = Hexcore2.state.settings.roundTiers || [1, 2, 3, 4];
       const tier = tiers[Math.max(0, Number(round) - 1)] || Math.min(4, Number(round) || 1);
       return Math.max(1, Math.min(4, Number(tier) || 1));
+    },
+    workflowStatus() {
+      const state = Hexcore2.state;
+      const captainReady = state.captains.length >= state.settings.minTeams
+        && state.captains.length <= state.settings.maxTeams
+        && state.captains.every(captain => String(captain.name || '').trim());
+      const hexcoreReady = captainReady && state.captains.every(captain =>
+        (state.hexcoreAssignments[captain.id] || []).length >= 3
+      );
+      return {
+        captainReady,
+        hexcoreReady,
+        playersDraftReady: captainReady && hexcoreReady,
+        missingHexcoreCaptains: state.captains
+          .filter(captain => (state.hexcoreAssignments[captain.id] || []).length < 3)
+          .map(captain => captain.id),
+      };
     },
   };
 })(window);

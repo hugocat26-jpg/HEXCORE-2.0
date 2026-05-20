@@ -94,7 +94,6 @@
 
   function normalizeImportedPlayer(row, index) {
     const source = row && typeof row === 'object' ? row : {};
-    const tier = Math.max(1, Math.min(4, Number(source.tier || source.卡池 || source.pool || 1) || 1));
     const score = Math.max(0, Math.min(120, Math.round(Number(source.score || source.评分 || 60) || 60)));
     const status = String(source.status || source.状态 || 'available') === 'disabled' || String(source.status || source.状态) === '禁用'
       ? 'disabled'
@@ -110,7 +109,7 @@
       lane: String(source.lane || source.位置 || '未分配').trim().slice(0, 16),
       gameId: String(source.gameId || source.游戏ID || source.uid || `IMPORT_${Date.now()}_${index}`).trim().slice(0, 40),
       score,
-      tier,
+      tier: 1,
       kda: String(source.kda || source.KDA || '0.0').trim().slice(0, 12),
       damage: String(source.damage || source.伤害 || '0K').trim().slice(0, 12),
       winRate: String(source.winRate || source.胜率 || '0%').trim().slice(0, 12),

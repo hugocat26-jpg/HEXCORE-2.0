@@ -78,6 +78,23 @@ function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
+function markWorkflowReady(H) {
+  const filler = H.sampleData.hexcores.slice(0, 3).map(hex => ({ ...hex }));
+  H.state.captains.forEach(captain => {
+    const current = H.state.hexcoreAssignments[captain.id] || [];
+    const owned = new Set(current.map(hex => hex.id));
+    filler.forEach(hex => {
+      if (current.length < 3 && !owned.has(hex.id)) current.push({ ...hex });
+    });
+    H.state.hexcoreAssignments[captain.id] = current;
+    if (current.length < 3) {
+      H.sampleData.hexcores.forEach(hex => {
+        if (current.length < 3 && !owned.has(hex.id)) current.push({ ...hex });
+      });
+    }
+  });
+}
+
 function testOriginQueue() {
   const { H } = createHarness();
   const origin = H.sampleData.hexcores.find(hex => hex.id === 'origin');
@@ -117,15 +134,18 @@ function testLockContract() {
   H.state.draft.runtimeEffects = [];
   const captain = H.state.captains.find(item => item.id === 'c2');
   const beforeSize = captain.team.length;
+  const pair = H.state.players.filter(player => player.status === 'available').slice(0, 2);
 
-  assert(H.hexcoreEngine.activate('lock-contract', { firstPlayerId: 'p201', secondPlayerId: 'p202' }).ok, '锁定契约应成功创建');
-  assert(H.assignmentEngine.assign('c2', 'p201', 'test_pick'), '应能选中契约内第一名选手');
-  assert(captain.team.includes('p201') && captain.team.includes('p202'), '契约另一名选手应自动入队');
+  assert(pair.length === 2, '锁定契约测试需要两名可选选手');
+  assert(H.hexcoreEngine.activate('lock-contract', { firstPlayerId: pair[0].id, secondPlayerId: pair[1].id }).ok, '锁定契约应成功创建');
+  assert(H.assignmentEngine.assign('c2', pair[0].id, 'test_pick'), '应能选中契约内第一名选手');
+  assert(captain.team.includes(pair[0].id) && captain.team.includes(pair[1].id), '契约另一名选手应自动入队');
   assert(captain.team.length === beforeSize + 2, '锁定契约应使队伍增加2名选手');
 }
 
 function testMysteryBoxTransfer() {
   const { H } = createHarness();
+  markWorkflowReady(H);
   H.state.draft.round = 1;
   H.state.draft.currentOrder = ['c7', 'c1', 'c2'];
   H.state.draft.currentIndex = 0;
@@ -144,6 +164,7 @@ function testMysteryBoxTransfer() {
 
 function testHellhound() {
   const { H } = createHarness();
+  markWorkflowReady(H);
   H.state.draft.round = 1;
   H.state.draft.currentOrder = ['c10', 'c7', 'c8'];
   H.state.draft.currentIndex = 0;
@@ -163,6 +184,11 @@ function testSnowCat() {
   H.state.draft.currentOrder = ['c11', 'c7', 'c8'];
   H.state.draft.currentIndex = 0;
   H.state.draft.runtimeEffects = [];
+  H.state.players.push(
+    { id: 'snow-test-a', name: '雪猫高分', lane: '中路', gameId: 'SNOW_A', score: 119, tier: 3, status: 'available' },
+    { id: 'snow-test-b', name: '雪猫低分', lane: '辅助', gameId: 'SNOW_B', score: 118, tier: 3, status: 'available' }
+  );
+  H.normalizeState(H.state);
 
   assert(H.hexcoreEngine.activate('snow-cat').ok, '雪定饿的喵应成功触发');
   assert(H.state.draft.currentDraw.pickMode === 'mystery_swap', '应生成身份扰动抽卡');
@@ -172,6 +198,7 @@ function testSnowCat() {
 
 function testDecomposeKnowledge() {
   const { H, app } = createHarness();
+  markWorkflowReady(H);
   H.state.draft.round = 2;
   H.state.draft.currentOrder = ['c1', 'c2', 'c3'];
   H.state.draft.currentIndex = 0;
@@ -192,19 +219,24 @@ function testUiNavigationAndHexButtons() {
   H.actions.setActiveView('players');
   assert(app.innerHTML.includes('选手库') && app.innerHTML.includes('侏儒马池') && app.innerHTML.includes('setPlayerFilter'), '选手库页面应可筛选');
   assert(app.innerHTML.includes('导入 JSON/CSV') && app.innerHTML.includes('pool-health-grid'), '选手库应提供导入和卡池容量检测');
+  assert(app.innerHTML.includes('队长专属池') && app.innerHTML.includes('系统卡池') && !app.innerHTML.includes('player-tier-'), '选手库应显示系统卡池且不允许手动设置卡池');
+  H.state.captains[0].playerId = 'captain-test-player';
+  H.state.players.push({ id: 'captain-test-player', name: '队长测试选手', lane: '中路', gameId: 'CAPTAIN_TEST', score: 120, tier: 4, status: 'available' });
+  H.normalizeState(H.state);
+  assert(H.state.players.find(player => player.id === 'captain-test-player').tier === 0, '被选为队长的选手应进入队长专属卡池');
+  assert(H.state.players.filter(player => player.id !== 'captain-test-player').every(player => player.tier >= 1 && player.tier <= 4), '非队长选手应被系统分配到四个普通卡池');
   const beforePlayers = H.state.players.length;
   H.actions.addPlayer();
   assert(H.state.players.length === beforePlayers, '点击新增选手不应直接写入选手库');
   assert(app.innerHTML.includes('add-player-name') && app.innerHTML.includes('confirmAddPlayer'), '新增选手应打开信息填写弹窗');
   elements['add-player-name'] = { value: '回归测试选手' };
   elements['add-player-lane'] = { value: '中路' };
-  elements['add-player-tier'] = { value: '2' };
   elements['add-player-score'] = { value: '88' };
   elements['add-player-game-id'] = { value: 'REG_NEW_001' };
   H.actions.confirmAddPlayer();
   assert(H.state.players.length === beforePlayers + 1, '选手库应能新增选手');
   const newPlayer = H.state.players[H.state.players.length - 1];
-  assert(newPlayer.name === '回归测试选手' && newPlayer.tier === 2 && newPlayer.score === 88, '选手库应能保存选手基础信息');
+  assert(newPlayer.name === '回归测试选手' && newPlayer.tier >= 1 && newPlayer.tier <= 4 && newPlayer.score === 88, '选手库应能保存选手基础信息并由系统安排卡池');
   H.actions.togglePlayerDisabled(newPlayer.id);
   assert(newPlayer.status === 'disabled', '选手库应能禁用可选选手');
   H.actions.togglePlayerDisabled(newPlayer.id);
@@ -213,7 +245,7 @@ function testUiNavigationAndHexButtons() {
     name: 'players.csv',
     content: 'name,lane,tier,score,gameId\nCSV选手,中路,3,91,CSV_001\n重复选手,上路,2,70,CSV_001',
   });
-  assert(H.state.players.some(player => player.name === 'CSV选手' && player.tier === 3), '选手库应能导入CSV选手');
+  assert(H.state.players.some(player => player.name === 'CSV选手' && player.tier >= 1 && player.tier <= 4), '选手库应能导入CSV选手并由系统安排卡池');
   assert(H.state.players.filter(player => player.gameId === 'CSV_001').length === 1, '选手导入应跳过重复游戏ID');
   const importedPlayer = H.state.players.find(player => player.name === 'CSV选手');
   H.actions.deletePlayer(importedPlayer.id);
