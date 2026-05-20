@@ -1130,6 +1130,8 @@ h2 span {
   display: grid;
   gap: 10px;
   min-width: 0;
+  min-height: 560px;
+  grid-template-rows: auto auto auto auto auto 1fr auto auto;
 }
 
 .data-card.active-card {
@@ -1205,6 +1207,7 @@ h2 span {
 .member-list {
   display: grid;
   gap: 6px;
+  align-content: start;
 }
 
 .team-member {
@@ -1212,6 +1215,7 @@ h2 span {
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
+  min-height: 70px;
   border: 1px solid var(--line-soft);
   border-radius: 5px;
   padding: 6px 8px;
@@ -1252,6 +1256,7 @@ h2 span {
 .team-member.empty-member {
   grid-template-columns: 1fr;
   border-style: dashed;
+  opacity: 0.72;
 }
 
 .member-list button,

@@ -477,7 +477,8 @@
                 <button onclick="window.hexcoreUI.setCaptainOrderPosition('${captain.id}')">应用顺位</button>
               </div>
               <div class="member-list">
-                ${captain.team.map(playerId => {
+                ${Array.from({ length: Hexcore2.state.settings.playersPerTeam }, (_, slotIndex) => {
+                  const playerId = captain.team[slotIndex];
                   const player = playerById(playerId);
                   return player ? `
                     <article class="team-member">
@@ -488,8 +489,16 @@
                       </div>
                       <button onclick="window.hexcoreUI.removePlayerFromTeam('${captain.id}', '${player.id}')">移回池</button>
                     </article>
-                  ` : '';
-                }).join('') || '<article class="team-member empty-member"><div><strong>暂无队员</strong><span>可通过补录或抽卡加入队伍</span></div></article>'}
+                  ` : `
+                    <article class="team-member empty-member">
+                      <div>
+                        <strong>空位 ${slotIndex + 1}</strong>
+                        <span>等待抽卡或补录队员</span>
+                        <small>当前未满员</small>
+                      </div>
+                    </article>
+                  `;
+                }).join('')}
               </div>
               <div class="backfill-tools">
                 <select id="team-add-player-${captain.id}" aria-label="${escapeHtml(captain.name)} 补录选手">
