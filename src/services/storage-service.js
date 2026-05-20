@@ -24,6 +24,19 @@
       }
     },
 
+    getMeta() {
+      if (!storageAvailable()) return null;
+      try {
+        const raw = global.localStorage.getItem(STORAGE_KEY);
+        if (!raw) return null;
+        const data = JSON.parse(raw);
+        return data && data.version === 1 ? { savedAt: data.savedAt } : null;
+      } catch (error) {
+        console.warn('[HEXCORE2] 本地状态元信息读取失败', error);
+        return null;
+      }
+    },
+
     save(state) {
       if (!storageAvailable()) return false;
       try {

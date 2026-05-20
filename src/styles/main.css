@@ -918,18 +918,38 @@ h2 span {
   border-bottom: 0;
   padding: 18px 14px 12px;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) 38px;
+  grid-template-rows: auto auto auto minmax(0, 1fr) 38px;
   min-height: 0;
   box-shadow: none;
 }
 
-.event-rail select {
+.event-rail select,
+.event-rail input {
   height: 34px;
   border: 1px solid var(--line);
   border-radius: 6px;
   background: #09151d;
   color: #d6e5ec;
   padding: 0 10px;
+}
+
+.event-filter-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+  margin: 10px 0 8px;
+}
+
+.event-filter-grid label {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.event-count {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .event-list {
@@ -1655,7 +1675,7 @@ h2 span {
 
 .system-summary {
   display: grid;
-  grid-template-columns: repeat(4, minmax(150px, 1fr));
+  grid-template-columns: repeat(5, minmax(150px, 1fr));
   gap: 12px;
   margin-bottom: 12px;
 }

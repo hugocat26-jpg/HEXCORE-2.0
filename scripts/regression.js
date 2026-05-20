@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
+const staticServer = require('./serve.js');
 
 const root = path.resolve(__dirname, '..');
 const sourceFiles = [
@@ -38,7 +39,7 @@ function createHarness() {
         return elements[id];
       },
       createElement() {
-        return { click() {}, set href(value) {}, set download(value) {} };
+        return { click() {}, remove() {}, set href(value) {}, set download(value) {} };
       },
       body: { appendChild() {}, removeChild() {} },
     },
@@ -246,11 +247,20 @@ function testUiNavigationAndHexButtons() {
   H.actions.jumpToScheduleSlot(2, 'c2');
   assert(H.state.draft.round === 2 && H.selectors.currentCaptain().id === 'c2', '赛程跳转应切换轮次和当前队长');
   H.actions.setActiveView('logs');
+  assert(app.innerHTML.includes('exportEventsJson') && app.innerHTML.includes('exportRecapText'), '日志页面应提供 JSON 和复盘文本导出');
+  elements['event-search'] = { value: '海克斯' };
+  H.actions.setEventSearch();
+  assert(H.state.ui.eventSearch === '海克斯', '日志页面应能设置关键词搜索');
+  H.actions.setEventCaptainFilter('c7');
+  assert(H.state.ui.eventCaptainFilter === 'c7', '日志页面应能按队长筛选');
+  assert(H.exportService.filteredEvents().every(event => `${event.title} ${event.body}`.includes('C7') || `${event.title} ${event.body}`.includes('海克斯')), '日志筛选应返回匹配事件');
+  assert(H.exportService.exportEventsJson(), '日志页面应能导出 JSON');
+  assert(H.exportService.exportRecapText(), '日志页面应能导出复盘文本');
   assert(app.innerHTML.includes('clearEvents'), '日志页面应提供清空入口');
   H.actions.clearEvents();
   assert(H.state.events.length === 1 && H.state.events[0].title === '日志清理', '清空日志后应保留清理反馈事件');
   H.actions.setActiveView('settings');
-  assert(app.innerHTML.includes('runSystemCheck'), '系统设置应提供状态检查入口');
+  assert(app.innerHTML.includes('runSystemCheck') && app.innerHTML.includes('restoreLatestSnapshot') && app.innerHTML.includes('clearBrowserData'), '系统设置应提供状态检查、快照恢复和本地清理入口');
   H.actions.runSystemCheck();
   assert(H.state.events[0].title === '系统检查通过', '系统检查应通过当前一致性数据');
 }
@@ -269,6 +279,31 @@ function testFeedbackAutoDismiss() {
   });
 }
 
+function testSecurityHardening() {
+  assert(staticServer.resolveRequestPath('/') === path.join(root, 'index.html'), '静态服务应正常解析首页');
+  assert(staticServer.resolveRequestPath('/src/main.js') === path.join(root, 'src', 'main.js'), '静态服务应正常解析项目内资源');
+  assert(staticServer.resolveRequestPath('/..%2FHEXCORE2.0_secret%2Fsecret.txt') === null, '静态服务应拒绝同名前缀兄弟目录穿越');
+  assert(staticServer.resolveRequestPath('/%E0%A4%A') === null, '静态服务应拒绝非法URL编码');
+
+  const { H, app } = createHarness();
+  H.state.settings.ruleTemplates = [{
+    name: '<b>模板</b>',
+    savedAt: '2026-05-20',
+    teamCount: '<img src=x onerror=window.__xss_fired=1>',
+    playersPerTeam: '<svg onload=window.__xss_fired=1>',
+    maxRounds: '<iframe src=javascript:alert(1)>',
+    drawCount: '3',
+    roundTiers: ['1', '2', '3', '4'],
+    disabledHexcores: [],
+  }];
+  H.normalizeState(H.state);
+  H.actions.setActiveView('rules');
+  assert(!app.innerHTML.includes('<img src=x'), '规则模板队伍数字段不应保留HTML');
+  assert(!app.innerHTML.includes('onload=window.__xss_fired'), '规则模板每队人数不应保留事件属性');
+  assert(!app.innerHTML.includes('<iframe src=javascript'), '规则模板轮数字段不应保留HTML');
+  assert(app.innerHTML.includes('&lt;b&gt;模板&lt;/b&gt;'), '规则模板名称应保持转义输出');
+}
+
 async function run() {
   const tests = [
     testOriginQueue,
@@ -280,6 +315,7 @@ async function run() {
     testDecomposeKnowledge,
     testUiNavigationAndHexButtons,
     testFeedbackAutoDismiss,
+    testSecurityHardening,
   ];
 
   for (const test of tests) {

@@ -328,14 +328,11 @@
   }
 
   function eventLog() {
-    const filter = (Hexcore2.state.ui && Hexcore2.state.ui.eventFilter) || 'all';
-    const filteredEvents = Hexcore2.state.events.filter(event => {
-      if (filter === 'all') return true;
-      if (filter === 'hexcore') return event.title.includes('海克斯');
-      if (filter === 'team') return event.title.includes('入队') || event.body.includes('加入队伍');
-      if (filter === 'warning') return event.level === 'warn';
-      return true;
-    });
+    const ui = Hexcore2.state.ui || {};
+    const filter = ui.eventFilter || 'all';
+    const captainFilter = ui.eventCaptainFilter || 'all';
+    const eventSearch = ui.eventSearch || '';
+    const filteredEvents = Hexcore2.exportService.filteredEvents();
 
     return `
       <aside class="event-rail">
@@ -345,9 +342,21 @@
             <option value="all" ${filter === 'all' ? 'selected' : ''}>全部事件</option>
             <option value="hexcore" ${filter === 'hexcore' ? 'selected' : ''}>海克斯</option>
             <option value="team" ${filter === 'team' ? 'selected' : ''}>选手入队</option>
+            <option value="draw" ${filter === 'draw' ? 'selected' : ''}>抽卡</option>
             <option value="warning" ${filter === 'warning' ? 'selected' : ''}>警告</option>
           </select>
         </div>
+        <div class="event-filter-grid">
+          <select aria-label="队长筛选" onchange="window.hexcoreUI.setEventCaptainFilter(this.value)">
+            <option value="all" ${captainFilter === 'all' ? 'selected' : ''}>全部队长</option>
+            ${Hexcore2.state.captains.map(captain => `<option value="${captain.id}" ${captainFilter === captain.id ? 'selected' : ''}>${escapeHtml(captain.name)}</option>`).join('')}
+          </select>
+          <label>
+            <input id="event-search" value="${escapeHtml(eventSearch)}" placeholder="搜索事件关键词" onkeydown="if(event.key === 'Enter') window.hexcoreUI.setEventSearch()">
+            <button onclick="window.hexcoreUI.setEventSearch()">搜索</button>
+          </label>
+        </div>
+        <p class="event-count">当前筛选 ${filteredEvents.length}/${Hexcore2.state.events.length} 条</p>
         <div class="event-list">
           ${filteredEvents.map(event => `
             <div class="event-item ${eventLevelClass(event.level)}">
@@ -739,7 +748,7 @@
           ${(Hexcore2.state.settings.ruleTemplates || []).map(template => `
             <div class="template-row">
               <strong>${escapeHtml(template.name)}</strong>
-              <span>${escapeHtml(template.savedAt)} / ${template.teamCount} 队 / 每队 ${template.playersPerTeam} 人 / ${template.maxRounds} 轮</span>
+              <span>${escapeHtml(template.savedAt)} / ${escapeHtml(template.teamCount)} 队 / 每队 ${escapeHtml(template.playersPerTeam)} 人 / ${escapeHtml(template.maxRounds)} 轮</span>
             </div>
           `).join('') || '<div class="empty-log">暂无模板</div>'}
         </div>
@@ -751,7 +760,9 @@
     return `
       ${pageHeader('日志导出', '筛选、查看并导出裁判操作和海克斯自动执行记录。')}
       <section class="data-panel log-tools">
-        <button class="primary-btn" onclick="window.hexcoreUI.exportEvents()">导出当前筛选日志</button>
+        <button class="primary-btn" onclick="window.hexcoreUI.exportEvents()">导出 TXT</button>
+        <button class="primary-btn" onclick="window.hexcoreUI.exportEventsJson()">导出 JSON</button>
+        <button class="subtle-btn" onclick="window.hexcoreUI.exportRecapText()">导出复盘文本</button>
         <button class="danger-btn" onclick="window.hexcoreUI.clearEvents()">清空日志</button>
       </section>
       <div class="log-workspace">
@@ -762,6 +773,8 @@
 
   function settingsPage() {
     const lastEvent = Hexcore2.state.events[0];
+    const meta = Hexcore2.storageService && Hexcore2.storageService.getMeta ? Hexcore2.storageService.getMeta() : null;
+    const lastSaved = meta && meta.savedAt ? new Date(meta.savedAt).toLocaleString('zh-CN', { hour12: false }) : '暂无保存记录';
     return `
       ${pageHeader('系统设置', '本地裁判端状态备份、导入和重置。部署访问请使用 npm start 或静态 HTTP 服务。')}
       <section class="data-panel system-summary">
@@ -769,11 +782,14 @@
         <div><span>事件数量</span><strong>${Hexcore2.state.events.length}</strong></div>
         <div><span>撤销快照</span><strong>${(Hexcore2.state.undoStack || []).length}</strong></div>
         <div><span>最近事件</span><strong>${lastEvent ? escapeHtml(lastEvent.title) : '暂无'}</strong></div>
+        <div><span>最后保存</span><strong>${escapeHtml(lastSaved)}</strong></div>
       </section>
       <section class="data-panel settings-actions">
         <button class="primary-btn" onclick="window.hexcoreUI.runSystemCheck()">运行状态检查</button>
+        <button class="subtle-btn" onclick="window.hexcoreUI.restoreLatestSnapshot()">恢复最近快照</button>
         <button class="primary-btn" onclick="window.hexcoreUI.exportState()">导出状态备份</button>
         <button class="subtle-btn" onclick="document.getElementById('state-import-input').click()">导入状态备份</button>
+        <button class="danger-btn" onclick="window.hexcoreUI.clearBrowserData()">清理浏览器本地数据</button>
         <button class="danger-btn" onclick="window.hexcoreUI.resetLocalState()">重置本地状态</button>
       </section>
     `;

@@ -28,6 +28,36 @@
     });
   }
 
+  function clampNumber(value, min, max, fallback) {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return fallback;
+    return Math.max(min, Math.min(max, Math.round(number)));
+  }
+
+  function normalizeRuleTemplate(template) {
+    const source = template && typeof template === 'object' ? template : {};
+    const maxRounds = clampNumber(source.maxRounds, 1, 8, defaultState.draft.maxRounds);
+    const roundTiers = Array.isArray(source.roundTiers)
+      ? source.roundTiers.slice(0, maxRounds).map(tier => clampNumber(tier, 1, 4, 1))
+      : [...defaultState.settings.roundTiers].slice(0, maxRounds);
+    while (roundTiers.length < maxRounds) {
+      roundTiers.push(Math.min(4, roundTiers.length + 1));
+    }
+
+    return {
+      name: String(source.name || '未命名模板').slice(0, 40),
+      savedAt: String(source.savedAt || '').slice(0, 40),
+      teamCount: clampNumber(source.teamCount, defaultState.settings.minTeams, defaultState.settings.maxTeams, defaultState.settings.totalTeams),
+      playersPerTeam: clampNumber(source.playersPerTeam, 1, 8, defaultState.settings.playersPerTeam),
+      maxRounds,
+      drawCount: clampNumber(source.drawCount, 1, 8, defaultState.settings.drawCount),
+      roundTiers,
+      disabledHexcores: Array.isArray(source.disabledHexcores)
+        ? source.disabledHexcores.filter(id => typeof id === 'string').slice(0, 50)
+        : [],
+    };
+  }
+
   const defaultState = {
     mode: 'referee_single_client',
     settings: {
@@ -81,7 +111,9 @@
     state.settings.autoRandomStrategy = state.settings.autoRandomStrategy || defaultState.settings.autoRandomStrategy;
     state.settings.timeoutStrategy = state.settings.timeoutStrategy || defaultState.settings.timeoutStrategy;
     state.settings.disabledHexcores = Array.isArray(state.settings.disabledHexcores) ? state.settings.disabledHexcores : [];
-    state.settings.ruleTemplates = Array.isArray(state.settings.ruleTemplates) ? state.settings.ruleTemplates : [];
+    state.settings.ruleTemplates = Array.isArray(state.settings.ruleTemplates)
+      ? state.settings.ruleTemplates.slice(0, 8).map(normalizeRuleTemplate)
+      : [];
     state.captains = state.captains || clone(defaultState.captains);
     state.settings.totalTeams = state.captains.length;
     state.players = state.players || clone(defaultState.players);

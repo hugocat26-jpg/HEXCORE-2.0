@@ -239,6 +239,14 @@
       if (Hexcore2.exportService.exportEvents()) Hexcore2.ui.render();
     },
 
+    exportEventsJson() {
+      if (Hexcore2.exportService.exportEventsJson()) Hexcore2.ui.render();
+    },
+
+    exportRecapText() {
+      if (Hexcore2.exportService.exportRecapText()) Hexcore2.ui.render();
+    },
+
     exportState() {
       if (Hexcore2.exportService.exportState()) Hexcore2.ui.render();
     },
@@ -246,6 +254,19 @@
     setEventFilter(filter) {
       Hexcore2.state.ui = Hexcore2.state.ui || {};
       Hexcore2.state.ui.eventFilter = filter;
+      renderAndPersist();
+    },
+
+    setEventCaptainFilter(captainId) {
+      Hexcore2.state.ui = Hexcore2.state.ui || {};
+      Hexcore2.state.ui.eventCaptainFilter = captainId || 'all';
+      renderAndPersist();
+    },
+
+    setEventSearch() {
+      const input = document.getElementById('event-search');
+      Hexcore2.state.ui = Hexcore2.state.ui || {};
+      Hexcore2.state.ui.eventSearch = input ? input.value.trim() : '';
       renderAndPersist();
     },
 
@@ -850,6 +871,27 @@
         issues.length ? issues.slice(0, 5).join('；') : '队伍、选手归属、顺位数据当前一致',
         issues.length ? 'warn' : 'success'
       );
+      Hexcore2.ui.render();
+    },
+
+    restoreLatestSnapshot() {
+      this.undo();
+    },
+
+    clearBrowserData() {
+      const confirmed = typeof confirm === 'function'
+        ? confirm('确认清理浏览器本地保存数据？当前页面内存状态会保留到刷新前，刷新后回到默认示例状态。')
+        : true;
+      if (!confirmed) return;
+      const ok = Hexcore2.storageService ? Hexcore2.storageService.clear() : false;
+      Hexcore2.state.ui = Hexcore2.state.ui || {};
+      Hexcore2.state.ui.feedback = {
+        title: ok ? '本地数据已清理' : '本地数据清理失败',
+        body: ok ? '刷新页面后将加载默认示例状态' : '当前环境不支持 localStorage 或清理失败',
+        level: ok ? 'success' : 'warn',
+        time: new Date().toLocaleTimeString('zh-CN', { hour12: false }),
+        createdAt: Date.now(),
+      };
       Hexcore2.ui.render();
     },
   };
