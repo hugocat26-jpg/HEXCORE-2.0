@@ -1223,6 +1223,25 @@
       renderAndPersist();
     },
 
+    autoSavePlayerIfChanged(playerId) {
+      const player = Hexcore2.state.players.find(item => item.id === playerId);
+      if (!player) return;
+      const lane = document.getElementById(`player-lane-${playerId}`);
+      const heroes = document.getElementById(`player-heroes-${playerId}`);
+      const manifesto = document.getElementById(`player-manifesto-${playerId}`);
+      const nextLane = lane ? lane.value.trim() : '';
+      const nextHeroes = heroes
+        ? heroes.value.split(/[，,、|/]/).map(hero => hero.trim()).filter(Boolean).slice(0, 5)
+        : (player.heroes || []);
+      const nextManifesto = manifesto ? manifesto.value.trim().slice(0, 80) : (player.manifesto || '');
+      const currentHeroes = Array.isArray(player.heroes) ? player.heroes : [];
+      const changed = nextLane !== (player.lane || '')
+        || nextHeroes.join('|') !== currentHeroes.join('|')
+        || nextManifesto !== (player.manifesto || '');
+
+      if (changed) this.savePlayer(playerId);
+    },
+
     editPlayerGameId(playerId) {
       const player = Hexcore2.state.players.find(item => item.id === playerId);
       if (!player) return;
