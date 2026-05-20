@@ -1586,11 +1586,23 @@ h2 span {
   white-space: nowrap;
 }
 
+.player-name-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.player-name-line strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .game-id-display {
   max-width: 100%;
 }
 
-.game-id-edit-btn {
+.inline-edit-btn {
   display: inline-grid;
   flex: 0 0 24px;
   place-items: center;
@@ -1605,23 +1617,35 @@ h2 span {
   transition: opacity 0.16s ease, background 0.16s ease, border-color 0.16s ease;
 }
 
-.game-id-edit-btn svg {
+.inline-edit-btn svg {
   width: 13px;
   height: 13px;
 }
 
-.player-row:hover .game-id-edit-btn {
+.player-row:hover .inline-edit-btn {
   opacity: 1;
 }
 
-.game-id-edit-btn:hover {
+.inline-edit-btn:hover {
   border-color: rgba(25, 212, 240, 0.72);
   background: rgba(25, 212, 240, 0.16);
 }
 
-.player-card-head .game-id-editor {
+.name-edit-btn {
+  width: 22px;
+  height: 22px;
+}
+
+.player-card-head .game-id-editor,
+.player-card-head .player-name-editor {
   min-height: 24px;
   font-size: 12px;
+}
+
+.player-card-head .player-name-editor {
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 900;
 }
 
 .player-edit-grid {

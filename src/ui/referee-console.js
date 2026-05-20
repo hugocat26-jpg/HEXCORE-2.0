@@ -681,18 +681,26 @@
                 const isCaptain = player.status === 'captain';
                 const canPromote = player.status !== 'disabled' && !isCaptain;
                 const editingGameId = Hexcore2.state.ui && Hexcore2.state.ui.editingGameIdPlayerId === player.id;
+                const editingName = Hexcore2.state.ui && Hexcore2.state.ui.editingNamePlayerId === player.id;
                 return `
                   <article class="player-row ${player.status === 'disabled' ? 'disabled-player' : ''} ${isCaptain ? 'captain-player-row' : ''}">
                     <div class="player-card-head">
                       <div>
-                        <strong>${escapeHtml(player.name)}</strong>
+                        <span class="player-name-line">
+                          ${editingName ? `
+                            <input class="player-name-editor" id="player-display-name-${player.id}" value="${escapeHtml(player.name || '')}" onblur="window.hexcoreUI.savePlayerName('${player.id}')" onkeydown="if(event.key==='Enter') window.hexcoreUI.savePlayerName('${player.id}'); if(event.key==='Escape') window.hexcoreUI.cancelPlayerNameEdit()">
+                          ` : `
+                            <strong>${escapeHtml(player.name)}</strong>
+                          `}
+                          ${editingName ? '' : `<button class="inline-edit-btn name-edit-btn" title="编辑选手名称" onclick="window.hexcoreUI.editPlayerName('${player.id}')">${Hexcore2.icon('edit')}</button>`}
+                        </span>
                         ${editingGameId ? `
-                          <input class="game-id-editor" id="player-game-id-${player.id}" value="${escapeHtml(player.gameId || '')}" onkeydown="if(event.key==='Enter') window.hexcoreUI.savePlayerGameId('${player.id}'); if(event.key==='Escape') window.hexcoreUI.cancelPlayerGameIdEdit()">
+                          <input class="game-id-editor" id="player-game-id-${player.id}" value="${escapeHtml(player.gameId || '')}" onblur="window.hexcoreUI.savePlayerGameId('${player.id}')" onkeydown="if(event.key==='Enter') window.hexcoreUI.savePlayerGameId('${player.id}'); if(event.key==='Escape') window.hexcoreUI.cancelPlayerGameIdEdit()">
                         ` : `
                           <span class="game-id-display">${escapeHtml(player.gameId || '无游戏ID')}</span>
                         `}
                       </div>
-                      ${editingGameId ? '' : `<button class="game-id-edit-btn" title="编辑游戏ID" onclick="window.hexcoreUI.editPlayerGameId('${player.id}')">${Hexcore2.icon('edit')}</button>`}
+                      ${editingGameId ? '' : `<button class="inline-edit-btn game-id-edit-btn" title="编辑游戏ID" onclick="window.hexcoreUI.editPlayerGameId('${player.id}')">${Hexcore2.icon('edit')}</button>`}
                       <em class="${isCaptain ? 'captain' : (player.status === 'available' ? 'available' : (player.status === 'disabled' ? 'disabled' : 'drafted'))}">${isCaptain ? '队长专属' : (player.status === 'available' ? '可选' : (player.status === 'disabled' ? '已禁用' : `已入队${owner ? `：${escapeHtml(owner.name)}` : ''}`))}</em>
                     </div>
                     <div class="player-edit-grid">

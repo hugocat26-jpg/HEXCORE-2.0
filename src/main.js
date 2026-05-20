@@ -1240,6 +1240,58 @@
       }, 0);
     },
 
+    editPlayerName(playerId) {
+      const player = Hexcore2.state.players.find(item => item.id === playerId);
+      if (!player) return;
+      Hexcore2.state.ui.editingNamePlayerId = playerId;
+      Hexcore2.ui.render();
+      setTimeout(() => {
+        const input = document.getElementById(`player-display-name-${playerId}`);
+        if (input) {
+          input.focus();
+          input.select();
+        }
+      }, 0);
+    },
+
+    cancelPlayerNameEdit() {
+      Hexcore2.state.ui.editingNamePlayerId = '';
+      Hexcore2.ui.render();
+    },
+
+    savePlayerName(playerId) {
+      const player = Hexcore2.state.players.find(item => item.id === playerId);
+      const input = document.getElementById(`player-display-name-${playerId}`);
+      if (!player || !input) return;
+      const nextName = String(input.value || '').trim().slice(0, 32);
+      if (!nextName) {
+        Hexcore2.eventStore.append('保存选手名称失败', '选手名称不能为空', 'warn');
+        Hexcore2.ui.render();
+        return;
+      }
+      const duplicated = Hexcore2.state.players.some(item =>
+        item.id !== player.id && String(item.name || '').toLowerCase() === nextName.toLowerCase()
+      );
+      if (duplicated) {
+        Hexcore2.eventStore.append('保存选手名称失败', `选手名称「${nextName}」已存在`, 'warn');
+        Hexcore2.ui.render();
+        return;
+      }
+
+      snapshot(`保存选手名称前：${player.name}`);
+      const oldName = player.name;
+      player.name = nextName;
+      Hexcore2.state.captains.forEach(captain => {
+        if (captain.playerId === player.id || captain.playerGameId === player.gameId) {
+          captain.name = captain.name === `${oldName}队` || captain.name === oldName ? `${nextName}队` : captain.name;
+        }
+      });
+      Hexcore2.state.ui.editingNamePlayerId = '';
+      if (Hexcore2.normalizeState) Hexcore2.normalizeState(Hexcore2.state);
+      Hexcore2.eventStore.append('选手库', `${oldName} 更名为 ${player.name}`, 'success');
+      renderAndPersist();
+    },
+
     cancelPlayerGameIdEdit() {
       Hexcore2.state.ui.editingGameIdPlayerId = '';
       Hexcore2.ui.render();
