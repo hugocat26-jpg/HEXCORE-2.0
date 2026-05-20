@@ -878,6 +878,7 @@
             <div>
               ${playerCards()}
               ${refereeControls()}
+              ${rosterRail()}
             </div>
             <div>
               ${hexcorePanel()}
@@ -887,7 +888,6 @@
         </div>
         ${eventLog()}
       </main>
-      ${rosterRail()}
     `;
   }
 
