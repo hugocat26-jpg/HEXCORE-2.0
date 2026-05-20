@@ -1694,6 +1694,28 @@ h2 span {
   border-color: rgba(25, 212, 240, 0.42);
 }
 
+.readonly-score {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 30px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: rgba(9, 21, 29, 0.52);
+  padding: 0 9px;
+}
+
+.readonly-score span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.readonly-score strong {
+  color: var(--cyan);
+  font-size: 15px;
+}
+
 .player-row textarea:hover {
   border-color: rgba(244, 182, 42, 0.62);
 }

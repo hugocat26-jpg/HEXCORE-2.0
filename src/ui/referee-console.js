@@ -710,7 +710,7 @@
                       </label>
                       <label><small>偏好位置</small><input id="player-lane-${player.id}" value="${escapeHtml(player.lane || '未知')}" onkeydown="if(event.key==='Enter') window.hexcoreUI.savePlayer('${player.id}')"></label>
                       <label><small>擅长英雄</small><input id="player-heroes-${player.id}" value="${escapeHtml((player.heroes || []).join('、'))}" placeholder="用顿号分隔"></label>
-                      <label><small>评分</small><input id="player-score-${player.id}" type="number" min="0" max="120" value="${player.score || 0}"></label>
+                      <div class="readonly-score"><span>评分</span><strong>${escapeHtml(player.score || 0)}</strong></div>
                     </div>
                     <div class="player-actions">
                       ${canPromote ? `<button class="promote-inline" onclick="window.hexcoreUI.promotePlayerToCaptain('${player.id}')">设为队长</button>` : '<button disabled>队长锁定</button>'}
