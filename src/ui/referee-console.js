@@ -708,6 +708,7 @@
                     <div class="player-edit-grid">
                       <label><small>偏好位置</small><input id="player-lane-${player.id}" value="${escapeHtml(player.lane || '未知')}" onkeydown="if(event.key==='Enter') window.hexcoreUI.savePlayer('${player.id}')"></label>
                       <label><small>绝活英雄</small><input id="player-heroes-${player.id}" value="${escapeHtml((player.heroes || []).join('、'))}" placeholder="用顿号分隔"></label>
+                      <label class="manifesto-field"><small>参赛宣言</small><textarea id="player-manifesto-${player.id}" rows="2" placeholder="填写这名选手的参赛宣言">${escapeHtml(player.manifesto || '')}</textarea></label>
                       <div class="readonly-score"><span>评分</span><strong>${escapeHtml(player.score || 0)}</strong></div>
                     </div>
                     <div class="player-actions">
