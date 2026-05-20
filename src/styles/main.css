@@ -34,7 +34,9 @@
 html,
 body {
   margin: 0;
+  height: 100%;
   min-height: 100%;
+  overflow: hidden;
   background: var(--bg-deep);
   color: var(--text);
   font-family: "Microsoft YaHei", "PingFang SC", "Segoe UI", Arial, sans-serif;
@@ -75,9 +77,11 @@ select:focus-visible {
 }
 
 #app {
+  height: 100vh;
+  min-height: 0;
   display: grid;
   grid-template-columns: var(--side) minmax(0, 1fr);
-  min-height: 100vh;
+  overflow: hidden;
   background:
     linear-gradient(180deg, rgba(20, 56, 70, 0.28), transparent 280px),
     var(--bg-deep);
@@ -242,9 +246,11 @@ select:focus-visible {
 
 .app-main {
   min-width: 0;
+  min-height: 0;
+  height: 100vh;
   display: grid;
   grid-template-rows: var(--top) minmax(0, 1fr);
-  min-height: 100vh;
+  overflow: hidden;
 }
 
 .topbar {
@@ -332,6 +338,7 @@ select:focus-visible {
 
 .workspace {
   min-height: 0;
+  height: 100%;
   display: grid;
   grid-template-columns: minmax(0, 1fr) var(--rail);
   overflow: hidden;
@@ -2065,7 +2072,7 @@ h2 span {
   }
 
   .app-main {
-    grid-template-rows: auto minmax(0, 1fr) auto;
+    grid-template-rows: auto minmax(0, 1fr);
   }
 
   .topbar {
