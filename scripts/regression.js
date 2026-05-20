@@ -220,6 +220,7 @@ function testUiNavigationAndHexButtons() {
   assert(app.innerHTML.includes('选手库') && app.innerHTML.includes('侏儒马池') && app.innerHTML.includes('setPlayerFilter'), '选手库页面应可筛选');
   assert(app.innerHTML.includes('导入 JSON/CSV') && app.innerHTML.includes('pool-health-grid'), '选手库应提供导入和卡池容量检测');
   assert(app.innerHTML.includes('队长专属池') && app.innerHTML.includes('系统卡池') && !app.innerHTML.includes('player-tier-'), '选手库应显示系统卡池且不允许手动设置卡池');
+  assert(app.innerHTML.includes('参赛宣言') && app.innerHTML.includes('player-manifesto-') && !app.innerHTML.includes('player-name-'), '选手卡片应使用参赛宣言替代名称编辑栏');
   H.state.captains[0].playerId = 'captain-test-player';
   H.state.players.push({ id: 'captain-test-player', name: '队长测试选手', lane: '中路', gameId: 'CAPTAIN_TEST', score: 120, tier: 4, status: 'available' });
   H.normalizeState(H.state);
@@ -251,6 +252,11 @@ function testUiNavigationAndHexButtons() {
   assert(H.state.players.length === beforePlayers + 1, '选手库应能新增选手');
   const newPlayer = H.state.players[H.state.players.length - 1];
   assert(newPlayer.name === '回归测试选手' && newPlayer.tier >= 1 && newPlayer.tier <= 4 && newPlayer.score === 88, '选手库应能保存选手基础信息并由系统安排卡池');
+  elements[`player-lane-${newPlayer.id}`] = { value: '辅助' };
+  elements[`player-score-${newPlayer.id}`] = { value: '89' };
+  elements[`player-manifesto-${newPlayer.id}`] = { value: '今天只打关键团' };
+  H.actions.savePlayer(newPlayer.id);
+  assert(newPlayer.manifesto === '今天只打关键团' && newPlayer.lane === '辅助', '选手库应能保存参赛宣言和基础信息');
   H.actions.togglePlayerDisabled(newPlayer.id);
   assert(newPlayer.status === 'disabled', '选手库应能禁用可选选手');
   H.actions.togglePlayerDisabled(newPlayer.id);

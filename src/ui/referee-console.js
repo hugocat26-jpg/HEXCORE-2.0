@@ -690,6 +690,10 @@
                       <em class="${isCaptain ? 'captain' : (player.status === 'available' ? 'available' : (player.status === 'disabled' ? 'disabled' : 'drafted'))}">${isCaptain ? '队长专属' : (player.status === 'available' ? '可选' : (player.status === 'disabled' ? '已禁用' : `已入队${owner ? `：${escapeHtml(owner.name)}` : ''}`))}</em>
                     </div>
                     <div class="player-edit-grid">
+                      <label class="manifesto-field">
+                        <small>参赛宣言</small>
+                        <textarea id="player-manifesto-${player.id}" rows="2" placeholder="填写这名选手的参赛宣言">${escapeHtml(player.manifesto || '')}</textarea>
+                      </label>
                       <label><small>位置</small><input id="player-lane-${player.id}" value="${escapeHtml(player.lane || '未知')}"></label>
                       <div class="derived-pool-field"><small>系统卡池</small><strong>${escapeHtml(tierNames[player.tier] || '未知')}</strong></div>
                       <label><small>评分</small><input id="player-score-${player.id}" type="number" min="0" max="120" value="${player.score || 0}"></label>

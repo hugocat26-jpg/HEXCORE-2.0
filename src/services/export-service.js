@@ -116,6 +116,7 @@
       heroes: Array.isArray(source.heroes)
         ? source.heroes.map(hero => String(hero).slice(0, 8)).slice(0, 5)
         : String(source.heroes || source.英雄 || '待,定,位').split(/[，,|/]/).map(hero => hero.trim()).filter(Boolean).slice(0, 5),
+      manifesto: String(source.manifesto || source.参赛宣言 || source.slogan || '').trim().slice(0, 80),
       status,
     };
   }

@@ -1611,8 +1611,28 @@ h2 span {
   padding: 0 8px;
 }
 
+.player-row textarea {
+  width: 100%;
+  min-height: 46px;
+  resize: vertical;
+  border: 1px solid rgba(244, 182, 42, 0.34);
+  border-radius: 5px;
+  background: rgba(42, 35, 15, 0.36);
+  color: #ffe9b8;
+  line-height: 1.45;
+  padding: 7px 8px;
+}
+
+.player-row textarea::placeholder {
+  color: rgba(255, 233, 184, 0.48);
+}
+
 .player-row input:hover {
   border-color: rgba(25, 212, 240, 0.42);
+}
+
+.player-row textarea:hover {
+  border-color: rgba(244, 182, 42, 0.62);
 }
 
 .player-row span,
