@@ -92,7 +92,7 @@
   }
 
   function sanitizePlayers(players, playerIdMap) {
-    const source = Array.isArray(players) && players.length ? players : clone(defaultState.players);
+    const source = Array.isArray(players) ? players : clone(defaultState.players);
     const usedIds = new Set();
     return source.slice(0, 600).map((player, index) => {
       const item = player && typeof player === 'object' ? player : {};

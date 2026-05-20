@@ -1317,6 +1317,60 @@
       });
     },
 
+    clearAllPlayers() {
+      const firstConfirmed = typeof confirm === 'function'
+        ? confirm('高风险操作：将清空所有选手，并移除所有队伍中的队长和队员，所有卡池会变为空。是否继续？')
+        : true;
+      if (!firstConfirmed) return;
+
+      const secondConfirmed = typeof confirm === 'function'
+        ? confirm('二次确认：清空后选人流程会初始化到第1轮，海克斯、抽卡结果、赛程也会清空。确认执行？')
+        : true;
+      if (!secondConfirmed) return;
+
+      snapshot('清空所有选手前');
+      Hexcore2.state.players = [];
+      Hexcore2.state.captains.forEach(captain => {
+        captain.team = [];
+        delete captain.playerId;
+        delete captain.playerGameId;
+      });
+      Hexcore2.state.hexcoreAssignments = Hexcore2.state.captains.reduce((result, captain) => {
+        result[captain.id] = [];
+        return result;
+      }, {});
+      Hexcore2.state.hexcoreDraft = {
+        captainId: '',
+        slots: [],
+        chosen: [],
+        seenIds: [],
+        refreshUsed: false,
+        drawOrder: [],
+      };
+      Hexcore2.state.draft = {
+        phase: 'captain_action',
+        round: 1,
+        maxRounds: Hexcore2.state.draft.maxRounds || 4,
+        baseOrder: Hexcore2.state.captains.map(captain => captain.id),
+        currentOrder: Hexcore2.state.captains.map(captain => captain.id),
+        currentIndex: 0,
+        selectedSlot: 0,
+        currentDraw: null,
+        runtimeEffects: [],
+        explanations: [],
+        pickedThisTurn: false,
+        paused: false,
+      };
+      Hexcore2.state.tournament = { status: 'empty', championId: '', rounds: [] };
+      Hexcore2.state.ui = Hexcore2.state.ui || {};
+      Hexcore2.state.ui.activeView = 'players';
+      Hexcore2.state.ui.playerFilter = 'all';
+      if (Hexcore2.normalizeState) Hexcore2.normalizeState(Hexcore2.state);
+      Hexcore2.turnOrderEngine.recompute();
+      Hexcore2.eventStore.append('选手库清空', '裁判清空了所有选手，队伍、卡池、海克斯和选人流程已初始化', 'warn');
+      renderAndPersist();
+    },
+
     savePlayer(playerId) {
       const player = Hexcore2.state.players.find(item => item.id === playerId);
       if (!player) return;

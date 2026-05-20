@@ -670,6 +670,7 @@
             </select>
             <button class="primary-btn" onclick="window.hexcoreUI.addPlayer()">新增选手</button>
             <button class="subtle-btn" onclick="document.getElementById('player-import-input').click()">导入 JSON/CSV</button>
+            <button class="danger-inline" onclick="window.hexcoreUI.clearAllPlayers()">清空所有选手</button>
             <input id="player-import-input" type="file" accept=".json,.csv,application/json,text/csv" hidden onchange="window.hexcoreUI.importPlayers(this.files[0]); this.value = ''">
           </div>
         </div>

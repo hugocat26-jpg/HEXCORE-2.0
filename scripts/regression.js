@@ -233,7 +233,7 @@ function testUiNavigationAndHexButtons() {
   assert(!app.innerHTML.includes('useHexcore(" origin")'), '海克斯按钮不应生成被截断的 onclick 参数');
   H.actions.setActiveView('players');
   assert(app.innerHTML.includes('选手库') && app.innerHTML.includes('侏儒马池') && app.innerHTML.includes('setPlayerFilter'), '选手库页面应可筛选');
-  assert(app.innerHTML.includes('导入 JSON/CSV') && app.innerHTML.includes('pool-health-grid'), '选手库应提供导入和卡池容量检测');
+  assert(app.innerHTML.includes('导入 JSON/CSV') && app.innerHTML.includes('清空所有选手') && app.innerHTML.includes('pool-health-grid'), '选手库应提供导入、清空和卡池容量检测');
   assert(app.innerHTML.includes('队长专属池') && app.innerHTML.includes('卡池等级不可手动设置') && !app.innerHTML.includes('player-tier-'), '选手库应说明系统分池且不允许手动设置卡池');
   assert(app.innerHTML.includes('参赛宣言') && app.innerHTML.includes('player-manifesto-') && app.innerHTML.includes('player-lane-') && app.innerHTML.includes('player-heroes-') && app.innerHTML.includes('autoSavePlayerIfChanged') && app.innerHTML.includes('偏好位置') && app.innerHTML.includes('绝活英雄') && app.innerHTML.includes('readonly-score') && !app.innerHTML.includes('id="player-name-') && !app.innerHTML.includes('player-score-'), '选手卡片应按名字、ID、偏好位置、绝活英雄、参赛宣言、评分展示并支持失焦自动保存');
   assert(!app.innerHTML.includes('>保存</button>'), '选手卡片不应再显示手动保存按钮');
@@ -434,6 +434,24 @@ function testFeedbackAutoDismiss() {
   });
 }
 
+function testClearAllPlayers() {
+  const { H, app } = createHarness();
+  H.actions.setActiveView('players');
+  assert(app.innerHTML.includes('清空所有选手'), '选手库应显示清空所有选手入口');
+  H.actions.generateTournamentSchedule();
+  H.actions.clearAllPlayers();
+  assert(H.state.players.length === 0, '清空所有选手后选手库应为空');
+  assert(H.state.captains.every(captain => captain.team.length === 0 && !captain.playerId && !captain.playerGameId), '清空所有选手后所有队伍应为空且无队长绑定');
+  assert(H.state.draft.round === 1 && H.state.draft.currentIndex === 0 && !H.state.draft.currentDraw, '清空所有选手后流程应回到第1轮初始态');
+  assert(H.state.captains.every(captain => (H.state.hexcoreAssignments[captain.id] || []).length === 0), '清空所有选手后所有海克斯分配应清空');
+  assert(H.state.tournament.status === 'empty' && H.state.tournament.rounds.length === 0, '清空所有选手后赛程应清空');
+  H.actions.importPlayers({
+    name: 'hexcore2_players_50.csv',
+    content: fs.readFileSync(path.join(root, 'test-data', 'hexcore2_players_50.csv'), 'utf8'),
+  });
+  assert(H.state.players.length === 50 && H.state.players.some(player => player.gameId === 'DY_Raven_T48'), '清空后应能导入50人测试表格');
+}
+
 function testSecurityHardening() {
   assert(staticServer.resolveRequestPath('/') === path.join(root, 'index.html'), '静态服务应正常解析首页');
   assert(staticServer.resolveRequestPath('/src/main.js') === path.join(root, 'src', 'main.js'), '静态服务应正常解析项目内资源');
@@ -481,6 +499,7 @@ async function run() {
     testDecomposeKnowledge,
     testUiNavigationAndHexButtons,
     testFeedbackAutoDismiss,
+    testClearAllPlayers,
     testSecurityHardening,
   ];
 
