@@ -259,9 +259,9 @@ function testUiNavigationAndHexButtons() {
   H.actions.saveRuleTemplate();
   assert(H.state.settings.ruleTemplates.length === 1, '规则设置应能保存规则模板');
   H.actions.setActiveView('schedule');
-  assert(app.innerHTML.includes('schedule-cell') && app.innerHTML.includes('jumpToScheduleSlot'), '赛程页面应提供跳转入口');
+  assert(app.innerHTML.includes('轮次进度') && app.innerHTML.includes('schedule-cell') && app.innerHTML.includes('jumpToScheduleSlot'), '轮次进度页面应提供跳转入口');
   H.actions.jumpToScheduleSlot(2, 'c2');
-  assert(H.state.draft.round === 2 && H.selectors.currentCaptain().id === 'c2', '赛程跳转应切换轮次和当前队长');
+  assert(H.state.draft.round === 2 && H.selectors.currentCaptain().id === 'c2', '轮次跳转应切换轮次和当前队长');
   H.actions.setActiveView('logs');
   assert(app.innerHTML.includes('exportEventsJson') && app.innerHTML.includes('exportRecapText'), '日志页面应提供 JSON 和复盘文本导出');
   elements['event-search'] = { value: '海克斯' };

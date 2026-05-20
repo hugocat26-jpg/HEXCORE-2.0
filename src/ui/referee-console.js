@@ -52,11 +52,11 @@
     const teamCount = Hexcore2.selectors.teamCount();
     const activeView = (Hexcore2.state.ui && Hexcore2.state.ui.activeView) || 'draft';
     const items = [
-      ['draft', 'draft', '实时选秀'],
+      ['draft', 'draft', '实时抽选'],
       ['team', 'teams', '队伍管理'],
       ['users', 'players', '选手库'],
       ['hex', 'hexcores', '海克斯库'],
-      ['calendar', 'schedule', '赛程进度'],
+      ['calendar', 'schedule', '轮次进度'],
       ['rule', 'rules', '规则设置'],
       ['log', 'logs', '日志导出'],
       ['cog', 'settings', '系统设置'],
@@ -68,7 +68,7 @@
           <span class="brand-mark">${icon('cube')}</span>
           <span>HEXCORE 2.0</span>
         </div>
-        <div class="nav-section">赛事控制台</div>
+        <div class="nav-section">选人抽卡控制台</div>
         <nav class="nav-list">
           ${items.map(([iconName, view, label]) => `
             <button class="nav-item ${activeView === view ? 'active' : ''}" onclick="window.hexcoreUI.setActiveView('${view}')">
@@ -78,9 +78,9 @@
           `).join('')}
         </nav>
         <div class="event-info">
-          <div>赛事信息</div>
-          <p>赛事名称：HEXCORE 杯 S2</p>
-          <p>赛制：${teamCount} 队征召制</p>
+          <div>流程信息</div>
+          <p>项目名称：HEXCORE 2.0</p>
+          <p>抽选规模：${teamCount} 队征召制</p>
           <p>队伍范围：${Hexcore2.state.settings.minTeams}-${Hexcore2.state.settings.maxTeams} 队</p>
           <p>版本：2.0 裁判端</p>
           <p>模式：裁判代执行</p>
@@ -116,8 +116,8 @@
     const tier = captain ? Hexcore2.poolEngine.effectiveTier(captain.id) : Hexcore2.selectors.roundTier(Hexcore2.state.draft.round);
     const tierName = Hexcore2.state.settings.tierNames[tier];
     const statusText = Hexcore2.state.draft.phase === 'completed'
-      ? '选秀已完成'
-      : (Hexcore2.state.draft.paused ? '流程已暂停' : '比赛进行中');
+      ? '选人已完成'
+      : (Hexcore2.state.draft.paused ? '流程已暂停' : '选人进行中');
     return `
       <header class="topbar">
         <div class="mode">裁判代执行</div>
@@ -216,7 +216,7 @@
           <button class="action-btn amber ${Hexcore2.state.draft.currentDraw && Hexcore2.state.draft.currentDraw.pickMode === 'hellhound' ? '' : 'disabled'}" onclick="window.hexcoreUI.timeoutRandomPick()"><span class="fast-icon">⏱</span><strong>超时随机</strong><span>当前段随机入队</span></button>
           <button class="action-btn amber" onclick="window.hexcoreUI.skipTurn()"><span class="fast-icon">»</span><strong>跳过本轮</strong><span>不选择，跳过此轮</span></button>
           <button class="action-btn blue" onclick="window.hexcoreUI.nextCaptain()">${icon('team')}<strong>下一位</strong><span>交给下一队长</span></button>
-          <button class="action-btn muted" onclick="window.hexcoreUI.pause()">${icon('pause')}<strong>暂停</strong><span>暂停选秀流程</span></button>
+          <button class="action-btn muted" onclick="window.hexcoreUI.pause()">${icon('pause')}<strong>暂停</strong><span>暂停选人流程</span></button>
           <button class="action-btn muted ${(Hexcore2.state.undoStack || []).length === 0 ? 'disabled' : ''}" onclick="window.hexcoreUI.undo()">${icon('undo')}<strong>撤销上一步</strong><span>可撤销 ${(Hexcore2.state.undoStack || []).length} 步</span></button>
         </div>
       </section>
@@ -405,7 +405,7 @@
           <h1>${escapeHtml(title)}</h1>
           <p>${escapeHtml(subtitle)}</p>
         </div>
-        <button class="subtle-btn" onclick="window.hexcoreUI.setActiveView('draft')">${Hexcore2.icon('draft')}返回实时选秀</button>
+        <button class="subtle-btn" onclick="window.hexcoreUI.setActiveView('draft')">${Hexcore2.icon('draft')}返回实时抽选</button>
       </section>
     `;
   }
@@ -648,7 +648,7 @@
     }
 
     return `
-      ${pageHeader('赛程进度', '查看当前轮次、顺位和选秀完成度，并支持裁判跳转到指定队长。')}
+      ${pageHeader('轮次进度', '查看当前抽选轮次、顺位和选人完成度，并支持裁判跳转到指定队长。')}
       <section class="data-panel">
         <div class="metrics-grid">
           <div><span>当前轮次</span><strong>${Hexcore2.state.draft.round}/${Hexcore2.state.draft.maxRounds}</strong></div>

@@ -79,7 +79,7 @@
     drawCards() {
       const captain = Hexcore2.selectors.currentCaptain();
       if (Hexcore2.state.draft.phase === 'completed') {
-        Hexcore2.eventStore.append('裁判操作', '选秀已完成，无法继续抽卡', 'warn');
+        Hexcore2.eventStore.append('裁判操作', '选人流程已完成，无法继续抽卡', 'warn');
         Hexcore2.ui.render();
         return;
       }
@@ -200,7 +200,7 @@
         const captain = Hexcore2.selectors.currentCaptain();
         Hexcore2.eventStore.append('回合推进', `进入第 ${transition.round} 轮，当前队长为 ${captain ? captain.name : '无'}`, 'info');
       } else if (transition.type === 'completed') {
-        Hexcore2.eventStore.append('选秀完成', '所有轮次已结束或队伍均已满员', 'success');
+        Hexcore2.eventStore.append('选人完成', '所有抽选轮次已结束或队伍均已满员', 'success');
       } else {
         const captain = Hexcore2.selectors.currentCaptain();
         Hexcore2.eventStore.append('裁判操作', `进入 ${captain ? captain.name : '无'} 的选人环节`, 'info');
@@ -235,7 +235,7 @@
     pause() {
       snapshot('暂停状态切换前');
       Hexcore2.state.draft.paused = !Hexcore2.state.draft.paused;
-      Hexcore2.eventStore.append('裁判操作', Hexcore2.state.draft.paused ? '裁判暂停了选秀流程' : '裁判恢复了选秀流程', 'warn');
+      Hexcore2.eventStore.append('裁判操作', Hexcore2.state.draft.paused ? '裁判暂停了选人流程' : '裁判恢复了选人流程', 'warn');
       Hexcore2.ui.render();
     },
 
@@ -287,7 +287,7 @@
 
     clearEvents() {
       const confirmed = typeof confirm === 'function'
-        ? confirm('确认清空当前事件日志？此操作会保留当前比赛状态。')
+        ? confirm('确认清空当前事件日志？此操作会保留当前选人状态。')
         : true;
       if (!confirmed) return;
 
@@ -454,12 +454,12 @@
       const targetRound = Number(round);
       const captain = Hexcore2.state.captains.find(item => item.id === captainId);
       if (!captain || !Number.isInteger(targetRound) || targetRound < 1 || targetRound > Hexcore2.state.draft.maxRounds) {
-        Hexcore2.eventStore.append('赛程跳转失败', '目标轮次或队长无效', 'warn');
+        Hexcore2.eventStore.append('轮次跳转失败', '目标轮次或队长无效', 'warn');
         Hexcore2.ui.render();
         return;
       }
 
-      snapshot(`赛程跳转前：第${targetRound}轮 ${captain.name}`);
+      snapshot(`轮次跳转前：第${targetRound}轮 ${captain.name}`);
       Hexcore2.state.draft.round = targetRound;
       Hexcore2.turnOrderEngine.recompute();
       const index = Hexcore2.state.draft.currentOrder.indexOf(captainId);
@@ -467,7 +467,7 @@
       Hexcore2.state.draft.currentDraw = null;
       Hexcore2.state.draft.selectedSlot = 0;
       Hexcore2.state.draft.pickedThisTurn = false;
-      Hexcore2.eventStore.append('赛程跳转', `裁判跳转到第 ${targetRound} 轮：${captain.name}`, 'warn');
+      Hexcore2.eventStore.append('轮次跳转', `裁判跳转到第 ${targetRound} 轮：${captain.name}`, 'warn');
       renderAndPersist();
     },
 

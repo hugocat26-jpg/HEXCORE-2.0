@@ -168,11 +168,11 @@
     exportRecapText() {
       const state = Hexcore2.state;
       const lines = [
-        `HEXCORE2 裁判复盘`,
+        `HEXCORE2 选人抽卡复盘`,
         `导出时间：${new Date().toLocaleString('zh-CN', { hour12: false })}`,
         `队伍数量：${state.captains.length}`,
         `当前轮次：${state.draft.round}/${state.draft.maxRounds}`,
-        `流程状态：${state.draft.phase}`,
+        `抽选流程状态：${state.draft.phase}`,
         '',
         '队伍阵容：',
         ...state.captains.map(captain => {
