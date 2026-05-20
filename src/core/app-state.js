@@ -122,6 +122,7 @@
       totalTeams: seed.captains.length,
       playersPerTeam: 4,
       drawCount: 3,
+      pickTimeoutSeconds: 30,
       roundTiers: [1, 2, 3, 4],
       autoRandomStrategy: 'balanced',
       timeoutStrategy: 'random_available',
@@ -175,6 +176,7 @@
     state.settings.maxTeams = state.settings.maxTeams || defaultState.settings.maxTeams;
     state.settings.playersPerTeam = state.settings.playersPerTeam || defaultState.settings.playersPerTeam;
     state.settings.drawCount = state.settings.drawCount || defaultState.settings.drawCount;
+    state.settings.pickTimeoutSeconds = clampNumber(state.settings.pickTimeoutSeconds, 1, 300, defaultState.settings.pickTimeoutSeconds);
     state.settings.roundTiers = Array.isArray(state.settings.roundTiers) && state.settings.roundTiers.length
       ? state.settings.roundTiers.map(tier => Math.max(1, Math.min(4, Number(tier) || 1)))
       : [...defaultState.settings.roundTiers];

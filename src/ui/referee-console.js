@@ -23,6 +23,12 @@
     return '全池自选';
   }
 
+  function drawTimeoutRemaining() {
+    const draw = Hexcore2.state.draft.currentDraw;
+    if (!draw || !draw.timeoutEndsAt || Hexcore2.state.draft.pickedThisTurn) return null;
+    return Math.max(0, Math.ceil((draw.timeoutEndsAt - Date.now()) / 1000));
+  }
+
   function currentExplanation() {
     const captain = Hexcore2.selectors.currentCaptain();
     if (!captain) return [];
@@ -249,6 +255,7 @@
     const infoBoost = captain ? Hexcore2.hexcoreEngine.infoBoostFor(captain.id) : null;
     const tier = captain ? Hexcore2.poolEngine.effectiveTier(captain.id) : Hexcore2.selectors.roundTier(Hexcore2.state.draft.round);
     const draw = Hexcore2.state.draft.currentDraw;
+    const timeoutRemaining = drawTimeoutRemaining();
     function teamOwnerName(player) {
       if (!player || !player.teamId) return '';
       const owner = Hexcore2.state.captains.find(item => item.id === player.teamId);
@@ -260,6 +267,7 @@
           <h2>${escapeHtml(currentDrawLabel())} <span>${escapeHtml(Hexcore2.state.settings.tierNames[tier])}池${draw && draw.reason ? ` / ${escapeHtml(draw.reason)}` : ''}</span></h2>
           <button class="subtle-btn" onclick="window.hexcoreUI.drawCards()">${Hexcore2.icon('refresh')}刷新池子</button>
         </div>
+        ${timeoutRemaining !== null ? `<div class="draw-timeout-bar"><strong>倒计时 ${timeoutRemaining}s</strong><span>结束未选择时，将从当前 ${cards.length} 张候选卡中随机入队</span></div>` : ''}
         <div class="cards-grid ${draw && draw.pickMode === 'open_pick' ? 'open-pick-grid' : ''}">
           ${cards.map(({ slot, player, realPlayer }, index) => `
             <button class="player-card ${index === selected ? 'selected' : ''} ${blinded ? 'blind-card' : ''} ${draw && draw.pickMode === 'mystery_swap' ? 'mystery-card' : ''}" onclick="window.hexcoreUI.selectCard(${index})">
@@ -292,13 +300,16 @@
 
   function refereeControls() {
     const icon = Hexcore2.icon;
+    const draw = Hexcore2.state.draft.currentDraw;
+    const timeoutRemaining = drawTimeoutRemaining();
+    const canTimeoutPick = Boolean(draw && draw.cards && draw.cards.length && !Hexcore2.state.draft.pickedThisTurn);
     return `
       <section class="control-panel">
         <h2>裁判操作</h2>
         <div class="control-grid">
           <button class="action-btn cyan" onclick="window.hexcoreUI.drawCards()">${icon('cube')}<strong>抽卡</strong><span>抽取本轮选手</span></button>
           <button class="action-btn green ${Hexcore2.state.draft.pickedThisTurn ? 'disabled' : ''}" onclick="window.hexcoreUI.pickCard()">${icon('pick')}<strong>${Hexcore2.state.draft.pickedThisTurn ? '已选择' : '选择此卡'}</strong><span>将选手加入队伍</span></button>
-          <button class="action-btn amber ${Hexcore2.state.draft.currentDraw && Hexcore2.state.draft.currentDraw.pickMode === 'hellhound' ? '' : 'disabled'}" onclick="window.hexcoreUI.timeoutRandomPick()"><span class="fast-icon">⏱</span><strong>超时随机</strong><span>当前段随机入队</span></button>
+          <button class="action-btn amber ${canTimeoutPick ? '' : 'disabled'}" onclick="window.hexcoreUI.timeoutRandomPick()"><span class="fast-icon">⏱</span><strong>超时随机${timeoutRemaining !== null ? ` ${timeoutRemaining}s` : ''}</strong><span>从当前卡组随机</span></button>
           <button class="action-btn amber" onclick="window.hexcoreUI.skipTurn()"><span class="fast-icon">»</span><strong>跳过本轮</strong><span>不选择，跳过此轮</span></button>
           <button class="action-btn blue" onclick="window.hexcoreUI.nextCaptain()">${icon('team')}<strong>下一位</strong><span>交给下一队长</span></button>
           <button class="action-btn muted" onclick="window.hexcoreUI.pause()">${icon('pause')}<strong>暂停</strong><span>暂停选人流程</span></button>

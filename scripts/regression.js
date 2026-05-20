@@ -209,6 +209,11 @@ function testDecomposeKnowledge() {
   H.actions.drawCards();
   H.ui.render();
   assert(app.innerHTML.includes('战力顺位'), '抽卡 UI 应显示战力顺位');
+  assert(app.innerHTML.includes('倒计时') && app.innerHTML.includes('从当前卡组随机'), '抽卡后 UI 应显示超时倒计时和当前卡组随机提示');
+  const drawnPlayerIds = H.state.draft.currentDraw.cards.map(card => card.playerId);
+  H.actions.timeoutRandomPick(true);
+  const pickedFromDraw = H.state.captains.find(captain => captain.id === 'c1').team.some(playerId => drawnPlayerIds.includes(playerId));
+  assert(pickedFromDraw, '普通超时随机应只从当前抽到的候选卡中选择');
 }
 
 function testUiNavigationAndHexButtons() {

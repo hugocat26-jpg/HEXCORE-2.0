@@ -95,6 +95,66 @@
     Hexcore2.state.hexcoreDraft.refreshUsed = false;
   }
 
+  function browserTimerAvailable() {
+    return typeof global.setTimeout === 'function'
+      && typeof global.clearTimeout === 'function'
+      && global.document
+      && typeof global.document.querySelector === 'function';
+  }
+
+  function clearPickTimeout(clearDrawMeta = false) {
+    if (Hexcore2.pickTimeoutTimer && typeof global.clearTimeout === 'function') {
+      global.clearTimeout(Hexcore2.pickTimeoutTimer);
+    }
+    Hexcore2.pickTimeoutTimer = null;
+    const draw = Hexcore2.state.draft && Hexcore2.state.draft.currentDraw;
+    if (clearDrawMeta && draw) {
+      delete draw.timeoutStartedAt;
+      delete draw.timeoutEndsAt;
+      delete draw.timeoutSeconds;
+    }
+  }
+
+  function drawTimeoutSeconds(draw) {
+    const configured = Number(Hexcore2.state.settings.pickTimeoutSeconds);
+    const seconds = Number(draw && draw.timeLimitSeconds) || configured || 30;
+    return Math.max(1, Math.round(seconds));
+  }
+
+  function schedulePickTimeoutTick() {
+    if (!browserTimerAvailable()) return;
+    clearPickTimeout(false);
+    Hexcore2.pickTimeoutTimer = global.setTimeout(() => {
+      const draw = Hexcore2.state.draft.currentDraw;
+      if (!draw || Hexcore2.state.draft.pickedThisTurn || !draw.timeoutEndsAt) {
+        clearPickTimeout(false);
+        return;
+      }
+      if (Date.now() >= draw.timeoutEndsAt) {
+        Hexcore2.actions.timeoutRandomPick(true);
+        return;
+      }
+      Hexcore2.ui.render();
+      schedulePickTimeoutTick();
+    }, 1000);
+    if (Hexcore2.pickTimeoutTimer && typeof Hexcore2.pickTimeoutTimer.unref === 'function') {
+      Hexcore2.pickTimeoutTimer.unref();
+    }
+  }
+
+  function armPickTimeout(draw) {
+    if (!draw || !draw.cards || !draw.cards.length) {
+      clearPickTimeout(true);
+      return;
+    }
+    clearPickTimeout(false);
+    const seconds = drawTimeoutSeconds(draw);
+    draw.timeoutSeconds = seconds;
+    draw.timeoutStartedAt = Date.now();
+    draw.timeoutEndsAt = draw.timeoutStartedAt + seconds * 1000;
+    schedulePickTimeoutTick();
+  }
+
   function captainName(captainId) {
     const captain = Hexcore2.state.captains.find(item => item.id === captainId);
     return captain ? captain.name : '待定';
@@ -224,6 +284,7 @@
 
       const drawOverride = Hexcore2.hexcoreEngine.drawOverrideBeforeDraw(captain.id);
       if (drawOverride.handled) {
+        armPickTimeout(Hexcore2.state.draft.currentDraw);
         Hexcore2.ui.render();
         return;
       }
@@ -235,6 +296,7 @@
       Hexcore2.state.draft.currentDraw.reason = drawReasons.join('；');
       Hexcore2.state.draft.selectedSlot = 0;
       Hexcore2.state.draft.pickedThisTurn = false;
+      armPickTimeout(Hexcore2.state.draft.currentDraw);
 
       const tierName = Hexcore2.state.settings.tierNames[tier];
       const drawn = Hexcore2.state.draft.currentDraw.cards.length;
@@ -269,6 +331,7 @@
       }
 
       snapshot(`选卡前：${captain.name}`);
+      clearPickTimeout(true);
       const selectedPlayer = Hexcore2.state.players.find(player => player.id === slot.playerId);
       if (draw.pickMode === 'blind_box' && selectedPlayer && selectedPlayer.status === 'drafted' && selectedPlayer.teamId !== captain.id) {
         const transfer = Hexcore2.assignmentEngine.transferDraftedPlayer(captain.id, slot.playerId, 'mystery_box_transfer');
@@ -294,16 +357,17 @@
       }
       if (draw.pickMode === 'hellhound') {
         Hexcore2.hexcoreEngine.advanceHellhound(captain.id);
+        armPickTimeout(Hexcore2.state.draft.currentDraw);
       } else {
         Hexcore2.state.draft.pickedThisTurn = true;
       }
       renderAndPersist();
     },
 
-    timeoutRandomPick() {
+    timeoutRandomPick(autoTriggered = false) {
       const draw = Hexcore2.state.draft.currentDraw;
-      if (!draw || draw.pickMode !== 'hellhound' || !draw.cards.length) {
-        Hexcore2.eventStore.append('超时随机失败', '当前没有可随机分配的地狱三头犬候选卡', 'warn');
+      if (!draw || !draw.cards || !draw.cards.length || Hexcore2.state.draft.pickedThisTurn) {
+        Hexcore2.eventStore.append('超时随机失败', '当前没有可随机选择的候选卡', 'warn');
         Hexcore2.ui.render();
         return;
       }
@@ -311,13 +375,18 @@
       const index = Math.floor(Math.random() * draw.cards.length);
       Hexcore2.state.draft.selectedSlot = index;
       const captain = Hexcore2.selectors.currentCaptain();
-      Hexcore2.eventStore.append('地狱三头犬超时', `${captain ? captain.name : '当前队长'} 本段超时，系统随机选择第 ${index + 1} 张`, 'warn');
+      Hexcore2.eventStore.append(
+        draw.pickMode === 'hellhound' ? '地狱三头犬超时' : '超时随机',
+        `${captain ? captain.name : '当前队长'} ${autoTriggered ? '倒计时结束' : '触发超时随机'}，系统从当前 ${draw.cards.length} 张候选卡中随机选择第 ${index + 1} 张`,
+        'warn'
+      );
       this.pickCard();
     },
 
     nextCaptain() {
       const previous = Hexcore2.selectors.currentCaptain();
       snapshot(`切换队长前：${previous ? previous.name : '未知'}`);
+      clearPickTimeout(true);
       const transition = Hexcore2.turnOrderEngine.advance();
 
       if (transition.type === 'next_round') {
@@ -344,14 +413,17 @@
         secondPlayerId: secondTargetCaptainId,
       });
       if (result && result.advanceTurn) {
+        clearPickTimeout(true);
         this.nextCaptain();
       } else {
+        armPickTimeout(Hexcore2.state.draft.currentDraw);
         Hexcore2.ui.render();
       }
     },
 
     skipTurn() {
       const captain = Hexcore2.selectors.currentCaptain();
+      clearPickTimeout(true);
       Hexcore2.eventStore.append('裁判操作', `${captain ? captain.name : '无队长'} 跳过本轮选人`, 'warn');
       this.nextCaptain();
     },
@@ -364,9 +436,11 @@
     },
 
     undo() {
+      clearPickTimeout(false);
       const snapshot = Hexcore2.historyService.undo();
       if (snapshot) {
         Hexcore2.eventStore.append('撤销完成', `已恢复到「${snapshot.label}」之前的状态`, 'warn');
+        armPickTimeout(Hexcore2.state.draft.currentDraw);
       } else {
         Hexcore2.eventStore.append('撤销失败', '没有可撤销的操作快照', 'warn');
       }
@@ -1555,6 +1629,11 @@
 
   global.hexcoreUI = Hexcore2.actions;
   if (Hexcore2.state.draft.currentDraw) {
+    if (!Hexcore2.state.draft.currentDraw.timeoutEndsAt) {
+      armPickTimeout(Hexcore2.state.draft.currentDraw);
+    } else {
+      schedulePickTimeoutTick();
+    }
     Hexcore2.ui.render();
   } else if (playersDraftReady()) {
     Hexcore2.actions.drawCards();

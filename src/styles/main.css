@@ -769,6 +769,28 @@ h2 span {
   font-size: 13px;
 }
 
+.draw-timeout-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+  border: 1px solid rgba(244, 182, 42, 0.44);
+  border-radius: 6px;
+  background: rgba(244, 182, 42, 0.1);
+  padding: 9px 11px;
+}
+
+.draw-timeout-bar strong {
+  color: var(--amber);
+  font-size: 15px;
+}
+
+.draw-timeout-bar span {
+  color: #d7c28f;
+  font-size: 12px;
+}
+
 .control-panel {
   margin-top: 12px;
 }
