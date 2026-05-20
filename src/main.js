@@ -1200,7 +1200,7 @@
       const name = document.getElementById(`player-name-${playerId}`);
       const lane = document.getElementById(`player-lane-${playerId}`);
       const score = document.getElementById(`player-score-${playerId}`);
-      const nextName = name ? name.value.trim() : '';
+      const nextName = name ? name.value.trim() : player.name;
       const nextLane = lane ? lane.value.trim() : '';
       const nextScore = Number(score && score.value);
 
