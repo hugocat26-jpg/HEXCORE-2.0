@@ -524,6 +524,13 @@
                 <button onclick="window.hexcoreUI.setCaptainOrderPosition('${captain.id}')">应用顺位</button>
               </div>
               <div class="member-list">
+                <article class="team-member captain-member">
+                  <div>
+                    <strong>${escapeHtml(captain.name)}</strong>
+                    <span>队长 · 固定第一位</span>
+                    <small>队伍编号：${escapeHtml(captain.id)}</small>
+                  </div>
+                </article>
                 ${Array.from({ length: Hexcore2.state.settings.playersPerTeam }, (_, slotIndex) => {
                   const playerId = captain.team[slotIndex];
                   const player = playerById(playerId);
