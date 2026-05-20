@@ -631,7 +631,7 @@
       const input = document.getElementById(`captain-name-${captainId}`);
       const nextName = input ? input.value : '';
       if (!nextName || !nextName.trim()) {
-        Hexcore2.eventStore.append('队伍改名失败', '队长名称不能为空', 'warn');
+        Hexcore2.eventStore.append('队伍改名失败', '队伍名称不能为空', 'warn');
         Hexcore2.ui.render();
         return;
       }
@@ -641,10 +641,10 @@
         return;
       }
 
-      snapshot(`重命名队长前：${captain.name}`);
+      snapshot(`重命名队伍前：${captain.name}`);
       const oldName = captain.name;
       captain.name = nextName.trim();
-      Hexcore2.eventStore.append('队伍管理', `队长「${oldName}」重命名为「${captain.name}」`, 'info');
+      Hexcore2.eventStore.append('队伍管理', `队伍「${oldName}」重命名为「${captain.name}」`, 'info');
       renderAndPersist();
     },
 
@@ -699,7 +699,7 @@
       }
 
       const number = nextCaptainNumber();
-      const name = prompt('请输入新队长名称', `C${number} 新队长`);
+      const name = prompt('请输入新队伍名称', `C${number} 新队伍`);
       if (!name || !name.trim()) return;
 
       snapshot('新增队伍前');
@@ -839,7 +839,7 @@
       snapshot('队伍数量调整前');
       while (Hexcore2.state.captains.length < teamCount) {
         const number = nextCaptainNumber();
-        const captain = { id: `c${number}`, name: `C${number} 新队长`, record: '待定', team: [] };
+        const captain = { id: `c${number}`, name: `C${number} 新队伍`, record: '待定', team: [] };
         Hexcore2.state.captains.push(captain);
         Hexcore2.state.hexcoreAssignments[captain.id] = [];
         Hexcore2.state.draft.baseOrder.push(captain.id);
@@ -923,7 +923,7 @@
       snapshot('规则设置保存前');
       while (Hexcore2.state.captains.length < teamCount) {
         const number = nextCaptainNumber();
-        const captain = { id: `c${number}`, name: `C${number} 新队长`, record: '待定', team: [] };
+        const captain = { id: `c${number}`, name: `C${number} 新队伍`, record: '待定', team: [] };
         Hexcore2.state.captains.push(captain);
         Hexcore2.state.hexcoreAssignments[captain.id] = [];
         Hexcore2.state.draft.baseOrder.push(captain.id);

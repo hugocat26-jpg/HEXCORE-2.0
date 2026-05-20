@@ -482,7 +482,7 @@
       return { label: `缺员 ${Hexcore2.state.settings.playersPerTeam - captain.team.length}`, className: 'pending' };
     }
     return `
-      ${pageHeader('队伍管理', '裁判可调整队伍、切换当前队长、重命名队长并处理队员归属。')}
+      ${pageHeader('队伍管理', '裁判可调整队伍、切换当前队伍、重命名队伍并处理队员归属。')}
       <section class="data-panel teams-panel">
         <div class="toolbar-row team-toolbar">
           <div>
@@ -510,8 +510,8 @@
               <div class="data-card-head">
                 <span>${index + 1}</span>
                 <label class="captain-name-field">
-                  <small>队长名称</small>
-                  <input id="captain-name-${captain.id}" value="${escapeHtml(captain.name)}" aria-label="${escapeHtml(captain.name)} 队长名称">
+                  <small>队伍名称</small>
+                  <input id="captain-name-${captain.id}" value="${escapeHtml(captain.name)}" aria-label="${escapeHtml(captain.name)} 队伍名称">
                 </label>
               </div>
               <p>状态：<em class="${status.className}">${escapeHtml(status.label)}</em></p>
