@@ -1399,6 +1399,110 @@ h2 span {
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
 }
 
+.hex-draw-order {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  border: 1px solid var(--line-soft);
+  border-radius: 7px;
+  background: rgba(25, 212, 240, 0.045);
+  margin-bottom: 14px;
+  padding: 10px 12px;
+}
+
+.hex-draw-order strong {
+  color: var(--cyan);
+}
+
+.hex-draw-order span {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.035);
+  color: #d7e6ed;
+  padding: 5px 10px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.hex-draw-session {
+  border: 1px solid var(--line-soft);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.02);
+  margin-bottom: 14px;
+  padding: 12px;
+}
+
+.hex-session-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.hex-session-head strong {
+  color: var(--cyan);
+}
+
+.hex-session-empty {
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.hex-draw-slots {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.hex-draw-card {
+  position: relative;
+  display: grid;
+  gap: 10px;
+  border: 1px solid currentColor;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.025);
+  padding: 14px;
+}
+
+.hex-draw-card.cyan {
+  color: var(--cyan);
+}
+
+.hex-draw-card.amber {
+  color: var(--amber);
+}
+
+.hex-draw-card.violet {
+  color: var(--violet);
+}
+
+.hex-draw-card div {
+  display: grid;
+  gap: 5px;
+}
+
+.hex-draw-card strong {
+  color: var(--text);
+  padding-right: 58px;
+}
+
+.hex-draw-card span,
+.hex-draw-card p {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.hex-refresh-btn {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  min-height: 28px;
+  padding: 0 8px;
+  border-radius: 999px;
+}
+
 .owned-hex-panel {
   margin-bottom: 14px;
   border: 1px solid var(--line-soft);
@@ -1987,6 +2091,7 @@ h2 span {
   .pool-columns,
   .metrics-grid,
   .pool-health-grid,
+  .hex-draw-slots,
   .system-summary {
     grid-template-columns: 1fr;
   }

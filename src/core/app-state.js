@@ -76,6 +76,14 @@
     captains: clone(seed.captains),
     players: clone(seed.players),
     hexcoreAssignments: clone(seed.hexcoreAssignments || { c7: seed.hexcores }),
+    hexcoreDraft: {
+      captainId: '',
+      slots: [],
+      chosen: [],
+      seenIds: [],
+      refreshUsed: false,
+      drawOrder: [],
+    },
     draft: {
       phase: 'captain_action',
       round: 2,
@@ -119,6 +127,15 @@
     state.players = state.players || clone(defaultState.players);
     reconcilePlayerTeamIds(state.captains, state.players);
     state.hexcoreAssignments = state.hexcoreAssignments || {};
+    state.hexcoreDraft = state.hexcoreDraft || clone(defaultState.hexcoreDraft);
+    state.hexcoreDraft.captainId = state.hexcoreDraft.captainId || '';
+    state.hexcoreDraft.slots = Array.isArray(state.hexcoreDraft.slots) ? state.hexcoreDraft.slots : [];
+    state.hexcoreDraft.chosen = Array.isArray(state.hexcoreDraft.chosen) ? state.hexcoreDraft.chosen : [];
+    state.hexcoreDraft.seenIds = Array.isArray(state.hexcoreDraft.seenIds) ? state.hexcoreDraft.seenIds : [];
+    state.hexcoreDraft.refreshUsed = Boolean(state.hexcoreDraft.refreshUsed);
+    state.hexcoreDraft.drawOrder = Array.isArray(state.hexcoreDraft.drawOrder)
+      ? state.hexcoreDraft.drawOrder.filter(id => state.captains.some(captain => captain.id === id))
+      : [];
     state.draft = state.draft || clone(defaultState.draft);
     state.draft.baseOrder = reconcileBaseOrder(state.captains, state.draft.baseOrder);
     state.draft.maxRounds = state.draft.maxRounds || defaultState.draft.maxRounds;

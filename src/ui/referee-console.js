@@ -583,6 +583,12 @@
     const selectedCaptainId = (Hexcore2.state.ui && Hexcore2.state.ui.hexCaptainId) || (captain && captain.id) || '';
     const selectedCaptain = Hexcore2.state.captains.find(item => item.id === selectedCaptainId) || captain;
     const ownedHexcores = selectedCaptain ? (Hexcore2.state.hexcoreAssignments[selectedCaptain.id] || []) : [];
+    const session = Hexcore2.state.hexcoreDraft || {};
+    const activeSession = selectedCaptain && session.captainId === selectedCaptain.id && session.slots && session.slots.length;
+    const drawOrder = session.drawOrder || [];
+    const nextCaptain = selectedCaptain
+      ? Hexcore2.state.captains.find(captain => captain.id !== selectedCaptain.id && (Hexcore2.state.hexcoreAssignments[captain.id] || []).length < 3)
+      : null;
     const hexFilter = (Hexcore2.state.ui && Hexcore2.state.ui.hexFilter) || 'all';
     const visibleHexcores = Hexcore2.sampleData.hexcores.filter(hex => {
       if (hexFilter === 'all') return true;
@@ -591,12 +597,12 @@
       return hex.type === hexFilter;
     });
     return `
-      ${pageHeader('海克斯库', '裁判查看全量海克斯，并可指定队长抽取或移除海克斯。')}
+      ${pageHeader('海克斯库', '流程与旧项目一致：每次为队长随机生成 3 个海克斯选项，队长三选一，选满 3 个为止。')}
       <section class="data-panel">
         <div class="toolbar-row">
           <div>
             <strong>操作队长：${selectedCaptain ? escapeHtml(selectedCaptain.name) : '无'}</strong>
-            <span>当前阶段仍由裁判代执行抽取、分配和使用。</span>
+            <span>当前阶段由裁判代执行抽取，队长口头选择后裁判点击确认。</span>
           </div>
           <div class="toolbar-actions">
             <select aria-label="选择海克斯队长" onchange="window.hexcoreUI.setHexCaptain(this.value)">
@@ -610,8 +616,44 @@
               <option value="amber" ${hexFilter === 'amber' ? 'selected' : ''}>黄金/干扰</option>
               <option value="violet" ${hexFilter === 'violet' ? 'selected' : ''}>棱彩/强力</option>
             </select>
-            <button class="primary-btn" onclick="window.hexcoreUI.drawHexcoreForCaptain('${selectedCaptain ? selectedCaptain.id : ''}')">${Hexcore2.icon('hex')}为该队长抽海克斯</button>
+            <button class="primary-btn" onclick="window.hexcoreUI.drawHexcoreForCaptain('${selectedCaptain ? selectedCaptain.id : ''}')">${Hexcore2.icon('hex')}抽取 3 个候选</button>
+            <button class="subtle-btn" onclick="window.hexcoreUI.randomizeHexcoreDrawOrder()">制定抽取顺序</button>
           </div>
+        </div>
+        ${drawOrder.length ? `
+          <div class="hex-draw-order">
+            <strong>抽取顺序</strong>
+            ${drawOrder.map((captainId, index) => {
+              const item = Hexcore2.state.captains.find(captain => captain.id === captainId);
+              return item ? `<span>${index + 1}. ${escapeHtml(item.name)}</span>` : '';
+            }).join('')}
+          </div>
+        ` : ''}
+        <div class="hex-draw-session">
+          ${activeSession ? `
+            <div class="hex-session-head">
+              <strong>${escapeHtml(selectedCaptain.name)} 已拥有 ${ownedHexcores.length}/3，还需选 ${Math.max(0, 3 - ownedHexcores.length)} 个</strong>
+              <button class="danger-inline" onclick="window.hexcoreUI.cancelHexcoreDraw()">取消本次抽取</button>
+            </div>
+            <div class="hex-draw-slots">
+              ${session.slots.map((hexcoreId, index) => {
+                const hex = Hexcore2.sampleData.hexcores.find(item => item.id === hexcoreId);
+                if (!hex) return '';
+                return `
+                  <article class="hex-draw-card ${escapeHtml(hex.type)}">
+                    <button class="hex-refresh-btn" ${session.refreshUsed ? 'disabled' : ''} onclick="window.hexcoreUI.refreshHexcoreSlot(${index})">刷新</button>
+                    <div><strong>${escapeHtml(hex.name)}</strong><span>${hex.mode === 'passive' ? '被动自动' : '裁判手动'}</span></div>
+                    <p>${escapeHtml(hex.desc)}</p>
+                    <button class="primary-btn" onclick="window.hexcoreUI.selectHexcoreFromDraw('${selectedCaptain.id}', '${hex.id}')">选择这个海克斯</button>
+                  </article>
+                `;
+              }).join('')}
+            </div>
+          ` : `
+            <div class="hex-session-empty">
+              ${selectedCaptain ? `${escapeHtml(selectedCaptain.name)} 当前没有进行中的三选一。点击“抽取 3 个候选”开始。` : '请选择队长'}
+            </div>
+          `}
         </div>
         <div class="owned-hex-panel">
           <h2>已持有海克斯</h2>
@@ -629,7 +671,7 @@
                 <span>${hex.mode === 'passive' ? '被动自动' : '裁判手动'}</span>
               </div>
               <p>${escapeHtml(hex.desc)}</p>
-              <button onclick="window.hexcoreUI.assignHexcoreToCaptain('${selectedCaptain ? selectedCaptain.id : ''}', '${hex.id}')">分配给该队长</button>
+              <button onclick="window.hexcoreUI.assignHexcoreToCaptain('${selectedCaptain ? selectedCaptain.id : ''}', '${hex.id}')">裁判兜底分配</button>
             </article>
           `).join('')}
         </div>

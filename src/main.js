@@ -69,6 +69,40 @@
     return id;
   }
 
+  function ownedHexIds(captainId) {
+    return new Set((Hexcore2.state.hexcoreAssignments[captainId] || []).map(hex => hex.id));
+  }
+
+  function drawHexcoreSlots(captainId, count, extraExcludes = []) {
+    const excluded = new Set([...ownedHexIds(captainId), ...extraExcludes]);
+    const candidates = Hexcore2.sampleData.hexcores
+      .filter(hex => !excluded.has(hex.id))
+      .filter(hex => Hexcore2.selectors.isHexcoreEnabled(hex.id));
+    return [...candidates].sort(() => Math.random() - 0.5).slice(0, count).map(hex => hex.id);
+  }
+
+  function resetHexcoreSession() {
+    Hexcore2.state.hexcoreDraft = Hexcore2.state.hexcoreDraft || {};
+    Hexcore2.state.hexcoreDraft.captainId = '';
+    Hexcore2.state.hexcoreDraft.slots = [];
+    Hexcore2.state.hexcoreDraft.chosen = [];
+    Hexcore2.state.hexcoreDraft.seenIds = [];
+    Hexcore2.state.hexcoreDraft.refreshUsed = false;
+  }
+
+  function findNextHexcoreCaptain(currentCaptainId) {
+    const order = (Hexcore2.state.hexcoreDraft && Hexcore2.state.hexcoreDraft.drawOrder && Hexcore2.state.hexcoreDraft.drawOrder.length)
+      ? Hexcore2.state.hexcoreDraft.drawOrder
+      : Hexcore2.state.captains.map(captain => captain.id);
+    const currentIndex = Math.max(0, order.indexOf(currentCaptainId));
+    for (let offset = 1; offset <= order.length; offset += 1) {
+      const captainId = order[(currentIndex + offset) % order.length];
+      const captain = Hexcore2.state.captains.find(item => item.id === captainId);
+      if (captain && (Hexcore2.state.hexcoreAssignments[captain.id] || []).length < 3) return captain;
+    }
+    return null;
+  }
+
   Hexcore2.actions = {
     selectCard(index) {
       Hexcore2.state.draft.selectedSlot = index;
@@ -304,6 +338,7 @@
         Hexcore2.state.captains = state.captains;
         Hexcore2.state.players = state.players;
         Hexcore2.state.hexcoreAssignments = state.hexcoreAssignments || {};
+        Hexcore2.state.hexcoreDraft = state.hexcoreDraft || {};
         Hexcore2.state.draft = state.draft;
         Hexcore2.state.events = state.events || [];
         Hexcore2.state.undoStack = state.undoStack || [];
@@ -347,23 +382,127 @@
         return;
       }
 
-      snapshot(`抽取海克斯前：${captain.name}`);
-      const owned = new Set((Hexcore2.state.hexcoreAssignments[captain.id] || []).map(hex => hex.id));
-      const candidates = Hexcore2.sampleData.hexcores
-        .filter(hex => !owned.has(hex.id))
-        .filter(hex => Hexcore2.selectors.isHexcoreEnabled(hex.id))
-        .filter(hex => hex.status !== 'passive' || hex.mode === 'passive');
-      if (!candidates.length) {
-        Hexcore2.eventStore.append('抽取海克斯失败', `${captain.name} 没有可抽取的新海克斯`, 'warn');
+      if ((Hexcore2.state.hexcoreAssignments[captain.id] || []).length >= 3) {
+        Hexcore2.eventStore.append('抽取海克斯失败', `${captain.name} 已拥有 3 个海克斯`, 'warn');
         Hexcore2.ui.render();
         return;
       }
 
-      const picked = candidates[Math.floor(Math.random() * candidates.length)];
-      Hexcore2.state.hexcoreAssignments[captain.id] = Hexcore2.state.hexcoreAssignments[captain.id] || [];
-      Hexcore2.state.hexcoreAssignments[captain.id].push({ ...picked, status: picked.mode === 'passive' ? 'passive' : 'available' });
-      Hexcore2.eventStore.append('抽取海克斯', `${captain.name} 获得【${picked.name}】`, 'success');
+      const activeSession = Hexcore2.state.hexcoreDraft && Hexcore2.state.hexcoreDraft.captainId === captain.id && Hexcore2.state.hexcoreDraft.slots.length;
+      if (!activeSession) {
+        snapshot(`抽取海克斯前：${captain.name}`);
+        const slots = drawHexcoreSlots(captain.id, 3);
+        if (slots.length < 3) {
+          Hexcore2.eventStore.append('抽取海克斯失败', '海克斯池可用数量不足 3 个', 'warn');
+          Hexcore2.ui.render();
+          return;
+        }
+        Hexcore2.state.hexcoreDraft = Hexcore2.state.hexcoreDraft || {};
+        Hexcore2.state.hexcoreDraft.captainId = captain.id;
+        Hexcore2.state.hexcoreDraft.slots = slots;
+        Hexcore2.state.hexcoreDraft.chosen = [];
+        Hexcore2.state.hexcoreDraft.seenIds = [...slots];
+        Hexcore2.state.hexcoreDraft.refreshUsed = false;
+        Hexcore2.eventStore.append('抽取海克斯', `${captain.name} 抽出 3 个海克斯候选，等待队长三选一`, 'draw');
+      } else {
+        Hexcore2.eventStore.append('抽取海克斯', `${captain.name} 已有进行中的海克斯三选一`, 'info');
+      }
       renderAndPersist();
+    },
+
+    selectHexcoreFromDraw(captainId, hexcoreId) {
+      const captain = Hexcore2.state.captains.find(item => item.id === captainId);
+      const session = Hexcore2.state.hexcoreDraft || {};
+      const hexcore = Hexcore2.sampleData.hexcores.find(item => item.id === hexcoreId);
+      if (!captain || !hexcore || session.captainId !== captainId || !session.slots.includes(hexcoreId)) {
+        Hexcore2.eventStore.append('选择海克斯失败', '当前海克斯抽取会话无效', 'warn');
+        Hexcore2.ui.render();
+        return;
+      }
+      if ((Hexcore2.state.hexcoreAssignments[captainId] || []).some(item => item.id === hexcoreId)) {
+        Hexcore2.eventStore.append('选择海克斯失败', `${captain.name} 已持有【${hexcore.name}】`, 'warn');
+        Hexcore2.ui.render();
+        return;
+      }
+
+      snapshot(`选择海克斯前：${captain.name}`);
+      const list = Hexcore2.state.hexcoreAssignments[captainId] || [];
+      Hexcore2.state.hexcoreAssignments[captainId] = list;
+      list.push({ ...hexcore, status: hexcore.mode === 'passive' ? 'passive' : 'available' });
+      session.chosen = [...(session.chosen || []), hexcoreId];
+      const ownedCount = list.length;
+      const nextCaptain = ownedCount >= 3 ? findNextHexcoreCaptain(captainId) : null;
+
+      if (ownedCount >= 3) {
+        resetHexcoreSession();
+        if (nextCaptain) Hexcore2.state.ui.hexCaptainId = nextCaptain.id;
+        Hexcore2.eventStore.append('海克斯完成', nextCaptain
+          ? `${captain.name} 已选满 3 个海克斯，下一位：${nextCaptain.name}`
+          : `${captain.name} 已选满 3 个海克斯，全部队长海克斯抽取已完成`,
+        'success');
+      } else {
+        const excludes = [...(session.seenIds || []), hexcoreId];
+        const slots = drawHexcoreSlots(captainId, 3, excludes);
+        session.slots = slots;
+        session.seenIds = [...excludes, ...slots];
+        session.refreshUsed = false;
+        Hexcore2.eventStore.append('选择海克斯', `${captain.name} 选择【${hexcore.name}】，重新抽出 3 个候选，还需再选 ${3 - ownedCount} 个`, 'success');
+      }
+      renderAndPersist();
+    },
+
+    refreshHexcoreSlot(slotIndex) {
+      const session = Hexcore2.state.hexcoreDraft || {};
+      const index = Number(slotIndex);
+      if (!session.captainId || !Number.isInteger(index) || index < 0 || index >= session.slots.length) {
+        Hexcore2.eventStore.append('刷新海克斯失败', '当前没有可刷新的候选槽', 'warn');
+        Hexcore2.ui.render();
+        return;
+      }
+      if (session.refreshUsed) {
+        Hexcore2.eventStore.append('刷新海克斯失败', '本次三选一已使用过刷新', 'warn');
+        Hexcore2.ui.render();
+        return;
+      }
+      const excludes = [...(session.seenIds || []), ...(session.chosen || [])];
+      const replacement = drawHexcoreSlots(session.captainId, 1, excludes)[0];
+      if (!replacement) {
+        Hexcore2.eventStore.append('刷新海克斯失败', '没有更多可用海克斯', 'warn');
+        Hexcore2.ui.render();
+        return;
+      }
+      snapshot('刷新海克斯候选前');
+      session.slots[index] = replacement;
+      session.seenIds = [...excludes, replacement];
+      session.refreshUsed = true;
+      const captain = Hexcore2.state.captains.find(item => item.id === session.captainId);
+      Hexcore2.eventStore.append('刷新海克斯', `${captain ? captain.name : '当前队长'} 刷新了第 ${index + 1} 个候选`, 'warn');
+      renderAndPersist();
+    },
+
+    cancelHexcoreDraw() {
+      snapshot('取消海克斯抽取前');
+      resetHexcoreSession();
+      Hexcore2.eventStore.append('海克斯抽取', '裁判取消了当前海克斯抽取会话', 'warn');
+      renderAndPersist();
+    },
+
+    randomizeHexcoreDrawOrder() {
+      snapshot('制定海克斯抽取顺序前');
+      Hexcore2.state.hexcoreDraft = Hexcore2.state.hexcoreDraft || {};
+      Hexcore2.state.hexcoreDraft.drawOrder = [...Hexcore2.state.captains]
+        .sort(() => Math.random() - 0.5)
+        .map(captain => captain.id);
+      Hexcore2.eventStore.append('海克斯抽取顺序', '裁判随机生成队长海克斯抽取顺序', 'success');
+      renderAndPersist();
+    },
+
+    advanceToNextHexcoreCaptain(captainId) {
+      const captain = Hexcore2.state.captains.find(item => item.id === captainId);
+      if (!captain) return;
+      Hexcore2.state.ui.hexCaptainId = captain.id;
+      renderAndPersist();
+      this.drawHexcoreForCaptain(captain.id);
     },
 
     removeHexcore(captainId, hexcoreId) {
@@ -392,6 +531,11 @@
       }
 
       const list = Hexcore2.state.hexcoreAssignments[captainId] || [];
+      if (list.length >= 3) {
+        Hexcore2.eventStore.append('分配海克斯失败', `${captain.name} 已拥有 3 个海克斯`, 'warn');
+        Hexcore2.ui.render();
+        return;
+      }
       if (list.some(item => item.id === hexcoreId)) {
         Hexcore2.eventStore.append('分配海克斯失败', `${captain.name} 已持有【${hexcore.name}】`, 'warn');
         Hexcore2.ui.render();

@@ -19,6 +19,7 @@
           captains: state.captains,
           players: state.players,
           hexcoreAssignments: state.hexcoreAssignments,
+          hexcoreDraft: state.hexcoreDraft,
           draft: state.draft,
           events: state.events,
         }),
@@ -35,6 +36,7 @@
       state.captains = clone(snapshot.state.captains);
       state.players = clone(snapshot.state.players);
       state.hexcoreAssignments = clone(snapshot.state.hexcoreAssignments);
+      state.hexcoreDraft = clone(snapshot.state.hexcoreDraft || {});
       state.draft = clone(snapshot.state.draft);
       state.events = clone(snapshot.state.events);
       state.undoStack = state.undoStack || [];
