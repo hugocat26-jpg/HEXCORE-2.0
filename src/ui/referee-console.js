@@ -518,10 +518,19 @@
               <p>顺位记录：${escapeHtml(captain.record)} / 基础顺位第 ${basePosition}</p>
               <p>队伍人数：${captain.team.length}/${Hexcore2.state.settings.playersPerTeam}</p>
               <div class="order-tools">
-                <button onclick="window.hexcoreUI.moveCaptainOrder('${captain.id}', 'up')">上移</button>
-                <button onclick="window.hexcoreUI.moveCaptainOrder('${captain.id}', 'down')">下移</button>
-                <label><small>设为第</small><input id="captain-order-${captain.id}" type="number" min="1" max="${Hexcore2.state.captains.length}" value="${basePosition}"></label>
-                <button onclick="window.hexcoreUI.setCaptainOrderPosition('${captain.id}')">应用顺位</button>
+                <div class="order-tools-head">
+                  <span>基础顺位</span>
+                  <strong>第 ${basePosition} 位</strong>
+                </div>
+                <div class="order-button-row">
+                  <button class="subtle-btn icon-order-btn" title="顺位上移" onclick="window.hexcoreUI.moveCaptainOrder('${captain.id}', 'up')">${Hexcore2.icon('arrowUp')}</button>
+                  <button class="subtle-btn icon-order-btn" title="顺位下移" onclick="window.hexcoreUI.moveCaptainOrder('${captain.id}', 'down')">${Hexcore2.icon('arrowDown')}</button>
+                  <label class="order-position-field">
+                    <small>设为</small>
+                    <input id="captain-order-${captain.id}" type="number" min="1" max="${Hexcore2.state.captains.length}" value="${basePosition}">
+                  </label>
+                  <button class="subtle-btn order-apply-btn" onclick="window.hexcoreUI.setCaptainOrderPosition('${captain.id}')">应用</button>
+                </div>
               </div>
               <div class="member-list">
                 <article class="team-member captain-member">

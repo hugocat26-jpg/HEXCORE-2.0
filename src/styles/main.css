@@ -1990,18 +1990,66 @@ h2 span {
 }
 
 .order-tools {
-  grid-template-columns: repeat(2, minmax(62px, 1fr)) minmax(90px, 1fr) minmax(84px, 1fr);
-  align-items: end;
+  border: 1px solid var(--line-soft);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.02);
+  margin-top: 0;
+  padding: 10px;
 }
 
-.order-tools label {
-  display: grid;
-  gap: 5px;
+.order-tools-head,
+.order-button-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
 }
 
-.order-tools small {
+.order-tools-head {
+  justify-content: space-between;
+}
+
+.order-tools-head span,
+.order-position-field small {
   color: var(--muted);
-  font-size: 11px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.order-tools-head strong {
+  color: var(--cyan);
+  font-size: 13px;
+}
+
+.icon-order-btn {
+  width: 38px;
+  min-width: 38px;
+  padding: 0;
+}
+
+.icon-order-btn .ui-icon {
+  width: 16px;
+  height: 16px;
+}
+
+.order-position-field {
+  flex: 1 1 auto;
+  display: grid;
+  grid-template-columns: auto minmax(48px, 1fr);
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.order-position-field input {
+  width: 100%;
+  min-width: 0;
+  text-align: center;
+  font-weight: 900;
+}
+
+.order-apply-btn {
+  min-width: 58px;
 }
 
 .backfill-tools {
