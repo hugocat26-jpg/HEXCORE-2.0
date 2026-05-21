@@ -30,11 +30,12 @@
           if (Hexcore2.state.ui && Hexcore2.state.ui.feedback && Hexcore2.state.ui.feedback.createdAt === createdAt) {
             delete Hexcore2.state.ui.feedback;
             if (Hexcore2.storageService) Hexcore2.storageService.save(Hexcore2.state);
-            if (Hexcore2.ui) Hexcore2.ui.render();
+            if (Hexcore2.ui && Hexcore2.ui.renderFeedback) Hexcore2.ui.renderFeedback();
           }
         }, 2200);
       }
       if (Hexcore2.storageService) Hexcore2.storageService.save(Hexcore2.state);
+      if (Hexcore2.ui && Hexcore2.ui.renderFeedback) Hexcore2.ui.renderFeedback();
     },
   };
 })(window);

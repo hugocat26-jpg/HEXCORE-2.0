@@ -61,6 +61,205 @@
       return hasHexcore(captainId, 'pandora-box') && pandoraDisabledHexcores.includes(hexcoreId);
     },
 
+    executionQueue(captainId) {
+      const state = Hexcore2.state;
+      const captain = state.captains.find(item => item.id === captainId) || Hexcore2.selectors.currentCaptain();
+      if (!captain) return [];
+
+      const currentTier = Hexcore2.poolEngine.effectiveTier(captain.id);
+      const tierName = state.settings.tierNames[currentTier];
+      const hexcores = state.hexcoreAssignments[captain.id] || [];
+      const teamSize = Hexcore2.selectors.teamSize(captain.id);
+      const capacity = Hexcore2.selectors.teamMemberCapacity(captain.id);
+      const remainingSlots = Math.max(0, capacity - teamSize);
+      const pendingDraw = state.draft.currentDraw
+        && state.draft.currentDraw.captainId === captain.id
+        && !state.draft.pickedThisTurn;
+      const availableInTier = tier => Hexcore2.selectors.availablePlayers(tier).length;
+      const allPlayersInTier = tier => state.players.filter(player => player.tier === tier).length;
+      const blocked = (base, status, reason) => ({ ...base, type: 'blocked', status, reason, executable: false });
+      const active = (base, status, reason, extra = {}) => ({ ...base, type: 'active', status, reason, executable: true, ...extra });
+      const target = (base, status, reason, extra = {}) => ({ ...base, type: 'target', status, reason, needsTarget: true, executable: true, ...extra });
+      const passiveReasons = {
+        'giant-slayer': `本轮按规则进入${tierName}池，巨人杀手会在侏儒马与猛犸池之间互换。`,
+        'elite-choice': currentTier === 3 ? '本轮抽上等马时，基础抽卡会额外展示1张。' : '未到上等马池时仅待机。',
+        'ballroom-queen': `持有者个人卡池顺序反转，本轮实际进入${tierName}池。`,
+        'demon-contract': state.draft.round <= 3 ? '第1-3轮自动争取第1顺位，若启元存在则启元优先。' : '第4轮自动调整为最后顺位。',
+        'pandora-box': `抽卡前自动从${tierName}评分前5随机分配1人，并禁用自主选人类海克斯。`,
+        'last-stand': [1, 2].includes(state.draft.round)
+          ? `本轮抽卡前自动跳过并从${tierName}随机分配1人。`
+          : (state.draft.round === 4 ? '第4轮获得第一顺位，并可从猛犸池全池自选。' : '本轮仅待机。'),
+      };
+
+      const targetRequiredIds = new Set(['blind', 'order-swap', 'decompose-knowledge', 'lock-contract']);
+      const actionLabels = {
+        blind: '选择致盲目标',
+        'order-swap': '选择两名队长',
+        'decompose-knowledge': '选择队内选手',
+        'lock-contract': '选择两名选手',
+        'snow-cat': '生成高低分暗牌',
+        'open-feast': '展开全池自选',
+        'mystery-box': '生成盲盒抽卡',
+        steady: '跳过并随机分配',
+        'double-shot': '立即双池分配',
+        hellhound: '开启三段自选',
+        photographer: '交换本轮与下轮池',
+        origin: '加入启元顺位',
+      };
+      const actionTypes = {
+        'transmute-bronze': '直接入队',
+        'transmute-auric': '直接入队',
+        'transmute-prismatic': '直接入队',
+        steady: '直接入队',
+        'double-shot': '直接入队',
+        'open-feast': '生成抽卡',
+        'mystery-box': '生成抽卡',
+        'snow-cat': '生成抽卡',
+        hellhound: '生成抽卡',
+        blind: '抽卡修饰',
+        'decompose-knowledge': '抽卡修饰',
+        'elite-choice': '抽卡修饰',
+        'giant-slayer': '抽卡修饰',
+        'ballroom-queen': '抽卡修饰',
+        origin: '顺位控制',
+        'order-swap': '顺位控制',
+        photographer: '流程控制',
+        'demon-contract': '顺位控制',
+        'lock-contract': '绑定触发',
+        'pandora-box': '被动待触发',
+        'last-stand': '被动待触发',
+      };
+
+      return hexcores.map((hex, index) => {
+        const globallyDisabled = !Hexcore2.selectors.isHexcoreEnabled(hex.id);
+        const pandoraDisabled = this.isDisabledByPandora(captain.id, hex.id);
+        const blindUsed = hex.id === 'blind' && this.blindUsedBy(captain.id);
+        const snowUsed = hex.id === 'snow-cat' && this.snowCatUsedBy(captain.id);
+        const normallyUsed = hex.status === 'used' && hex.id !== 'blind' && hex.id !== 'snow-cat';
+        const base = {
+          id: hex.id,
+          name: hex.name,
+          captainId: captain.id,
+          captainName: captain.name,
+          priority: index + 1,
+          mode: hex.mode,
+          needsTarget: false,
+          executable: false,
+          actionLabel: actionLabels[hex.id] || '裁判执行',
+          actionType: actionTypes[hex.id] || (hex.mode === 'passive' ? '被动待触发' : '裁判执行'),
+        };
+
+        if (globallyDisabled) {
+          return blocked(base, '已禁用', '规则设置已禁用该海克斯，本轮不会执行。');
+        }
+        if (pandoraDisabled) {
+          return blocked(base, '潘多拉失效', '潘多拉魔盒禁用自主抽卡或选人类海克斯。');
+        }
+        if (hex.mode === 'passive') {
+          if ((hex.id === 'pandora-box' || hex.id === 'last-stand') && remainingSlots <= 0) {
+            return blocked(base, '队伍已满', '队伍已满员，自动分配类被动不会再入队。');
+          }
+          if (hex.id === 'pandora-box' && availableInTier(currentTier) === 0) {
+            return blocked(base, '当前池不足', `${tierName}池暂无可自动分配选手，抽卡时会继续检查下一等级池。`);
+          }
+          return { ...base, type: 'passive', status: '被动生效', reason: passiveReasons[hex.id] || '该海克斯由引擎在顺位、卡池或抽卡阶段自动结算。', executable: true };
+        }
+        if (blindUsed || snowUsed || normallyUsed) {
+          return { ...base, type: 'used', status: '已使用', reason: hex.id === 'blind' || hex.id === 'snow-cat' ? '该海克斯本轮已使用。' : '该海克斯全程次数已消耗。', executable: false };
+        }
+        if (pendingDraw) {
+          return blocked(base, '先完成抽卡', '当前队长已有抽卡结果未处理，请先选择、随机、跳过或撤销。');
+        }
+        if (hex.id === 'blind') {
+          const targets = this.blindTargetOptions(captain.id);
+          return targets.length
+            ? target(base, '需选择目标', `本轮可指定 ${targets.length} 名未被致盲过的队长之一。`, { targetCount: targets.length })
+            : blocked(base, '无可选目标', '本轮其他队长都已被致盲或不存在可选目标。');
+        }
+        if (remainingSlots <= 0 && !['origin', 'order-swap', 'photographer'].includes(hex.id)) {
+          return blocked(base, '队伍已满', '当前队伍已满员，不能再执行会产生选手入队或抽卡结果的海克斯。');
+        }
+        if (hex.id === 'order-swap') {
+          return state.captains.length >= 2
+            ? target(base, '需选择目标', '需要裁判选择两名不同队长，交换基础顺位。')
+            : blocked(base, '目标不足', '当前队长数量不足2名，无法执行顺位互换。');
+        }
+        if (hex.id === 'decompose-knowledge') {
+          return captain.team.length > 0
+            ? target(base, '需选择目标', `可从当前队伍 ${captain.team.length} 名已有选手中选择1名进行分析。`, { targetCount: captain.team.length })
+            : blocked(base, '条件不足', '当前队伍还没有已入队选手，无法分解分析。');
+        }
+        if (hex.id === 'lock-contract') {
+          const availableCount = state.players.filter(player => player.status === 'available').length;
+          return availableCount >= 2
+            ? target(base, '需选择目标', `当前有 ${availableCount} 名可选选手，可绑定其中任意两名。`, { targetCount: availableCount })
+            : blocked(base, '选手不足', '当前可选选手少于2名，无法建立锁定契约。');
+        }
+        if (hex.id === 'origin') {
+          return active(base, '可执行', '当前无未处理抽卡，可加入本轮启元顺位队列。');
+        }
+        if (hex.id === 'photographer') {
+          return state.draft.round >= 1 && state.draft.round <= 3
+            ? active(base, '可执行', `可交换第 ${state.draft.round} 轮与第 ${state.draft.round + 1} 轮卡池，影响所有队长。`)
+            : blocked(base, '轮次不符', '摄影艺术家仅可在第1-3轮开始时使用。');
+        }
+        if (transmuteTiers[hex.id]) {
+          const targetTier = transmuteTiers[hex.id];
+          const targetTierName = state.settings.tierNames[targetTier];
+          const count = availableInTier(targetTier);
+          return count > 0
+            ? active(base, '可执行', `${targetTierName}池当前有 ${count} 名可选选手，可跳过当前池盲抽1人。`)
+            : blocked(base, '目标池不足', `${targetTierName}池暂无可选选手，无法完成质变盲抽。`);
+        }
+        if (hex.id === 'double-shot') {
+          if (state.draft.round < 1 || state.draft.round > 3) return blocked(base, '轮次不符', '双发快射仅可在第1/2/3轮使用。');
+          if (remainingSlots < 2) return blocked(base, '队伍空间不足', '双发快射会尝试本池和下一池各入队1人，当前队伍至少需要2个空位。');
+          const nextTier = Hexcore2.poolEngine.effectiveTierForRound(captain.id, Math.min(4, state.draft.round + 1));
+          const currentCount = availableInTier(currentTier);
+          const nextCount = availableInTier(nextTier);
+          if (currentCount === 0 || nextCount === 0) {
+            return blocked(base, '卡池不足', `${tierName}池可选 ${currentCount} 人，${state.settings.tierNames[nextTier]}池可选 ${nextCount} 人，不足以完成双发。`);
+          }
+          return active(base, '可执行', `${tierName}池和${state.settings.tierNames[nextTier]}池均有可选选手，且队伍有 ${remainingSlots} 个空位。`);
+        }
+        if (hex.id === 'steady') {
+          const count = availableInTier(currentTier);
+          return count > 0
+            ? active(base, '可执行', `${tierName}池当前有 ${count} 名可选选手，可跳过本轮并随机分配1人。`)
+            : blocked(base, '当前池不足', `${tierName}池暂无可选选手，无法随机分配。`);
+        }
+        if (hex.id === 'open-feast') {
+          const count = availableInTier(currentTier);
+          return count > 0
+            ? active(base, '可执行', `${tierName}池当前有 ${count} 名可选选手，可展开全池自选。`)
+            : blocked(base, '当前池不足', `${tierName}池暂无可选选手，无法自选。`);
+        }
+        if (hex.id === 'mystery-box') {
+          const count = allPlayersInTier(currentTier);
+          return count > 0
+            ? active(base, '可执行', `${tierName}池含已选选手共 ${count} 人，可生成盲盒抽卡。`)
+            : blocked(base, '当前池不足', `${tierName}池没有任何选手，无法生成盲盒。`);
+        }
+        if (hex.id === 'hellhound') {
+          if (state.draft.round !== 1) return blocked(base, '轮次不符', '地狱三头犬仅可在第1轮使用。');
+          const total = [1, 2, 3].reduce((sum, tier) => sum + availableInTier(tier), 0);
+          return total > 0
+            ? active(base, '可执行', `前三个卡池当前共有 ${total} 名可选选手，可开始三段自选。`)
+            : blocked(base, '卡池不足', '侏儒马、中等马、上等马池均无可选选手，无法开始三段自选。');
+        }
+        if (hex.id === 'snow-cat') {
+          const count = availableInTier(currentTier);
+          return count >= 2
+            ? active(base, '本轮可用', `${tierName}池当前有 ${count} 名可选选手，可抽出最高分和最低分进行暗牌二选一。`)
+            : blocked(base, '选手不足', `${tierName}池可选选手少于2名，无法生成高低分二选一。`);
+        }
+        if (targetRequiredIds.has(hex.id)) {
+          return target(base, '需选择目标', '需要裁判打开目标选择面板，选择对象后才能执行。');
+        }
+        return active(base, '可执行', '当前执行条件满足，可由裁判点击使用。');
+      });
+    },
+
     activate(hexcoreId, options = {}) {
       const state = Hexcore2.state;
       const captain = Hexcore2.selectors.currentCaptain();
@@ -406,7 +605,7 @@
     resolveLockContracts(captainId, playerId) {
       const state = Hexcore2.state;
       const captain = state.captains.find(item => item.id === captainId);
-      if (!captain || captain.team.length >= state.settings.playersPerTeam) return false;
+      if (!captain || captain.team.length >= Hexcore2.selectors.teamMemberCapacity(captainId)) return false;
 
       const pair = this.lockContractPairs().find(effect => effect.playerIds.includes(playerId) && !effect.resolved);
       if (!pair) return false;
@@ -431,7 +630,7 @@
     grantCompensationTurn(captainId, reason) {
       const state = Hexcore2.state;
       const captain = state.captains.find(item => item.id === captainId);
-      if (!captain || captain.team.length >= state.settings.playersPerTeam) return false;
+      if (!captain || captain.team.length >= Hexcore2.selectors.teamMemberCapacity(captainId)) return false;
 
       const currentIndex = state.draft.currentIndex;
       const existingLaterIndex = state.draft.currentOrder
@@ -463,7 +662,7 @@
     startHellhoundStep(captainId, sequence) {
       const state = Hexcore2.state;
       const tier = sequence.tiers[sequence.step];
-      if (!tier || Hexcore2.selectors.teamSize(captainId) >= state.settings.playersPerTeam) {
+      if (!tier || Hexcore2.selectors.teamSize(captainId) >= Hexcore2.selectors.teamMemberCapacity(captainId)) {
         sequence.completed = true;
         state.draft.currentDraw = null;
         state.draft.pickedThisTurn = true;
@@ -491,7 +690,7 @@
       if (!sequence) return { handled: false };
 
       sequence.step += 1;
-      if (sequence.step >= sequence.tiers.length || Hexcore2.selectors.teamSize(captainId) >= Hexcore2.state.settings.playersPerTeam) {
+      if (sequence.step >= sequence.tiers.length || Hexcore2.selectors.teamSize(captainId) >= Hexcore2.selectors.teamMemberCapacity(captainId)) {
         sequence.completed = true;
         Hexcore2.state.draft.currentDraw = null;
         Hexcore2.state.draft.pickedThisTurn = true;

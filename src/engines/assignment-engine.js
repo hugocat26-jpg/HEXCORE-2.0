@@ -7,12 +7,13 @@
       const captain = state.captains.find(item => item.id === captainId);
       const player = state.players.find(item => item.id === playerId);
       if (!captain || !player || player.status !== 'available') return false;
-      if (captain.team.length >= state.settings.playersPerTeam) return false;
+      const capacity = Hexcore2.selectors.teamMemberCapacity(captainId);
+      if (captain.team.length >= capacity) return false;
 
       captain.team.push(player.id);
       player.status = 'drafted';
       player.teamId = captainId;
-      Hexcore2.eventStore.append('选手入队', `${captain.name} 选择了选手「${player.name}」加入队伍（${captain.team.length}/4）`, 'success', { source });
+      Hexcore2.eventStore.append('选手入队', `${captain.name} 选择了选手「${player.name}」加入队伍（${captain.team.length}/${capacity}）`, 'success', { source });
       if (Hexcore2.hexcoreEngine && source !== 'lock_contract_pair') {
         Hexcore2.hexcoreEngine.resolveLockContracts(captainId, player.id);
       }
@@ -48,7 +49,8 @@
       const ownerId = player && (player.teamId || (state.captains.find(captain => captain.team.includes(player.id)) || {}).id);
       if (!targetCaptain || !player || player.status !== 'drafted' || !ownerId) return null;
       if (ownerId === targetCaptainId) return null;
-      if (targetCaptain.team.length >= state.settings.playersPerTeam) return null;
+      const capacity = Hexcore2.selectors.teamMemberCapacity(targetCaptainId);
+      if (targetCaptain.team.length >= capacity) return null;
 
       const sourceCaptain = state.captains.find(item => item.id === ownerId);
       if (!sourceCaptain) return null;
@@ -58,7 +60,7 @@
       player.teamId = targetCaptainId;
       Hexcore2.eventStore.append(
         '选手转队',
-        `${targetCaptain.name} 通过盲盒选中「${player.name}」，该选手从 ${sourceCaptain.name} 转入当前队伍（${targetCaptain.team.length}/4）`,
+        `${targetCaptain.name} 通过盲盒选中「${player.name}」，该选手从 ${sourceCaptain.name} 转入当前队伍（${targetCaptain.team.length}/${capacity}）`,
         'warn',
         { source, fromCaptainId: sourceCaptain.id }
       );

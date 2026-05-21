@@ -2,7 +2,7 @@
   const Hexcore2 = global.Hexcore2 || (global.Hexcore2 = {});
 
   function teamIsOpen(captainId) {
-    return Hexcore2.selectors.teamSize(captainId) < Hexcore2.state.settings.playersPerTeam;
+    return Hexcore2.selectors.teamSize(captainId) < Hexcore2.selectors.teamMemberCapacity(captainId);
   }
 
   function isSkippedThisRound(captainId) {

@@ -98,36 +98,16 @@
     return cells;
   }
 
-  function normalizeImportedPlayer(row, index) {
-    const source = row && typeof row === 'object' ? row : {};
-    const score = Math.max(0, Math.min(120, Math.round(Number(source.score || source.评分 || 60) || 60)));
-    const status = String(source.status || source.状态 || 'available') === 'disabled' || String(source.status || source.状态) === '禁用'
-      ? 'disabled'
-      : 'available';
-    const name = String(source.name || source.名称 || source.playerName || '').trim();
-    if (!name) {
-      throw new Error(`第 ${index + 1} 行缺少选手名称`);
+  function readImportField(source, keys) {
+    for (const key of keys) {
+      if (Object.prototype.hasOwnProperty.call(source, key)) {
+        return source[key];
+      }
     }
-
-    return {
-      id: String(source.id || source.ID || '').trim(),
-      name: name.slice(0, 32),
-      lane: String(source.lane || source.位置 || '未分配').trim().slice(0, 16),
-      gameId: String(source.gameId || source.游戏ID || source.uid || `IMPORT_${Date.now()}_${index}`).trim().slice(0, 40),
-      score,
-      tier: 1,
-      kda: String(source.kda || source.KDA || '0.0').trim().slice(0, 12),
-      damage: String(source.damage || source.伤害 || '0K').trim().slice(0, 12),
-      winRate: String(source.winRate || source.胜率 || '0%').trim().slice(0, 12),
-      heroes: Array.isArray(source.heroes)
-        ? source.heroes.map(hero => String(hero).slice(0, 8)).slice(0, 5)
-        : String(source.heroes || source.英雄 || '待,定,位').split(/[，,|/]/).map(hero => hero.trim()).filter(Boolean).slice(0, 5),
-      manifesto: String(source.manifesto || source.参赛宣言 || source.slogan || '').trim().slice(0, 80),
-      status,
-    };
+    return '';
   }
 
-  function parsePlayerImport(filename, text) {
+  function parsePlayerRows(filename, text) {
     const raw = String(text || '').trim();
     if (!raw) throw new Error('导入文件为空');
     const isJson = /\.json$/i.test(filename || '') || raw.startsWith('[') || raw.startsWith('{');
@@ -151,7 +131,99 @@
 
     if (!rows.length) throw new Error('没有可导入的选手数据');
     if (rows.length > 500) throw new Error('单次最多导入 500 名选手');
-    return rows.map(normalizeImportedPlayer);
+    return rows;
+  }
+
+  function normalizeImportedPlayer(row, index) {
+    const source = row && typeof row === 'object' ? row : {};
+    const rawScore = readImportField(source, ['score', '评分']);
+    const scoreNumber = Number(rawScore);
+    const score = Math.max(0, Math.min(120, Math.round(scoreNumber)));
+    const status = String(source.status || source.状态 || 'available') === 'disabled' || String(source.status || source.状态) === '禁用'
+      ? 'disabled'
+      : 'available';
+    const name = String(readImportField(source, ['name', '名称', 'playerName', '选手名称'])).trim();
+    const lane = String(readImportField(source, ['lane', '位置', '偏好位置'])).trim();
+    const gameId = String(readImportField(source, ['gameId', '游戏ID', 'ID', 'uid'])).trim();
+    if (!name) {
+      throw new Error(`第 ${index + 1} 行缺少选手名称`);
+    }
+    if (!lane) {
+      throw new Error(`第 ${index + 1} 行缺少偏好位置`);
+    }
+    if (!gameId) {
+      throw new Error(`第 ${index + 1} 行缺少游戏ID`);
+    }
+    if (String(rawScore).trim() === '' || !Number.isFinite(scoreNumber) || scoreNumber < 0 || scoreNumber > 120) {
+      throw new Error(`第 ${index + 1} 行评分非法`);
+    }
+
+    return {
+      id: String(source.id || source.playerId || source.内部ID || '').trim(),
+      name: name.slice(0, 32),
+      lane: lane.slice(0, 16),
+      gameId: gameId.slice(0, 40),
+      score,
+      tier: 1,
+      kda: String(source.kda || source.KDA || '0.0').trim().slice(0, 12),
+      damage: String(source.damage || source.伤害 || '0K').trim().slice(0, 12),
+      winRate: String(source.winRate || source.胜率 || '0%').trim().slice(0, 12),
+      heroes: Array.isArray(source.heroes)
+        ? source.heroes.map(hero => String(hero).slice(0, 8)).slice(0, 5)
+        : String(source.heroes || source.英雄 || source.擅长英雄 || '待,定,位').split(/[，,|/]/).map(hero => hero.trim()).filter(Boolean).slice(0, 5),
+      manifesto: String(source.manifesto || source.参赛宣言 || source.slogan || '').trim().slice(0, 80),
+      status,
+    };
+  }
+
+  function parsePlayerImport(filename, text) {
+    return parsePlayerRows(filename, text).map(normalizeImportedPlayer);
+  }
+
+  function buildPlayerImportPreview(filename, text, existingPlayers) {
+    const rows = parsePlayerRows(filename, text);
+    const existingGameIds = new Set((existingPlayers || [])
+      .map(player => String(player.gameId || '').trim().toLowerCase())
+      .filter(Boolean));
+    const seenGameIds = new Set();
+    const accepted = [];
+    const skipped = [];
+    const stats = {
+      missingField: 0,
+      invalidScore: 0,
+      duplicateGameId: 0,
+    };
+
+    rows.forEach((row, index) => {
+      try {
+        const player = normalizeImportedPlayer(row, index);
+        const gameIdKey = String(player.gameId || '').toLowerCase();
+        if (existingGameIds.has(gameIdKey) || seenGameIds.has(gameIdKey)) {
+          stats.duplicateGameId += 1;
+          skipped.push({ row: index + 1, name: player.name, gameId: player.gameId, reason: '游戏ID重复' });
+          return;
+        }
+        seenGameIds.add(gameIdKey);
+        accepted.push(player);
+      } catch (error) {
+        const reason = error && error.message ? error.message : '数据格式错误';
+        if (reason.includes('评分')) {
+          stats.invalidScore += 1;
+        } else {
+          stats.missingField += 1;
+        }
+        skipped.push({ row: index + 1, name: '', gameId: '', reason });
+      }
+    });
+
+    return {
+      fileName: String(filename || '未命名文件').slice(0, 120),
+      totalRows: rows.length,
+      accepted,
+      skipped,
+      stats,
+      createdAt: new Date().toISOString(),
+    };
   }
 
   Hexcore2.exportService = {
@@ -234,6 +306,7 @@
     },
 
     parsePlayerImport,
+    buildPlayerImportPreview,
 
     readPlayerFile(file, onSuccess, onError) {
       if (!file || typeof FileReader === 'undefined') {
@@ -252,6 +325,33 @@
       reader.onload = () => {
         try {
           onSuccess(parsePlayerImport(file.name || '', String(reader.result || '')));
+        } catch (error) {
+          if (onError) onError(error);
+        }
+      };
+      reader.onerror = () => {
+        if (onError) onError(new Error('选手文件读取失败'));
+      };
+      reader.readAsText(file, 'utf-8');
+    },
+
+    readPlayerImportPreview(file, existingPlayers, onSuccess, onError) {
+      if (!file || typeof FileReader === 'undefined') {
+        if (onError) onError(new Error('当前环境不支持文件读取'));
+        return;
+      }
+
+      try {
+        enforceFileSize(file, 2 * 1024 * 1024, '选手导入文件');
+      } catch (error) {
+        if (onError) onError(error);
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          onSuccess(buildPlayerImportPreview(file.name || '', String(reader.result || ''), existingPlayers));
         } catch (error) {
           if (onError) onError(error);
         }

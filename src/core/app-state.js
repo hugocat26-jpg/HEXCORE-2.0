@@ -31,11 +31,7 @@
   function isCaptainPoolPlayer(player, captains) {
     if (!player) return false;
     if (player.isCaptain || player.role === 'captain') return true;
-    return captains.some(captain =>
-      captain.playerId === player.id
-      || captain.playerGameId === player.gameId
-      || captain.gameId === player.gameId
-    );
+    return captains.some(captain => captain.playerId === player.id);
   }
 
   function rebalancePlayerTiers(captains, players) {
@@ -133,6 +129,9 @@
       const id = safeId(oldId, `c${index + 1}`, usedIds);
       if (oldId) captainIdMap.set(oldId, id);
       captainIdMap.set(id, id);
+      const captainPlayerId = remapId(item.playerId, playerIdMap);
+      const captainGameId = captainPlayerId ? sanitizeText(item.playerGameId || item.gameId, '', 40) : '';
+      const memberCapacity = captainPlayerId ? playersPerTeam : playersPerTeam + 1;
       const normalized = {
         id,
         name: sanitizeText(item.name, `C${index + 1} 队伍`, 40),
@@ -141,9 +140,9 @@
           .map(playerId => remapId(playerId, playerIdMap))
           .filter(Boolean)
           .filter((playerId, playerIndex, all) => all.indexOf(playerId) === playerIndex)
-          .slice(0, playersPerTeam),
-        playerId: remapId(item.playerId, playerIdMap),
-        playerGameId: sanitizeText(item.playerGameId || item.gameId, '', 40),
+          .slice(0, memberCapacity),
+        playerId: captainPlayerId,
+        playerGameId: captainGameId,
       };
       return captain && typeof captain === 'object' ? Object.assign(captain, normalized) : normalized;
     });
@@ -451,6 +450,19 @@
       const captain = Hexcore2.state.captains.find(item => item.id === captainId);
       return captain ? captain.team.length : 0;
     },
+    captainPlayer(captainId) {
+      const captain = Hexcore2.state.captains.find(item => item.id === captainId);
+      return captain && captain.playerId
+        ? Hexcore2.state.players.find(player => player.id === captain.playerId) || null
+        : null;
+    },
+    teamMemberCapacity(captainId) {
+      const captain = Hexcore2.state.captains.find(item => item.id === captainId);
+      if (!captain) return Hexcore2.state.settings.playersPerTeam;
+      return Hexcore2.selectors.captainPlayer(captainId)
+        ? Hexcore2.state.settings.playersPerTeam
+        : Hexcore2.state.settings.playersPerTeam + 1;
+    },
     availablePlayers(tier) {
       return Hexcore2.state.players.filter(player => player.tier === tier && player.status === 'available');
     },
@@ -469,21 +481,131 @@
       const tier = tiers[Math.max(0, Number(round) - 1)] || Math.min(4, Number(round) || 1);
       return Math.max(1, Math.min(4, Number(tier) || 1));
     },
-    workflowStatus() {
+    workflowChecklist() {
       const state = Hexcore2.state;
-      const captainReady = state.captains.length >= state.settings.minTeams
-        && state.captains.length <= state.settings.maxTeams
-        && state.captains.every(captain => String(captain.name || '').trim());
-      const hexcoreReady = captainReady && state.captains.every(captain =>
-        (state.hexcoreAssignments[captain.id] || []).length >= 3
+      const teamCountOk = state.captains.length >= state.settings.minTeams && state.captains.length <= state.settings.maxTeams;
+      const namedCaptains = state.captains.filter(captain => String(captain.name || '').trim()).length;
+      const assignedCaptainCount = state.captains.filter(captain => Boolean(Hexcore2.selectors.captainPlayer(captain.id))).length;
+      const missingHexcoreCaptains = state.captains.filter(captain => (state.hexcoreAssignments[captain.id] || []).length < 3);
+      const assignedPlayerIds = new Map();
+      const rosterIssues = [];
+      state.captains.forEach(captain => {
+        if (captain.team.length > Hexcore2.selectors.teamMemberCapacity(captain.id)) {
+          rosterIssues.push(`${captain.name} 超员`);
+        }
+        captain.team.forEach(playerId => {
+          if (assignedPlayerIds.has(playerId)) rosterIssues.push(`${playerId} 重复归属`);
+          assignedPlayerIds.set(playerId, captain.id);
+          const player = state.players.find(item => item.id === playerId);
+          if (!player) rosterIssues.push(`${captain.name} 包含缺失选手`);
+          if (player && player.teamId !== captain.id) rosterIssues.push(`${player.name} 归属不一致`);
+        });
+        if (captain.playerId && !Hexcore2.selectors.captainPlayer(captain.id)) {
+          rosterIssues.push(`${captain.name} 队长不在选手库`);
+        }
+      });
+      const openSlots = state.captains.reduce((sum, captain) => (
+        sum + Math.max(0, Hexcore2.selectors.teamMemberCapacity(captain.id) - captain.team.length)
+      ), 0);
+      const availablePlayers = state.players.filter(player => player.status === 'available' && player.tier >= 1 && player.tier <= 4);
+      const tierCounts = [1, 2, 3, 4].map(tier => ({
+        tier,
+        name: state.settings.tierNames[tier],
+        count: availablePlayers.filter(player => player.tier === tier).length,
+      }));
+      const weakTiers = tierCounts.filter(item => item.count < state.captains.length);
+      const items = [
+        {
+          id: 'team-count',
+          label: '队伍数量',
+          status: teamCountOk ? 'pass' : 'block',
+          detail: `当前 ${state.captains.length} 队，允许 ${state.settings.minTeams}-${state.settings.maxTeams} 队`,
+          view: 'rules',
+        },
+        {
+          id: 'team-name',
+          label: '队伍名称',
+          status: namedCaptains === state.captains.length ? 'pass' : 'block',
+          detail: `${namedCaptains}/${state.captains.length} 队已命名`,
+          view: 'teams',
+        },
+        {
+          id: 'captain-player',
+          label: '队长确认',
+          status: assignedCaptainCount === state.captains.length ? 'pass' : 'block',
+          detail: `${assignedCaptainCount}/${state.captains.length} 队已指定队长选手`,
+          view: 'teams',
+        },
+        {
+          id: 'hexcore-draw',
+          label: '海克斯抽取',
+          status: missingHexcoreCaptains.length ? 'block' : 'pass',
+          detail: missingHexcoreCaptains.length ? `${missingHexcoreCaptains.length} 队未抽满 3 个海克斯` : '全部队长已抽满 3 个',
+          view: 'hexcores',
+        },
+        {
+          id: 'roster-integrity',
+          label: '阵容一致性',
+          status: rosterIssues.length ? 'block' : 'pass',
+          detail: rosterIssues.length ? rosterIssues.slice(0, 3).join('；') : '队伍、队长和选手归属一致',
+          view: 'settings',
+        },
+        {
+          id: 'player-capacity',
+          label: '可选人数',
+          status: availablePlayers.length >= openSlots ? 'pass' : 'block',
+          detail: `可选 ${availablePlayers.length} 人，剩余队员空位 ${openSlots}`,
+          view: 'players',
+        },
+        {
+          id: 'pool-capacity',
+          label: '卡池容量',
+          status: weakTiers.length ? 'warn' : 'pass',
+          detail: weakTiers.length
+            ? `${weakTiers.map(item => `${item.name}${item.count}`).join('、')}，低于当前队伍数`
+            : '四档卡池数量均不低于当前队伍数',
+          view: 'players',
+        },
+      ];
+      return {
+        items,
+        blockingItems: items.filter(item => item.status === 'block'),
+        warningItems: items.filter(item => item.status === 'warn'),
+        missingHexcoreCaptains: missingHexcoreCaptains.map(captain => captain.id),
+      };
+    },
+    workflowStage() {
+      const state = Hexcore2.state;
+      const checklist = Hexcore2.selectors.workflowChecklist();
+      const blockedIds = new Set(checklist.blockingItems.map(item => item.id));
+      if (blockedIds.has('team-count') || blockedIds.has('team-name') || state.players.length === 0) {
+        return { id: 'data-prep', label: '数据准备', order: 1, checklist };
+      }
+      if (blockedIds.has('captain-player') || blockedIds.has('roster-integrity') || blockedIds.has('player-capacity')) {
+        return { id: 'captain-confirm', label: '队长确认', order: 2, checklist };
+      }
+      if (blockedIds.has('hexcore-draw')) {
+        return { id: 'hexcore-draw', label: '队长抽海克斯', order: 3, checklist };
+      }
+      if (state.draft.phase === 'completed') {
+        return { id: 'roster-confirm', label: '阵容确认', order: 5, checklist };
+      }
+      return { id: 'player-draft', label: '队员抽选', order: 4, checklist };
+    },
+    workflowStatus() {
+      const stage = Hexcore2.selectors.workflowStage();
+      const checklist = stage.checklist;
+      const captainReady = !checklist.blockingItems.some(item =>
+        ['team-count', 'team-name', 'captain-player', 'roster-integrity', 'player-capacity'].includes(item.id)
       );
+      const hexcoreReady = captainReady && !checklist.blockingItems.some(item => item.id === 'hexcore-draw');
       return {
         captainReady,
         hexcoreReady,
         playersDraftReady: captainReady && hexcoreReady,
-        missingHexcoreCaptains: state.captains
-          .filter(captain => (state.hexcoreAssignments[captain.id] || []).length < 3)
-          .map(captain => captain.id),
+        stage,
+        checklist,
+        missingHexcoreCaptains: checklist.missingHexcoreCaptains,
       };
     },
   };
