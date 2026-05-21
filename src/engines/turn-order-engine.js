@@ -166,17 +166,20 @@
       if (state.draft.round >= state.draft.maxRounds) {
         state.draft.phase = 'completed';
         resetTurnState();
+        if (Hexcore2.assignmentEngine) Hexcore2.assignmentEngine.fillIncompleteRosters();
         return { type: 'completed' };
       }
 
       state.draft.round += 1;
       state.draft.phase = 'round_start';
+      if (Hexcore2.economyEngine) Hexcore2.economyEngine.applyRoundIncome(state.draft.round);
       this.recompute();
       state.draft.currentIndex = 0;
       resetTurnState();
 
       if (state.draft.currentOrder.length === 0) {
         state.draft.phase = 'completed';
+        if (Hexcore2.assignmentEngine) Hexcore2.assignmentEngine.fillIncompleteRosters();
         return { type: 'completed' };
       }
 

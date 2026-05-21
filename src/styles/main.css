@@ -1029,6 +1029,24 @@ h2 span {
   font-size: 17px;
 }
 
+.price-row {
+  margin: 16px auto 0;
+  width: fit-content;
+  min-width: 116px;
+  border: 1px solid rgba(245, 190, 84, 0.4);
+  border-radius: 6px;
+  background: rgba(245, 190, 84, 0.1);
+  padding: 7px 12px;
+  color: #ffe5ad;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.price-row b {
+  color: var(--amber);
+  font-size: 24px;
+}
+
 .score-row b {
   color: var(--cyan);
   font-size: 36px;

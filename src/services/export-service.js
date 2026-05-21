@@ -1,5 +1,6 @@
 (function initExportService(global) {
   const Hexcore2 = global.Hexcore2 || (global.Hexcore2 = {});
+  const OFFICIAL_PLAYER_LIMIT = 50;
 
   function downloadText(filename, content, mimeType) {
     if (typeof document === 'undefined' || typeof Blob === 'undefined') {
@@ -61,6 +62,9 @@
     }
     if (state.captains.length < 5 || state.captains.length > 20) {
       throw new Error('队伍数量必须在5-20之间');
+    }
+    if (!Array.isArray(state.players) || state.players.length > OFFICIAL_PLAYER_LIMIT) {
+      throw new Error('参赛选手总数不能超过50人');
     }
 
     const captainIds = new Set();
@@ -158,6 +162,21 @@
       throw new Error(`第 ${index + 1} 行评分非法`);
     }
 
+    const seasonResults = {};
+    for (let season = 1; season <= 6; season += 1) {
+      seasonResults[`s${season}`] = String(readImportField(source, [
+        `s${season}`,
+        `S${season}`,
+        `season${season}`,
+        `第${season}届`,
+        `第${season}屆`,
+      ]) || '未参赛').trim();
+    }
+    const fmvpRaw = readImportField(source, ['fmvpSeasons', 'FMVP届数', 'FMVP', 'fmvp']);
+    const fmvpSeasons = Array.isArray(fmvpRaw)
+      ? fmvpRaw
+      : String(fmvpRaw || '').split(/[，,、|/]/).map(value => value.trim()).filter(Boolean);
+
     return {
       id: String(source.id || source.playerId || source.内部ID || '').trim(),
       name: name.slice(0, 32),
@@ -172,6 +191,9 @@
         ? source.heroes.map(hero => String(hero).slice(0, 8)).slice(0, 5)
         : String(source.heroes || source.英雄 || source.擅长英雄 || '待,定,位').split(/[，,|/]/).map(hero => hero.trim()).filter(Boolean).slice(0, 5),
       manifesto: String(source.manifesto || source.参赛宣言 || source.slogan || '').trim().slice(0, 80),
+      seasonResults,
+      fmvpSeasons,
+      isFmvp: Boolean(fmvpSeasons.length || Object.values(seasonResults).some(value => String(value).toUpperCase() === 'FMVP')),
       status,
     };
   }
@@ -192,7 +214,9 @@
       missingField: 0,
       invalidScore: 0,
       duplicateGameId: 0,
+      overflow: 0,
     };
+    const remainingSlots = Math.max(0, OFFICIAL_PLAYER_LIMIT - (existingPlayers || []).length);
 
     rows.forEach((row, index) => {
       try {
@@ -201,6 +225,11 @@
         if (existingGameIds.has(gameIdKey) || seenGameIds.has(gameIdKey)) {
           stats.duplicateGameId += 1;
           skipped.push({ row: index + 1, name: player.name, gameId: player.gameId, reason: '游戏ID重复' });
+          return;
+        }
+        if (accepted.length >= remainingSlots) {
+          stats.overflow += 1;
+          skipped.push({ row: index + 1, name: player.name, gameId: player.gameId, reason: '超过50人参赛上限' });
           return;
         }
         seenGameIds.add(gameIdKey);
@@ -257,8 +286,9 @@
           const members = captain.team
             .map(playerId => state.players.find(player => player.id === playerId))
             .filter(Boolean)
-            .map(player => `${player.name}(${player.lane || '未知'} / ${state.settings.tierNames[player.tier] || player.tier})`);
-          return `- ${captain.name}：${members.length ? members.join('、') : '暂无队员'}`;
+            .map(player => `${player.name}(${player.lane || '未知'} / ${state.settings.tierNames[player.tier] || player.tier} / ${player.tier}金币)`);
+          const gold = captain.economy ? captain.economy.gold : 0;
+          return `- ${captain.name}（剩余金币${gold}）：${members.length ? members.join('、') : '暂无队员'}`;
         }),
         '',
         '关键事件：',

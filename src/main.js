@@ -13,6 +13,10 @@
     return;
   }
 
+  if (Hexcore2.economyEngine) {
+    Hexcore2.economyEngine.ensureAll();
+    Hexcore2.economyEngine.applyRoundIncome(Hexcore2.state.draft.round);
+  }
   Hexcore2.turnOrderEngine.recompute();
 
   function persist() {
@@ -29,6 +33,34 @@
     return workflow.playersDraftReady;
   }
 
+  function goldShopMode() {
+    return Hexcore2.state.settings.economyMode === 'gold_shop';
+  }
+
+  function goldDraftStarted() {
+    if (!goldShopMode()) return false;
+    const draft = Hexcore2.state.draft || {};
+    const economyTouched = Hexcore2.state.captains.some(captain => {
+      const roundState = captain.economy && captain.economy.roundState ? captain.economy.roundState : {};
+      return Object.values(roundState).some(item =>
+        item && (item.freeShopUsed || item.refreshCount > 0 || item.purchaseUsed || item.skipped)
+      );
+    });
+    return draft.round > 1
+      || draft.phase === 'completed'
+      || Boolean(draft.currentDraw)
+      || Boolean(draft.pickedThisTurn)
+      || Hexcore2.state.captains.some(captain => (captain.team || []).length > 0)
+      || economyTouched;
+  }
+
+  function rejectGoldLockedMutation(title) {
+    if (!goldDraftStarted()) return false;
+    Hexcore2.eventStore.append(title, '金币抽卡开始后阵容、基础顺位和规则配置已固化，请使用撤销或重置流程处理', 'warn');
+    Hexcore2.ui.render();
+    return true;
+  }
+
   function snapshot(label) {
     if (Hexcore2.historyService) Hexcore2.historyService.push(label);
   }
@@ -43,6 +75,8 @@
     Hexcore2.state.draft.currentDraw = null;
     Hexcore2.state.draft.selectedSlot = 0;
     Hexcore2.state.draft.pickedThisTurn = false;
+    Hexcore2.state.draft.finalFillCompleted = false;
+    if (Hexcore2.economyEngine) Hexcore2.economyEngine.ensureAll();
   }
 
   function nextCaptainNumber() {
@@ -308,64 +342,96 @@
     drawCards() {
       const captain = Hexcore2.selectors.currentCaptain();
       if (!playersDraftReady()) {
-        Hexcore2.eventStore.append('流程未就绪', '请先完成全部队伍配置，并让所有队伍抽满 3 个海克斯，再开始实时抽选队员', 'warn');
+        Hexcore2.eventStore.append('流程未就绪', '请先完成队伍、队长和海克斯配置，再开始金币商店抽选队员', 'warn');
         Hexcore2.ui.render();
         return;
       }
       if (Hexcore2.state.draft.phase === 'completed') {
-        Hexcore2.eventStore.append('裁判操作', '选人流程已完成，无法继续抽卡', 'warn');
+        Hexcore2.eventStore.append('裁判操作', '选人流程已完成，无法继续生成商店', 'warn');
         Hexcore2.ui.render();
         return;
       }
       if (!captain) {
-        Hexcore2.eventStore.append('裁判操作', '当前没有可操作队长，无法抽卡', 'warn');
+        Hexcore2.eventStore.append('裁判操作', '当前没有可操作队长，无法生成商店', 'warn');
         Hexcore2.ui.render();
         return;
       }
 
       const teamSize = Hexcore2.selectors.teamSize(captain.id);
       if (teamSize >= Hexcore2.selectors.teamMemberCapacity(captain.id)) {
-        Hexcore2.eventStore.append('裁判操作', `${captain.name} 队伍已满，自动跳过抽卡`, 'warn');
+        Hexcore2.eventStore.append('裁判操作', `${captain.name} 队伍已满，自动进入下一位`, 'warn');
         this.nextCaptain();
         return;
       }
 
-      snapshot(`抽卡前：${captain.name}`);
-      const autoAssign = Hexcore2.hexcoreEngine.autoAssignBeforeDraw(captain.id);
-      if (autoAssign.handled) {
-        this.nextCaptain();
-        return;
-      }
-
-      const drawOverride = Hexcore2.hexcoreEngine.drawOverrideBeforeDraw(captain.id);
-      if (drawOverride.handled) {
-        armPickTimeout(Hexcore2.state.draft.currentDraw);
+      Hexcore2.economyEngine.applyRoundIncome(Hexcore2.state.draft.round);
+      const operate = Hexcore2.economyEngine.canOperate(captain.id);
+      if (!operate.ok) {
+        Hexcore2.eventStore.append('商店生成失败', operate.reason, 'warn');
         Hexcore2.ui.render();
         return;
       }
+      const roundState = Hexcore2.economyEngine.roundState(captain.id);
+      if (roundState.freeShopUsed) {
+        this.refreshShop();
+        return;
+      }
 
-      const tier = Hexcore2.poolEngine.effectiveTier(captain.id);
-      const drawReasons = Hexcore2.hexcoreEngine.drawReasons(captain.id);
-      const drawCount = Hexcore2.state.settings.drawCount + Hexcore2.hexcoreEngine.extraDrawCount(captain.id);
-      Hexcore2.state.draft.currentDraw = Hexcore2.probabilityEngine.draw(captain.id, tier, drawCount);
-      Hexcore2.state.draft.currentDraw.reason = drawReasons.join('；');
+      snapshot(`免费开店前：${captain.name}`);
+      Hexcore2.state.draft.currentDraw = Hexcore2.shopEngine.generate(captain.id, {
+        generatedBy: 'free_shop',
+        reason: '本轮首次免费商店',
+      });
+      Hexcore2.economyEngine.markFreeShop(captain.id);
       Hexcore2.state.draft.selectedSlot = 0;
       Hexcore2.state.draft.pickedThisTurn = false;
-      armPickTimeout(Hexcore2.state.draft.currentDraw);
-
-      const tierName = Hexcore2.state.settings.tierNames[tier];
       const drawn = Hexcore2.state.draft.currentDraw.cards.length;
       Hexcore2.eventStore.append(
-        drawn > 0 ? '抽卡完成' : '卡池不足',
-        drawn > 0 ? `${captain.name} 从${tierName}抽取 ${drawn} 张选手卡${drawReasons.length ? `（${drawReasons.join('；')}）` : ''}` : `${tierName}暂无可用选手，裁判需要跳过或手动处理`,
+        drawn > 0 ? '免费商店生成' : '卡池不足',
+        drawn > 0 ? `${captain.name} 第 ${Hexcore2.state.draft.round} 轮免费生成 ${drawn} 张商店卡` : '剩余队员不足，无法生成商店',
         drawn > 0 ? 'draw' : 'warn'
       );
       Hexcore2.ui.render();
     },
 
+    refreshShop() {
+      const captain = Hexcore2.selectors.currentCaptain();
+      if (!captain) {
+        Hexcore2.eventStore.append('刷新失败', '当前没有可操作队长', 'warn');
+        Hexcore2.ui.render();
+        return;
+      }
+      Hexcore2.economyEngine.applyRoundIncome(Hexcore2.state.draft.round);
+      const roundState = Hexcore2.economyEngine.roundState(captain.id);
+      if (!roundState.freeShopUsed) {
+        this.drawCards();
+        return;
+      }
+      const result = Hexcore2.economyEngine.payRefresh(captain.id);
+      if (!result.ok) {
+        Hexcore2.eventStore.append('刷新失败', result.reason, 'warn');
+        Hexcore2.ui.render();
+        return;
+      }
+      snapshot(`刷新商店前：${captain.name}`);
+      Hexcore2.state.draft.currentDraw = Hexcore2.shopEngine.generate(captain.id, {
+        generatedBy: 'paid_refresh',
+        refreshCostPaid: result.cost,
+        reason: `付费刷新，消耗 ${result.cost} 金币`,
+      });
+      Hexcore2.state.draft.selectedSlot = 0;
+      Hexcore2.state.draft.pickedThisTurn = false;
+      Hexcore2.eventStore.append(
+        '商店刷新',
+        `${captain.name} 花费 ${result.cost} 金币刷新商店，剩余 ${result.gold} 金币`,
+        'draw'
+      );
+      renderAndPersist();
+    },
+
     pickCard() {
       if (!playersDraftReady()) {
-        Hexcore2.eventStore.append('流程未就绪', '海克斯抽取未完成，暂不能选择队员', 'warn');
+        Hexcore2.eventStore.append('流程未就绪', '前置流程未完成，暂不能购买队员', 'warn');
         Hexcore2.ui.render();
         return;
       }
@@ -373,56 +439,34 @@
       const captain = Hexcore2.selectors.currentCaptain();
       if (Hexcore2.state.draft.pickedThisTurn) return;
       if (!draw || !captain) {
-        Hexcore2.eventStore.append('选卡失败', '当前没有可选择的抽卡结果', 'warn');
+        Hexcore2.eventStore.append('购买失败', '当前没有可购买的商店卡', 'warn');
         Hexcore2.ui.render();
         return;
       }
 
       const slot = draw.cards[Hexcore2.state.draft.selectedSlot];
       if (!slot) {
-        Hexcore2.eventStore.append('选卡失败', '当前卡槽为空，无法加入队伍', 'warn');
+        Hexcore2.eventStore.append('购买失败', '当前卡槽为空，无法购买', 'warn');
         Hexcore2.ui.render();
         return;
       }
 
-      snapshot(`选卡前：${captain.name}`);
+      snapshot(`购买队员前：${captain.name}`);
       clearPickTimeout(true);
-      const selectedPlayer = Hexcore2.state.players.find(player => player.id === slot.playerId);
-      if (draw.pickMode === 'blind_box' && selectedPlayer && selectedPlayer.status === 'drafted' && selectedPlayer.teamId !== captain.id) {
-        const transfer = Hexcore2.assignmentEngine.transferDraftedPlayer(captain.id, slot.playerId, 'mystery_box_transfer');
-        if (transfer) {
-          Hexcore2.hexcoreEngine.grantCompensationTurn(
-            transfer.sourceCaptain.id,
-            `神秘贤者·盲盒：${transfer.player.name} 被 ${captain.name} 选中并转队`
-          );
-        }
-      } else {
-        Hexcore2.assignmentEngine.assign(captain.id, slot.playerId, draw.pickMode === 'blind_box' ? 'mystery_box_pick' : 'normal_pick');
+      const result = Hexcore2.assignmentEngine.purchase(captain.id, slot.playerId, 'gold_shop_purchase');
+      if (!result.ok) {
+        Hexcore2.eventStore.append('购买失败', result.reason, 'warn');
+        Hexcore2.ui.render();
+        return;
       }
-      if (draw.pickMode === 'mystery_swap') {
-        const shown = Hexcore2.state.players.find(player => player.id === (slot.displayPlayerId || slot.playerId));
-        const real = Hexcore2.state.players.find(player => player.id === slot.playerId);
-        Hexcore2.eventStore.append(
-          '暗牌揭示',
-          shown && real
-            ? `${captain.name} 选择了展示为「${shown.name}」的卡牌，真实入队选手为「${real.name}」`
-            : `${captain.name} 完成雪定饿的喵暗牌选择`,
-          'warn'
-        );
-      }
-      if (draw.pickMode === 'hellhound') {
-        Hexcore2.hexcoreEngine.advanceHellhound(captain.id);
-        armPickTimeout(Hexcore2.state.draft.currentDraw);
-      } else {
-        Hexcore2.state.draft.pickedThisTurn = true;
-      }
+      Hexcore2.state.draft.pickedThisTurn = true;
       renderAndPersist();
     },
 
     timeoutRandomPick(autoTriggered = false) {
       const draw = Hexcore2.state.draft.currentDraw;
       if (!draw || !draw.cards || !draw.cards.length || Hexcore2.state.draft.pickedThisTurn) {
-        Hexcore2.eventStore.append('超时随机失败', '当前没有可随机选择的候选卡', 'warn');
+        Hexcore2.eventStore.append('随机购买失败', '当前没有可随机购买的商店卡', 'warn');
         Hexcore2.ui.render();
         return;
       }
@@ -431,8 +475,8 @@
       Hexcore2.state.draft.selectedSlot = index;
       const captain = Hexcore2.selectors.currentCaptain();
       Hexcore2.eventStore.append(
-        draw.pickMode === 'hellhound' ? '地狱三头犬超时' : '超时随机',
-        `${captain ? captain.name : '当前队长'} ${autoTriggered ? '倒计时结束' : '触发超时随机'}，系统从当前 ${draw.cards.length} 张候选卡中随机选择第 ${index + 1} 张`,
+        '随机购买',
+        `${captain ? captain.name : '当前队长'} ${autoTriggered ? '倒计时结束' : '触发随机'}，系统从当前 ${draw.cards.length} 张商店卡中随机尝试购买第 ${index + 1} 张`,
         'warn'
       );
       this.pickCard();
@@ -442,13 +486,21 @@
       const previous = Hexcore2.selectors.currentCaptain();
       snapshot(`切换队长前：${previous ? previous.name : '未知'}`);
       clearPickTimeout(true);
+      if (previous && Hexcore2.state.draft.phase !== 'completed') {
+        const state = Hexcore2.economyEngine.roundState(previous.id);
+        const full = Hexcore2.selectors.teamSize(previous.id) >= Hexcore2.selectors.teamMemberCapacity(previous.id);
+        if (!state.purchaseUsed && !state.skipped && !full) {
+          Hexcore2.economyEngine.markSkipped(previous.id);
+          Hexcore2.eventStore.append('购买权作废', `${previous.name} 未完成购买即进入下一位，第 ${Hexcore2.state.draft.round} 轮购买权限作废`, 'warn');
+        }
+      }
       const transition = Hexcore2.turnOrderEngine.advance();
 
       if (transition.type === 'next_round') {
         const captain = Hexcore2.selectors.currentCaptain();
         Hexcore2.eventStore.append('回合推进', `进入第 ${transition.round} 轮，当前队长为 ${captain ? captain.name : '无'}`, 'info');
       } else if (transition.type === 'completed') {
-        Hexcore2.eventStore.append('选人完成', '所有抽选轮次已结束或队伍均已满员', 'success');
+        Hexcore2.eventStore.append('选人完成', '四轮金币抽卡已结束，系统已检查并处理阵容随机补位', 'success');
       } else {
         const captain = Hexcore2.selectors.currentCaptain();
         Hexcore2.eventStore.append('裁判操作', `进入 ${captain ? captain.name : '无'} 的选人环节`, 'info');
@@ -516,7 +568,17 @@
     skipTurn() {
       const captain = Hexcore2.selectors.currentCaptain();
       clearPickTimeout(true);
-      Hexcore2.eventStore.append('裁判操作', `${captain ? captain.name : '无队长'} 跳过本轮选人`, 'warn');
+      if (captain) {
+        const result = Hexcore2.economyEngine.markSkipped(captain.id);
+        if (!result.ok) {
+          Hexcore2.eventStore.append('跳过失败', result.reason, 'warn');
+          Hexcore2.ui.render();
+          return;
+        }
+      }
+      Hexcore2.state.draft.currentDraw = null;
+      Hexcore2.state.draft.pickedThisTurn = true;
+      Hexcore2.eventStore.append('裁判操作', `${captain ? captain.name : '无队长'} 跳过本轮购买，购买权限立即作废`, 'warn');
       this.nextCaptain();
     },
 
@@ -920,6 +982,11 @@
         Hexcore2.ui.render();
         return;
       }
+      if (goldShopMode() && targetRound !== Hexcore2.state.draft.round) {
+        Hexcore2.eventStore.append('轮次跳转失败', '金币模式必须按当前轮次顺序执行，不能手动跳转到其他轮次', 'warn');
+        Hexcore2.ui.render();
+        return;
+      }
 
       snapshot(`轮次跳转前：第${targetRound}轮 ${captain.name}`);
       Hexcore2.state.draft.round = targetRound;
@@ -934,6 +1001,7 @@
     },
 
     addCaptain() {
+      if (rejectGoldLockedMutation('新增队伍失败')) return;
       if (Hexcore2.state.captains.length >= Hexcore2.state.settings.maxTeams) {
         Hexcore2.eventStore.append('新增队伍失败', `队伍数量不能超过 ${Hexcore2.state.settings.maxTeams}`, 'warn');
         Hexcore2.ui.render();
@@ -955,6 +1023,7 @@
     },
 
     removeCaptain(captainId) {
+      if (rejectGoldLockedMutation('删除队伍失败')) return;
       if (Hexcore2.state.captains.length <= Hexcore2.state.settings.minTeams) {
         Hexcore2.eventStore.append('删除队伍失败', `队伍数量不能少于 ${Hexcore2.state.settings.minTeams}`, 'warn');
         Hexcore2.ui.render();
@@ -984,6 +1053,11 @@
     },
 
     removePlayerFromTeam(captainId, playerId) {
+      if (goldShopMode()) {
+        Hexcore2.eventStore.append('移除队员失败', '金币模式下已入队队员不能手动移回卡池，请使用撤销或重置流程处理', 'warn');
+        Hexcore2.ui.render();
+        return;
+      }
       const captain = Hexcore2.state.captains.find(item => item.id === captainId);
       const player = Hexcore2.state.players.find(item => item.id === playerId);
       if (!captain || !player) return;
@@ -996,6 +1070,11 @@
     },
 
     assignPlayerToTeam(captainId, playerId) {
+      if (goldShopMode()) {
+        Hexcore2.eventStore.append('补录队员失败', '金币模式下队员只能通过商店购买或四轮结束后的随机补位进入阵容', 'warn');
+        Hexcore2.ui.render();
+        return;
+      }
       const captain = Hexcore2.state.captains.find(item => item.id === captainId);
       const selectedPlayerId = playerId || (document.getElementById(`team-add-player-${captainId}`) || {}).value;
       const player = Hexcore2.state.players.find(item => item.id === selectedPlayerId);
@@ -1023,6 +1102,7 @@
     },
 
     promotePlayerToCaptain(playerId) {
+      if (rejectGoldLockedMutation('设为队长失败')) return;
       const player = Hexcore2.state.players.find(item => item.id === playerId);
       if (!player) {
         Hexcore2.eventStore.append('设为队长失败', '目标选手不存在', 'warn');
@@ -1096,6 +1176,7 @@
     },
 
     releaseCaptain(playerId) {
+      if (rejectGoldLockedMutation('解除队长失败')) return;
       const player = Hexcore2.state.players.find(item => item.id === playerId);
       const captain = player && Hexcore2.state.captains.find(item => item.playerId === player.id);
       if (!player || !captain) {
@@ -1113,6 +1194,7 @@
     },
 
     moveCaptainOrder(captainId, direction) {
+      if (rejectGoldLockedMutation('顺位调整失败')) return;
       const order = Hexcore2.state.draft.baseOrder;
       const index = order.indexOf(captainId);
       const targetIndex = direction === 'up' ? index - 1 : index + 1;
@@ -1132,6 +1214,7 @@
     },
 
     setCaptainOrderPosition(captainId) {
+      if (rejectGoldLockedMutation('顺位调整失败')) return;
       const input = document.getElementById(`captain-order-${captainId}`);
       const position = Number(input && input.value);
       const order = Hexcore2.state.draft.baseOrder;
@@ -1152,6 +1235,7 @@
     },
 
     updateTeamCountFromTeams() {
+      if (rejectGoldLockedMutation('队伍数量失败')) return;
       const input = document.getElementById('teams-team-count');
       const teamCount = Number(input && input.value);
       const minTeams = Hexcore2.state.settings.minTeams;
@@ -1162,7 +1246,7 @@
         return;
       }
       const confirmed = typeof confirm === 'function'
-        ? confirm('队伍数量修改会重算流程并清空当前抽卡结果，确认保存？')
+        ? confirm('队伍数量修改会重算流程并清空当前商店结果，确认保存？')
         : true;
       if (!confirmed) return;
 
@@ -1191,6 +1275,7 @@
     },
 
     updateRules(fromTeamPage = false) {
+      if (rejectGoldLockedMutation('规则保存失败')) return;
       const teamCountInput = document.getElementById('rules-team-count');
       const teamPageCountInput = document.getElementById('teams-team-count');
       const playersPerTeamInput = document.getElementById('rules-players-per-team');
@@ -1206,13 +1291,13 @@
       const drawCount = Number(drawCountInput && drawCountInput.value);
       const minTeams = Hexcore2.state.settings.minTeams;
       const maxTeams = Hexcore2.state.settings.maxTeams;
-      const nextMaxRounds = Number.isInteger(maxRounds) ? maxRounds : Hexcore2.state.draft.maxRounds;
-      const nextDrawCount = Number.isInteger(drawCount) ? drawCount : Hexcore2.state.settings.drawCount;
+      const nextMaxRounds = 4;
+      const nextDrawCount = 5;
       const roundTiers = Array.from({ length: nextMaxRounds }, (_, index) => {
         const input = document.getElementById(`rules-round-tier-${index + 1}`);
         return Number(input && input.value) || Hexcore2.selectors.roundTier(index + 1);
       });
-      const tierNames = [0, 1, 2, 3, 4].reduce((result, tier) => {
+      const tierNames = [0, 1, 2, 3, 4, 5].reduce((result, tier) => {
         const input = document.getElementById(`rules-tier-name-${tier}`);
         const fallback = Hexcore2.state.settings.tierNames[tier] || '';
         const value = String((input && input.value) || fallback).trim().slice(0, 12);
@@ -1230,33 +1315,23 @@
         Hexcore2.ui.render();
         return;
       }
-      if (!Number.isInteger(nextMaxRounds) || nextMaxRounds < 1 || nextMaxRounds > 8) {
-        Hexcore2.eventStore.append('规则保存失败', '最大轮数必须在 1-8 之间', 'warn');
-        Hexcore2.ui.render();
-        return;
-      }
       if (!Number.isInteger(round) || round < 1 || round > nextMaxRounds) {
         Hexcore2.eventStore.append('规则保存失败', `当前轮次必须在 1-${nextMaxRounds} 之间`, 'warn');
         Hexcore2.ui.render();
         return;
       }
-      if (!Number.isInteger(nextDrawCount) || nextDrawCount < 1 || nextDrawCount > 8) {
-        Hexcore2.eventStore.append('规则保存失败', '基础抽卡张数必须在 1-8 之间', 'warn');
+      if (roundTiers.some(tier => !Number.isInteger(tier) || tier < 1 || tier > 5)) {
+        Hexcore2.eventStore.append('规则保存失败', '每轮卡池必须在 1-5 之间', 'warn');
         Hexcore2.ui.render();
         return;
       }
-      if (roundTiers.some(tier => !Number.isInteger(tier) || tier < 1 || tier > 4)) {
-        Hexcore2.eventStore.append('规则保存失败', '每轮卡池必须在 1-4 之间', 'warn');
-        Hexcore2.ui.render();
-        return;
-      }
-      if ([0, 1, 2, 3, 4].some(tier => !tierNames[tier])) {
+      if ([0, 1, 2, 3, 4, 5].some(tier => !tierNames[tier])) {
         Hexcore2.eventStore.append('规则保存失败', '卡池名称不能为空', 'warn');
         Hexcore2.ui.render();
         return;
       }
       const confirmed = typeof confirm === 'function'
-        ? confirm(`${fromTeamPage ? '队伍数量' : '规则'}修改会重算流程并清空当前抽卡结果，确认保存？`)
+        ? confirm(`${fromTeamPage ? '队伍数量' : '规则'}修改会重算流程并清空当前商店结果，确认保存？`)
         : true;
       if (!confirmed) return;
 
@@ -1283,6 +1358,7 @@
       }
       Hexcore2.state.settings.playersPerTeam = playersPerTeam;
       Hexcore2.state.settings.drawCount = nextDrawCount;
+      Hexcore2.state.settings.shopSize = 5;
       Hexcore2.state.settings.roundTiers = roundTiers;
       Hexcore2.state.settings.tierNames = tierNames;
       Hexcore2.state.settings.autoRandomStrategy = (autoRandomStrategyInput && autoRandomStrategyInput.value) || Hexcore2.state.settings.autoRandomStrategy;
@@ -1290,7 +1366,7 @@
       Hexcore2.state.draft.round = round;
       Hexcore2.state.draft.maxRounds = nextMaxRounds;
       normalizeAfterConfigChange();
-      Hexcore2.eventStore.append('规则设置', `保存规则：${teamCount} 队，每队 ${playersPerTeam} 人，${nextMaxRounds} 轮，基础抽 ${nextDrawCount} 张`, 'success');
+      Hexcore2.eventStore.append('规则设置', `保存金币模式规则：${teamCount} 队，每队 ${playersPerTeam} 名队员，固定4轮，每次商店5张`, 'success');
       renderAndPersist();
     },
 
@@ -1360,6 +1436,12 @@
     },
 
     addPlayer() {
+      if (rejectGoldLockedMutation('新增选手失败')) return;
+      if (Hexcore2.state.players.length >= 50) {
+        Hexcore2.eventStore.append('新增选手失败', '本模式固定50名参赛选手，不能继续新增', 'warn');
+        Hexcore2.ui.render();
+        return;
+      }
       Hexcore2.state.ui = Hexcore2.state.ui || {};
       Hexcore2.state.ui.addPlayerModal = true;
       renderAndPersist();
@@ -1391,6 +1473,11 @@
         Hexcore2.ui.render();
         return;
       }
+      if (Hexcore2.state.players.length >= 50) {
+        Hexcore2.eventStore.append('新增选手失败', '本模式固定50名参赛选手，不能继续新增', 'warn');
+        Hexcore2.ui.render();
+        return;
+      }
 
       const number = nextPlayerId();
       const player = {
@@ -1416,6 +1503,7 @@
     },
 
     importPlayers(file) {
+      if (rejectGoldLockedMutation('选手导入失败')) return;
       Hexcore2.exportService.readPlayerImportPreview(file, Hexcore2.state.players, preview => {
         Hexcore2.state.ui = Hexcore2.state.ui || {};
         Hexcore2.state.ui.playerImportPreview = preview;
@@ -1432,6 +1520,7 @@
     },
 
     confirmPlayerImport() {
+      if (rejectGoldLockedMutation('选手导入失败')) return;
       const preview = Hexcore2.state.ui && Hexcore2.state.ui.playerImportPreview;
       const players = preview && Array.isArray(preview.accepted) ? preview.accepted : [];
       if (!players.length) {
@@ -1448,6 +1537,10 @@
       const imported = [];
 
       players.forEach(player => {
+        if (Hexcore2.state.players.length + imported.length >= 50) {
+          skipped += 1;
+          return;
+        }
         const gameIdKey = String(player.gameId || '').toLowerCase();
         if (gameIdKey && gameIds.has(gameIdKey)) {
           skipped += 1;
@@ -1486,7 +1579,7 @@
       if (!firstConfirmed) return;
 
       const secondConfirmed = typeof confirm === 'function'
-        ? confirm('二次确认：清空后选人流程会初始化到第1轮，海克斯、抽卡结果、赛程也会清空。确认执行？')
+        ? confirm('二次确认：清空后选人流程会初始化到第1轮，海克斯、商店结果、赛程也会清空。确认执行？')
         : true;
       if (!secondConfirmed) return;
 
@@ -1495,6 +1588,16 @@
       Hexcore2.state.captains.forEach(captain => {
         captain.team = [];
         clearCaptainBinding(captain);
+        captain.economy = {
+          gold: Hexcore2.state.settings.initialGold,
+          incomeAppliedRounds: [1],
+          roundState: {
+            1: { freeShopUsed: false, refreshCount: 0, purchaseUsed: false, skipped: false },
+            2: { freeShopUsed: false, refreshCount: 0, purchaseUsed: false, skipped: false },
+            3: { freeShopUsed: false, refreshCount: 0, purchaseUsed: false, skipped: false },
+            4: { freeShopUsed: false, refreshCount: 0, purchaseUsed: false, skipped: false },
+          },
+        };
       });
       Hexcore2.state.hexcoreAssignments = Hexcore2.state.captains.reduce((result, captain) => {
         result[captain.id] = [];
@@ -1521,6 +1624,7 @@
         explanations: [],
         pickedThisTurn: false,
         paused: false,
+        finalFillCompleted: false,
       };
       Hexcore2.state.tournament = { status: 'empty', championId: '', rounds: [] };
       Hexcore2.state.ui = Hexcore2.state.ui || {};
@@ -1684,6 +1788,7 @@
     },
 
     togglePlayerDisabled(playerId) {
+      if (rejectGoldLockedMutation('选手状态失败')) return;
       const player = Hexcore2.state.players.find(item => item.id === playerId);
       if (!player) return;
       if (player.status === 'captain') {
@@ -1704,6 +1809,7 @@
     },
 
     deletePlayer(playerId) {
+      if (rejectGoldLockedMutation('删除选手失败')) return;
       const player = Hexcore2.state.players.find(item => item.id === playerId);
       if (!player) return;
       const confirmed = typeof confirm === 'function'
@@ -1918,12 +2024,14 @@
   };
 
   global.hexcoreUI = Hexcore2.actions;
-  if (Hexcore2.state.draft.currentDraw) {
+  if (Hexcore2.state.draft.currentDraw && Hexcore2.state.draft.currentDraw.pickMode !== 'shop') {
     if (!Hexcore2.state.draft.currentDraw.timeoutEndsAt) {
       armPickTimeout(Hexcore2.state.draft.currentDraw);
     } else {
       schedulePickTimeoutTick();
     }
+    Hexcore2.ui.render();
+  } else if (Hexcore2.state.draft.currentDraw) {
     Hexcore2.ui.render();
   } else if (playersDraftReady()) {
     Hexcore2.actions.drawCards();

@@ -15,7 +15,7 @@
     { id: 'giant-slayer', name: '巨人杀手', type: 'amber', desc: '侏儒马与猛犸池互换，仅影响持有者。', status: 'passive', uses: 0, mode: 'passive' },
     { id: 'ballroom-queen', name: '舞会女王', type: 'violet', desc: '持有者个人卡池顺序反转。', status: 'passive', uses: 0, mode: 'passive' },
     { id: 'demon-contract', name: '恶魔契约', type: 'cyan', desc: '第1-3轮自动第1顺位，第4轮自动最后顺位。', status: 'passive', uses: 0, mode: 'passive' },
-    { id: 'decompose-knowledge', name: '知识来源于分解', type: 'cyan', desc: '全程1次：分析1名已有选手，本轮抽卡显示历史战绩和战力顺位信息。', status: 'available', uses: 1, mode: 'manual' },
+    { id: 'decompose-knowledge', name: '知识来源于分解', type: 'cyan', desc: '全程1次：分析1名已有选手，本轮商店显示历史战绩和战力顺位信息。', status: 'available', uses: 1, mode: 'manual' },
     { id: 'pandora-box', name: '潘多拉魔盒', type: 'violet', desc: '固定第3顺位，每轮从当前池评分前5随机分配1人。', status: 'passive', uses: 0, mode: 'passive' },
     { id: 'snow-cat', name: '雪定饿的喵', type: 'amber', desc: '每轮可用：抽出当前池最高分和最低分，两张身份可能互换，选择后揭示真实身份。', status: 'available', uses: 1, mode: 'manual', maxUsesPerRound: 1 },
     { id: 'steady', name: '稳扎稳打', type: 'amber', desc: '跳过本轮抽卡和选人，由系统从当前池随机分配1人。', status: 'available', uses: 1, mode: 'manual' },
@@ -30,6 +30,111 @@
       .filter(Boolean)
       .map(hexcore => ({ ...hexcore }));
   }
+
+  const officialRows = [
+    ['林间石', 'LJ_Stone_T01', '上路', 57, '奥恩、塞恩、石头人'],
+    ['薄雾铃', 'BW_Bell_T02', '辅助', 55, '璐璐、娜美、米利欧'],
+    ['晨星桥', 'CX_Bridge_T03', '中路', 63, '发条、维克托、沙皇'],
+    ['北风盾', 'BF_Shield_T04', '辅助', 61, '牛头、芮尔、泰坦'],
+    ['墨雨刀', 'MY_Blade_T05', '打野', 66, '蔚、皇子、赵信'],
+    ['白露弦', 'BL_String_T06', '下路', 64, '金克丝、霞、厄斐琉斯'],
+    ['长夜渡', 'CY_Ferry_T07', '中路', 68, '阿狸、妖姬、辛德拉'],
+    ['青灯客', 'QD_Guest_T08', '上路', 59, '剑魔、鳄鱼、纳尔'],
+    ['雪岸声', 'XA_Voice_T09', '辅助', 62, '锤石、洛、烈娜塔'],
+    ['折月人', 'ZY_Moon_T10', '打野', 70, '盲僧、佛耶戈、豹女'],
+    ['云外之人', 'YW_ZhiRen_T11', '中路', 72, '永恩、塞拉斯、杰斯'],
+    ['风缝蝶', 'FF_Die_T12', '辅助', 69, '巴德、琴女、萨勒芬妮'],
+    ['夜雨声烦', 'YR_Fan_T13', '下路', 81, '卡莎、泽丽、韦鲁斯'],
+    ['青山隐', 'QS_Yin_T14', '上路', 78, '凯南、奎桑提、青钢影'],
+    ['林深见鹿', 'LS_Deer_T15', '打野', 85, '千珏、莉莉娅、猴子'],
+    ['南枝雪', 'NZ_Snow_T16', '中路', 74, '岩雀、妮蔻、安妮'],
+    ['孤月', 'GY_Moon_T17', '打野', 98, '盲僧、破败王、豹女'],
+    ['星坠', 'XZ_Star_T18', '下路', 96, '霞、泽丽、厄斐琉斯'],
+    ['赤锋', 'CF_Red_T19', '上路', 91, '剑姬、武器、鳄鱼'],
+    ['雪烛', 'XZ_Light_T20', '中路', 93, '辛德拉、沙皇、发条'],
+    ['雾刃', 'WR_Blade_T21', '打野', 88, '螳螂、佛耶戈、猴子'],
+    ['白昼弦', 'BZ_String_T22', '下路', 89, '女警、烬、轮子妈'],
+    ['流光盾', 'LG_Shield_T23', '辅助', 87, '洛、锤石、牛头'],
+    ['寒江火', 'HJ_Fire_T24', '上路', 82, '兰博、凯南、船长'],
+    ['竹影归', 'ZY_Return_T25', '辅助', 76, '蕾欧娜、泰坦、布隆'],
+    ['霜叶落', 'SY_Fall_T26', '中路', 79, '维克托、卡尔玛、塞拉斯'],
+    ['听潮生', 'TC_Wave_T27', '下路', 73, '伊泽瑞尔、卡莎、希维尔'],
+    ['暮云开', 'MY_Open_T28', '打野', 71, '猪妹、波比、大树'],
+    ['星河远', 'XH_Far_T29', '上路', 84, '杰斯、格温、剑魔'],
+    ['轻舟客', 'QZ_Guest_T30', '辅助', 75, '娜美、璐璐、烈娜塔'],
+    ['折竹风', 'ZZ_Wind_T31', '中路', 67, '小法、冰女、加里奥'],
+    ['山海尽', 'SH_End_T32', '打野', 80, '皇子、蔚、梦魇'],
+    ['落星河', 'LX_River_T33', '下路', 77, '烬、女枪、卡莉斯塔'],
+    ['问剑人', 'WJ_Sword_T34', '上路', 86, '剑姬、青钢影、武器'],
+    ['映雪白', 'YX_White_T35', '辅助', 58, '风女、索拉卡、璐璐'],
+    ['千灯夜', 'QD_Night_T36', '中路', 90, '妖姬、阿卡丽、塞拉斯'],
+    ['听雨眠', 'TY_Sleep_T37', '打野', 65, '大树、猪妹、龙女'],
+    ['孤帆影', 'GF_Shadow_T38', '下路', 83, '卡莎、霞、泽丽'],
+    ['白沙洲', 'BS_Isle_T39', '上路', 60, '奥恩、塞恩、蒙多'],
+    ['秋水长', 'QS_Long_T40', '辅助', 92, '锤石、洛、巴德'],
+    ['雁回时', 'YH_Time_T41', '中路', 54, '拉克丝、卡尔玛、莫甘娜'],
+    ['燃灯者', 'RD_Lamp_T42', '打野', 94, '男枪、豹女、莉莉娅'],
+    ['断虹声', 'DH_Sound_T43', '下路', 56, '寒冰、轮子妈、韦鲁斯'],
+    ['苍岚', 'CangLan_T44', '上路', 95, '奎桑提、格温、兰博'],
+    ['归棹', 'GZ_Oar_T45', '辅助', 52, '布隆、塔姆、牛头'],
+    ['无声雪', 'WS_Snow_T46', '中路', 97, '沙皇、发条、维克托'],
+    ['破晓刃', 'PX_Blade_T47', '打野', 53, '赵信、盲僧、皇子'],
+    ['渡鸦', 'DY_Raven_T48', '下路', 99, '德莱文、卢锡安、卡莉斯塔'],
+    ['眠山客', 'MS_Guest_T49', '上路', 50, '石头人、慎、奥恩'],
+    ['星火', 'XH_Spark_T50', '辅助', 100, '芮尔、洛、锤石'],
+  ];
+
+  const fmvpByIndex = new Map([
+    [16, 'S1'],
+    [17, 'S2'],
+    [39, 'S3'],
+    [41, 'S4'],
+    [43, 'S5'],
+    [47, 'S6'],
+  ]);
+
+  function resultForScore(score, offset) {
+    if (score >= 94) return '冠军';
+    if (score >= 88) return offset % 2 ? '亚军' : '4强';
+    if (score >= 76) return offset % 3 ? '4强' : '亚军';
+    if (score >= 62) return offset % 2 ? '1轮游' : '4强';
+    return offset % 3 ? '1轮游' : '未参赛';
+  }
+
+  function buildSeasonResults(score, index, fmvpSeason) {
+    const results = {};
+    for (let season = 1; season <= 6; season += 1) {
+      results[`s${season}`] = resultForScore(score + ((index + season) % 7) - 3, index + season);
+    }
+    if (fmvpSeason) results[fmvpSeason.toLowerCase()] = 'FMVP';
+    return results;
+  }
+
+  const officialPlayers = officialRows.map((row, index) => {
+    const fmvpSeason = fmvpByIndex.get(index);
+    return {
+      id: `p${String(index + 1).padStart(3, '0')}`,
+      name: row[0],
+      gameId: row[1],
+      lane: row[2],
+      score: row[3],
+      heroes: row[4].split('、'),
+      manifesto: '第7届参赛选手',
+      status: 'available',
+      seasonResults: buildSeasonResults(row[3], index, fmvpSeason),
+      fmvpSeasons: fmvpSeason ? [fmvpSeason] : [],
+      isFmvp: Boolean(fmvpSeason),
+    };
+  });
+
+  const officialCaptains = officialPlayers.slice(0, 10).map((player, index) => ({
+    id: `c${index + 1}`,
+    name: `C${index + 1} ${player.name}`,
+    record: '第7届队长',
+    team: [],
+    playerId: player.id,
+    playerGameId: player.gameId,
+  }));
 
   Hexcore2.sampleData = {
     captains: [
@@ -91,5 +196,19 @@
     },
 
     hexcores,
+  };
+  Hexcore2.sampleData.captains = officialCaptains;
+  Hexcore2.sampleData.players = officialPlayers;
+  Hexcore2.sampleData.hexcoreAssignments = {
+    c1: take('blind', 'decompose-knowledge', 'order-swap'),
+    c2: take('giant-slayer', 'photographer', 'snow-cat'),
+    c3: take('demon-contract', 'elite-choice', 'blind'),
+    c4: take('origin', 'order-swap', 'decompose-knowledge'),
+    c5: take('ballroom-queen', 'photographer', 'snow-cat'),
+    c6: take('giant-slayer', 'blind', 'decompose-knowledge'),
+    c7: take('demon-contract', 'order-swap', 'photographer'),
+    c8: take('elite-choice', 'snow-cat', 'blind'),
+    c9: take('ballroom-queen', 'origin', 'decompose-knowledge'),
+    c10: take('giant-slayer', 'order-swap', 'photographer'),
   };
 })(window);

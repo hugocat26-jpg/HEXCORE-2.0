@@ -17,6 +17,21 @@
     'transmute-auric',
     'transmute-prismatic',
   ];
+  const goldModeDisabledHexcores = new Set([
+    'transmute-bronze',
+    'transmute-auric',
+    'transmute-prismatic',
+    'mystery-box',
+    'double-shot',
+    'last-stand',
+    'lock-contract',
+    'hellhound',
+    'elite-choice',
+    'pandora-box',
+    'snow-cat',
+    'steady',
+    'open-feast',
+  ]);
 
   function hasHexcore(captainId, hexcoreId) {
     return Hexcore2.selectors.isHexcoreEnabled(hexcoreId)
@@ -56,6 +71,10 @@
 
   Hexcore2.hexcoreEngine = {
     hasHexcore,
+
+    isDisabledInGoldMode(hexcoreId) {
+      return Hexcore2.state.settings.economyMode === 'gold_shop' && goldModeDisabledHexcores.has(hexcoreId);
+    },
 
     isDisabledByPandora(captainId, hexcoreId) {
       return hasHexcore(captainId, 'pandora-box') && pandoraDisabledHexcores.includes(hexcoreId);
@@ -132,6 +151,7 @@
 
       return hexcores.map((hex, index) => {
         const globallyDisabled = !Hexcore2.selectors.isHexcoreEnabled(hex.id);
+        const goldModeDisabled = this.isDisabledInGoldMode(hex.id);
         const pandoraDisabled = this.isDisabledByPandora(captain.id, hex.id);
         const blindUsed = hex.id === 'blind' && this.blindUsedBy(captain.id);
         const snowUsed = hex.id === 'snow-cat' && this.snowCatUsedBy(captain.id);
@@ -151,6 +171,13 @@
 
         if (globallyDisabled) {
           return blocked(base, '已禁用', '规则设置已禁用该海克斯，本轮不会执行。');
+        }
+        if (goldModeDisabled) {
+          return blocked(
+            { ...base, actionType: '金币模式禁用', actionLabel: '不可执行' },
+            '金币模式禁用',
+            '该海克斯会额外入队、免费入队、转队、补偿回合或改变选人数量，金币模式下暂不执行。'
+          );
         }
         if (pandoraDisabled) {
           return blocked(base, '潘多拉失效', '潘多拉魔盒禁用自主抽卡或选人类海克斯。');
@@ -269,6 +296,10 @@
       if (!hexcore || hexcore.mode === 'passive') return { ok: false };
       if (!Hexcore2.selectors.isHexcoreEnabled(hexcore.id)) {
         Hexcore2.eventStore.append('海克斯执行失败', `【${hexcore.name}】已被规则设置禁用`, 'warn');
+        return { ok: false };
+      }
+      if (this.isDisabledInGoldMode(hexcore.id)) {
+        Hexcore2.eventStore.append('海克斯执行失败', `【${hexcore.name}】属于入队型或额外选人型效果，金币模式下暂时禁用`, 'warn');
         return { ok: false };
       }
       if (hexcore.status === 'used' && hexcore.id !== 'blind' && hexcore.id !== 'snow-cat') return { ok: false };
@@ -533,7 +564,7 @@
           priority: 500,
           reason: `知识来源于分解：分析 ${player.name}，本轮显示战力顺位信息`,
         });
-        Hexcore2.eventStore.append('海克斯信息增强', `${captain.name} 使用【知识来源于分解】，分析已有选手「${player.name}」，本轮抽卡将显示战力顺位信息`, 'info');
+        Hexcore2.eventStore.append('海克斯信息增强', `${captain.name} 使用【知识来源于分解】，分析已有选手「${player.name}」，本轮商店将显示战力顺位信息`, 'info');
       }
 
       if (hexcore.id === 'lock-contract') {
@@ -603,6 +634,7 @@
     },
 
     resolveLockContracts(captainId, playerId) {
+      if (Hexcore2.state.settings.economyMode === 'gold_shop') return false;
       const state = Hexcore2.state;
       const captain = state.captains.find(item => item.id === captainId);
       if (!captain || captain.team.length >= Hexcore2.selectors.teamMemberCapacity(captainId)) return false;
@@ -628,6 +660,10 @@
     },
 
     grantCompensationTurn(captainId, reason) {
+      if (Hexcore2.state.settings.economyMode === 'gold_shop') {
+        Hexcore2.eventStore.append('补偿回合失败', '金币模式禁用额外补偿回合', 'warn', { reason });
+        return false;
+      }
       const state = Hexcore2.state;
       const captain = state.captains.find(item => item.id === captainId);
       if (!captain || captain.team.length >= Hexcore2.selectors.teamMemberCapacity(captainId)) return false;
@@ -702,6 +738,7 @@
     },
 
     extraDrawCount(captainId) {
+      if (Hexcore2.state.settings.economyMode === 'gold_shop') return 0;
       const tier = Hexcore2.poolEngine.effectiveTier(captainId);
       const passiveBonus = hasHexcore(captainId, 'elite-choice') && tier === 3 ? 1 : 0;
       const runtimeBonus = Hexcore2.state.draft.runtimeEffects
@@ -711,6 +748,7 @@
     },
 
     drawReasons(captainId) {
+      if (Hexcore2.state.settings.economyMode === 'gold_shop') return [];
       const tier = Hexcore2.poolEngine.effectiveTier(captainId);
       const reasons = [];
       if (hasHexcore(captainId, 'pandora-box')) {
@@ -726,6 +764,7 @@
     },
 
     autoAssignBeforeDraw(captainId) {
+      if (Hexcore2.state.settings.economyMode === 'gold_shop') return { handled: false };
       if (hasHexcore(captainId, 'last-stand') && [1, 2].includes(Hexcore2.state.draft.round)) {
         const tier = Hexcore2.poolEngine.effectiveTier(captainId);
         const assigned = Hexcore2.assignmentEngine.assignRandomFromTier(captainId, tier, 'last_stand_auto_assign');
@@ -764,6 +803,7 @@
     },
 
     drawOverrideBeforeDraw(captainId) {
+      if (Hexcore2.state.settings.economyMode === 'gold_shop') return { handled: false };
       if (!hasHexcore(captainId, 'last-stand') || Hexcore2.state.draft.round !== 4) {
         return { handled: false };
       }

@@ -34,6 +34,118 @@
     return captains.some(captain => captain.playerId === player.id);
   }
 
+  const RESULT_SCORE = {
+    '未参赛': 0,
+    '1轮游': 1,
+    '4强': 4,
+    '亚军': 7,
+    '冠军': 10,
+    FMVP: 12,
+  };
+
+  const RESULT_RANK = {
+    '未参赛': 0,
+    '1轮游': 1,
+    '4强': 2,
+    '亚军': 3,
+    '冠军': 4,
+    FMVP: 5,
+  };
+
+  function normalizeResultLabel(value) {
+    const text = String(value || '').trim();
+    if (['FMVP', 'fmvp', 'MVP'].includes(text)) return 'FMVP';
+    if (['冠军', '冠軍', 'champion'].includes(text)) return '冠军';
+    if (['亚军', '亞軍', 'runner-up', 'runnerup'].includes(text)) return '亚军';
+    if (['4强', '四强', '四強', 'top4', 'Top4'].includes(text)) return '4强';
+    if (['1轮游', '一轮游', '一輪遊', '首轮', '首輪'].includes(text)) return '1轮游';
+    return '未参赛';
+  }
+
+  function normalizeSeasonResults(value) {
+    const result = {};
+    if (Array.isArray(value)) {
+      value.slice(0, 6).forEach((item, index) => {
+        result[`s${index + 1}`] = normalizeResultLabel(item);
+      });
+    } else if (value && typeof value === 'object') {
+      for (let index = 1; index <= 6; index += 1) {
+        result[`s${index}`] = normalizeResultLabel(
+          value[`s${index}`]
+          || value[`S${index}`]
+          || value[`season${index}`]
+          || value[`第${index}届`]
+          || value[`第${index}屆`]
+        );
+      }
+    }
+    for (let index = 1; index <= 6; index += 1) {
+      if (!result[`s${index}`]) result[`s${index}`] = '未参赛';
+    }
+    return result;
+  }
+
+  function normalizeFmvpSeasons(item, seasonResults) {
+    const raw = item && (item.fmvpSeasons || item.FMVP届数 || item.fmvp || item.FMVP);
+    const source = Array.isArray(raw) ? raw : String(raw || '').split(/[，,、|/]/);
+    const seasons = source
+      .map(value => String(value || '').trim())
+      .filter(Boolean)
+      .map(value => value.replace(/^第?(\d+)届?$/u, 'S$1').toUpperCase());
+    Object.entries(seasonResults).forEach(([key, value]) => {
+      if (value === 'FMVP') seasons.push(key.toUpperCase());
+    });
+    return Array.from(new Set(seasons)).slice(0, 6);
+  }
+
+  function stableTieSeed(player) {
+    const text = `${player.gameId || ''}|${player.id || ''}|${player.name || ''}`;
+    let hash = 0;
+    for (let index = 0; index < text.length; index += 1) {
+      hash = ((hash << 5) - hash) + text.charCodeAt(index);
+      hash |= 0;
+    }
+    return Math.abs(hash);
+  }
+
+  function performanceMeta(player) {
+    const seasonResults = normalizeSeasonResults(player.seasonResults);
+    const results = Object.values(seasonResults);
+    const explicitScore = Number(player.resultScore);
+    const resultScore = Number.isFinite(explicitScore) && explicitScore > 0
+      ? Math.round(explicitScore)
+      : results.reduce((sum, result) => sum + (RESULT_SCORE[result] || 0), 0);
+    const latestResult = [...results].reverse().find(result => result && result !== '未参赛') || '未参赛';
+    return {
+      seasonResults,
+      resultScore,
+      tieBreakers: {
+        championCount: results.filter(result => result === '冠军' || result === 'FMVP').length,
+        runnerUpCount: results.filter(result => result === '亚军').length,
+        top4Count: results.filter(result => ['4强', '亚军', '冠军', 'FMVP'].includes(result)).length,
+        appearanceCount: results.filter(result => result !== '未参赛').length,
+        latestResultRank: RESULT_RANK[latestResult] || 0,
+      },
+    };
+  }
+
+  function compareByOfficialTier(a, b) {
+    const scoreDiff = (Number(b.resultScore) || 0) - (Number(a.resultScore) || 0);
+    if (scoreDiff) return scoreDiff;
+    const aTie = a.tieBreakers || {};
+    const bTie = b.tieBreakers || {};
+    const keys = ['championCount', 'runnerUpCount', 'top4Count', 'appearanceCount', 'latestResultRank'];
+    for (const key of keys) {
+      const diff = (Number(bTie[key]) || 0) - (Number(aTie[key]) || 0);
+      if (diff) return diff;
+    }
+    return (Number(a.tieSeed) || 0) - (Number(b.tieSeed) || 0);
+  }
+
+  function isHistoricalFmvp(player) {
+    return Boolean(player && (player.isFmvp || (Array.isArray(player.fmvpSeasons) && player.fmvpSeasons.length)));
+  }
+
   function rebalancePlayerTiers(captains, players) {
     const regularPlayers = [];
     players.forEach(player => {
@@ -47,13 +159,27 @@
       }
     });
 
+    const fmvpPlayers = regularPlayers
+      .filter(isHistoricalFmvp)
+      .sort(compareByOfficialTier)
+      .slice(0, 6);
+    const fiveFeeIds = new Set(fmvpPlayers.map(player => player.id));
+    fmvpPlayers.forEach(player => {
+      player.tier = 5;
+    });
+
     const sorted = regularPlayers
-      .slice()
-      .sort((a, b) => (Number(b.score) || 0) - (Number(a.score) || 0) || String(a.id).localeCompare(String(b.id)));
-    const total = Math.max(1, sorted.length);
+      .filter(player => !fiveFeeIds.has(player.id))
+      .sort(compareByOfficialTier);
+    const total = sorted.length;
+    const fourFeeCount = Math.round(total * 0.15);
+    const threeFeeCount = Math.round(total * 0.25);
+    const twoFeeCount = Math.round(total * 0.35);
     sorted.forEach((player, index) => {
-      const band = Math.floor((index * 4) / total);
-      player.tier = Math.max(1, Math.min(4, 4 - band));
+      if (index < fourFeeCount) player.tier = 4;
+      else if (index < fourFeeCount + threeFeeCount) player.tier = 3;
+      else if (index < fourFeeCount + threeFeeCount + twoFeeCount) player.tier = 2;
+      else player.tier = 1;
     });
   }
 
@@ -64,6 +190,7 @@
   }
 
   const SAFE_ID_PATTERN = /^[A-Za-z0-9_-]{1,48}$/;
+  const OFFICIAL_PLAYER_LIMIT = 50;
 
   function sanitizeText(value, fallback, maxLength) {
     const text = String(value ?? fallback ?? '').trim();
@@ -90,20 +217,23 @@
   function sanitizePlayers(players, playerIdMap) {
     const source = Array.isArray(players) ? players : clone(defaultState.players);
     const usedIds = new Set();
-    return source.slice(0, 600).map((player, index) => {
+    return source.slice(0, OFFICIAL_PLAYER_LIMIT).map((player, index) => {
       const item = player && typeof player === 'object' ? player : {};
       const oldId = String(item.id ?? '').trim();
       const id = safeId(oldId, `p${index + 1}`, usedIds);
       if (oldId) playerIdMap.set(oldId, id);
       playerIdMap.set(id, id);
       const status = ['available', 'drafted', 'disabled', 'captain'].includes(item.status) ? item.status : 'available';
+      const meta = performanceMeta(item);
+      const seasonResults = meta.seasonResults;
+      const fmvpSeasons = normalizeFmvpSeasons(item, seasonResults);
       const normalized = {
         id,
         lane: sanitizeText(item.lane, '未分配', 16),
         name: sanitizeText(item.name, `选手${index + 1}`, 32),
         gameId: sanitizeText(item.gameId, id, 40),
         score: clampNumber(item.score, 0, 120, 60),
-        tier: clampNumber(item.tier, 0, 4, 1),
+        tier: clampNumber(item.tier, 0, 5, 1),
         kda: sanitizeText(item.kda, '0.0', 12),
         damage: sanitizeText(item.damage, '0K', 12),
         winRate: sanitizeText(item.winRate, '0%', 12),
@@ -114,10 +244,40 @@
         status,
         teamId: sanitizeText(item.teamId, '', 48),
         isCaptain: Boolean(item.isCaptain),
+        isFmvp: Boolean(item.isFmvp || fmvpSeasons.length),
+        fmvpSeasons,
+        seasonResults,
+        resultScore: meta.resultScore || clampNumber(item.score, 0, 120, 60),
+        tieBreakers: meta.tieBreakers,
+        tieSeed: Number.isFinite(Number(item.tieSeed)) ? Number(item.tieSeed) : stableTieSeed({ ...item, id }),
         role: item.role === 'captain' ? 'captain' : undefined,
       };
       return player && typeof player === 'object' ? Object.assign(player, normalized) : normalized;
     });
+  }
+
+  function normalizeCaptainEconomy(economy) {
+    const source = economy && typeof economy === 'object' ? economy : {};
+    const roundStateSource = source.roundState && typeof source.roundState === 'object' ? source.roundState : {};
+    const roundState = {};
+    for (let round = 1; round <= 4; round += 1) {
+      const item = roundStateSource[round] || roundStateSource[String(round)] || {};
+      roundState[round] = {
+        freeShopUsed: Boolean(item.freeShopUsed),
+        refreshCount: clampNumber(item.refreshCount, 0, 99, 0),
+        purchaseUsed: Boolean(item.purchaseUsed),
+        skipped: Boolean(item.skipped),
+      };
+    }
+    return {
+      gold: clampNumber(source.gold, 0, 999, defaultState.settings.initialGold),
+      incomeAppliedRounds: Array.isArray(source.incomeAppliedRounds)
+        ? source.incomeAppliedRounds
+          .map(round => clampNumber(round, 1, 4, 1))
+          .filter((round, index, all) => all.indexOf(round) === index)
+        : [1],
+      roundState,
+    };
   }
 
   function sanitizeCaptains(captains, captainIdMap, playerIdMap, playersPerTeam) {
@@ -143,6 +303,7 @@
           .slice(0, memberCapacity),
         playerId: captainPlayerId,
         playerGameId: captainGameId,
+        economy: normalizeCaptainEconomy(item.economy),
       };
       return captain && typeof captain === 'object' ? Object.assign(captain, normalized) : normalized;
     });
@@ -190,13 +351,15 @@
         ...item,
         playerId: remapId(item.playerId, playerIdMap),
         displayPlayerId: remapId(item.displayPlayerId, playerIdMap) || remapId(item.playerId, playerIdMap),
+        tier: clampNumber(item.tier, 1, 5, 1),
+        price: clampNumber(item.price, 1, 5, item.tier || 1),
       };
     }).filter(card => card.playerId);
 
     const currentDrawSource = source.currentDraw && typeof source.currentDraw === 'object'
       ? source.currentDraw
       : null;
-    const allowedPickModes = new Set(['normal', 'open_pick', 'blind_box', 'mystery_swap', 'hellhound']);
+    const allowedPickModes = new Set(['normal', 'shop', 'open_pick', 'blind_box', 'mystery_swap', 'hellhound']);
     const pickMode = currentDrawSource
       ? sanitizeText(currentDrawSource.pickMode, 'normal', 32)
       : 'normal';
@@ -205,11 +368,13 @@
         id: sanitizeText(currentDrawSource.id, `draw_${Date.now()}`, 48),
         captainId: remapCaptain(currentDrawSource.captainId),
         round: clampNumber(currentDrawSource.round, 1, 8, source.round || defaultState.draft.round),
-        tier: clampNumber(currentDrawSource.tier, 1, 4, 1),
-        effectiveTier: clampNumber(currentDrawSource.effectiveTier, 1, 4, currentDrawSource.tier || 1),
+        tier: clampNumber(currentDrawSource.tier, 1, 5, 1),
+        effectiveTier: clampNumber(currentDrawSource.effectiveTier, 1, 5, currentDrawSource.tier || 1),
         cards: normalizeCards(currentDrawSource.cards),
         reason: sanitizeText(currentDrawSource.reason, '', 120),
         pickMode: allowedPickModes.has(pickMode) ? pickMode : 'normal',
+        generatedBy: sanitizeText(currentDrawSource.generatedBy, 'free_shop', 32),
+        refreshCostPaid: clampNumber(currentDrawSource.refreshCostPaid, 0, 4, 0),
         timeoutEndsAt: currentDrawSource.timeoutEndsAt ? clampNumber(currentDrawSource.timeoutEndsAt, 0, Number.MAX_SAFE_INTEGER, 0) : undefined,
         timeoutPausedRemainingMs: currentDrawSource.timeoutPausedRemainingMs ? clampNumber(currentDrawSource.timeoutPausedRemainingMs, 0, 300000, 0) : undefined,
         timeLimitSeconds: currentDrawSource.timeLimitSeconds ? clampNumber(currentDrawSource.timeLimitSeconds, 1, 300, defaultState.settings.pickTimeoutSeconds) : undefined,
@@ -244,6 +409,7 @@
       explanations: [],
       pickedThisTurn: Boolean(source.pickedThisTurn),
       paused: Boolean(source.paused),
+      finalFillCompleted: Boolean(source.finalFillCompleted),
     };
   }
 
@@ -251,7 +417,7 @@
     const source = template && typeof template === 'object' ? template : {};
     const maxRounds = clampNumber(source.maxRounds, 1, 8, defaultState.draft.maxRounds);
     const roundTiers = Array.isArray(source.roundTiers)
-      ? source.roundTiers.slice(0, maxRounds).map(tier => clampNumber(tier, 1, 4, 1))
+      ? source.roundTiers.slice(0, maxRounds).map(tier => clampNumber(tier, 1, 5, 1))
       : [...defaultState.settings.roundTiers].slice(0, maxRounds);
     while (roundTiers.length < maxRounds) {
       roundTiers.push(Math.min(4, roundTiers.length + 1));
@@ -274,7 +440,7 @@
 
   function normalizeTierNames(tierNames) {
     const source = tierNames && typeof tierNames === 'object' ? tierNames : {};
-    return [0, 1, 2, 3, 4].reduce((result, tier) => {
+    return [0, 1, 2, 3, 4, 5].reduce((result, tier) => {
       const fallback = defaultState.settings.tierNames[tier];
       const value = String(source[tier] || fallback).trim().slice(0, 12);
       result[tier] = value || fallback;
@@ -310,18 +476,23 @@
     settings: {
       minTeams: 5,
       maxTeams: 20,
-      totalTeams: seed.captains.length,
+      totalTeams: Math.min(10, seed.captains.length),
       playersPerTeam: 4,
-      drawCount: 3,
+      drawCount: 5,
+      shopSize: 5,
+      economyMode: 'gold_shop',
+      initialGold: 6,
+      roundIncome: 3,
+      refreshCosts: [1, 2, 3, 4],
       pickTimeoutSeconds: 30,
       roundTiers: [1, 2, 3, 4],
       autoRandomStrategy: 'balanced',
       timeoutStrategy: 'random_available',
       disabledHexcores: [],
       ruleTemplates: [],
-      tierNames: { 0: '队长专属', 1: '侏儒马', 2: '中等马', 3: '上等马', 4: '猛犸' },
+      tierNames: { 0: '队长专属', 1: '1费基础', 2: '2费轮换', 3: '3费主力', 4: '4费顶配', 5: '5费FMVP' },
     },
-    captains: clone(seed.captains),
+    captains: clone(seed.captains.slice(0, 10)),
     players: clone(seed.players),
     hexcoreAssignments: clone(seed.hexcoreAssignments || { c7: seed.hexcores }),
     hexcoreDraft: {
@@ -334,17 +505,18 @@
     },
     draft: {
       phase: 'captain_action',
-      round: 2,
+      round: 1,
       maxRounds: 4,
-      baseOrder: seed.captains.map(captain => captain.id),
-      currentOrder: seed.captains.map(captain => captain.id),
-      currentIndex: 6,
-      selectedSlot: 1,
+      baseOrder: seed.captains.slice(0, 10).map(captain => captain.id),
+      currentOrder: seed.captains.slice(0, 10).map(captain => captain.id),
+      currentIndex: 0,
+      selectedSlot: 0,
       currentDraw: null,
       runtimeEffects: [],
       explanations: [],
       pickedThisTurn: false,
       paused: false,
+      finalFillCompleted: false,
     },
     events: [],
     tournament: {
@@ -362,15 +534,23 @@
 
   Hexcore2.normalizeState = function normalizeState(state) {
     if (!state || typeof state !== 'object') state = clone(defaultState);
+    const legacyNoGoldState = !state.settings || state.settings.economyMode !== 'gold_shop';
     state.settings = state.settings || clone(defaultState.settings);
     state.settings.tierNames = normalizeTierNames(state.settings.tierNames);
     state.settings.minTeams = clampNumber(state.settings.minTeams, 5, 20, defaultState.settings.minTeams);
     state.settings.maxTeams = clampNumber(state.settings.maxTeams, state.settings.minTeams, 20, defaultState.settings.maxTeams);
     state.settings.playersPerTeam = clampNumber(state.settings.playersPerTeam, 1, 8, defaultState.settings.playersPerTeam);
     state.settings.drawCount = clampNumber(state.settings.drawCount, 1, 8, defaultState.settings.drawCount);
+    state.settings.shopSize = clampNumber(state.settings.shopSize, 1, 5, defaultState.settings.shopSize);
+    state.settings.economyMode = 'gold_shop';
+    state.settings.initialGold = clampNumber(state.settings.initialGold, 0, 99, defaultState.settings.initialGold);
+    state.settings.roundIncome = clampNumber(state.settings.roundIncome, 0, 99, defaultState.settings.roundIncome);
+    state.settings.refreshCosts = Array.isArray(state.settings.refreshCosts) && state.settings.refreshCosts.length
+      ? state.settings.refreshCosts.slice(0, 4).map(cost => clampNumber(cost, 1, 4, 1))
+      : [...defaultState.settings.refreshCosts];
     state.settings.pickTimeoutSeconds = clampNumber(state.settings.pickTimeoutSeconds, 1, 300, defaultState.settings.pickTimeoutSeconds);
     state.settings.roundTiers = Array.isArray(state.settings.roundTiers) && state.settings.roundTiers.length
-      ? state.settings.roundTiers.map(tier => Math.max(1, Math.min(4, Number(tier) || 1)))
+      ? state.settings.roundTiers.map(tier => Math.max(1, Math.min(5, Number(tier) || 1)))
       : [...defaultState.settings.roundTiers];
     state.settings.autoRandomStrategy = state.settings.autoRandomStrategy || defaultState.settings.autoRandomStrategy;
     state.settings.timeoutStrategy = state.settings.timeoutStrategy || defaultState.settings.timeoutStrategy;
@@ -383,6 +563,27 @@
     const playerIdMap = new Map();
     state.players = sanitizePlayers(state.players, playerIdMap);
     state.captains = sanitizeCaptains(state.captains, captainIdMap, playerIdMap, state.settings.playersPerTeam);
+    if (legacyNoGoldState && !state.legacyNoGoldBackup) {
+      state.legacyNoGoldBackup = {
+        migratedAt: new Date().toISOString(),
+        captains: clone(state.captains.map(captain => ({ id: captain.id, name: captain.name, team: captain.team }))),
+        draft: clone(state.draft || {}),
+      };
+      state.captains.forEach(captain => {
+        captain.team = [];
+      });
+      state.players.forEach(player => {
+        if (player.status === 'drafted') {
+          player.status = 'available';
+          delete player.teamId;
+        }
+      });
+      state.draft = {
+        ...clone(defaultState.draft),
+        baseOrder: state.captains.map(captain => captain.id),
+        currentOrder: state.captains.map(captain => captain.id),
+      };
+    }
     state.settings.totalTeams = state.captains.length;
     reconcilePlayerTeamIds(state.captains, state.players);
     rebalancePlayerTiers(state.captains, state.players);
@@ -405,7 +606,7 @@
       state.draft.currentIndex = Math.max(0, state.draft.currentOrder.length - 1);
     }
     state.draft.baseOrder = reconcileBaseOrder(state.captains, state.draft.baseOrder);
-    state.draft.maxRounds = clampNumber(state.draft.maxRounds, 1, 8, defaultState.draft.maxRounds);
+    state.draft.maxRounds = clampNumber(state.draft.maxRounds, 4, 4, defaultState.draft.maxRounds);
     state.draft.round = clampNumber(state.draft.round, 1, state.draft.maxRounds, defaultState.draft.round);
     if (state.settings.roundTiers.length < state.draft.maxRounds) {
       while (state.settings.roundTiers.length < state.draft.maxRounds) {
@@ -479,7 +680,7 @@
     roundTier(round) {
       const tiers = Hexcore2.state.settings.roundTiers || [1, 2, 3, 4];
       const tier = tiers[Math.max(0, Number(round) - 1)] || Math.min(4, Number(round) || 1);
-      return Math.max(1, Math.min(4, Number(tier) || 1));
+      return Math.max(1, Math.min(5, Number(tier) || 1));
     },
     workflowChecklist() {
       const state = Hexcore2.state;
@@ -507,8 +708,8 @@
       const openSlots = state.captains.reduce((sum, captain) => (
         sum + Math.max(0, Hexcore2.selectors.teamMemberCapacity(captain.id) - captain.team.length)
       ), 0);
-      const availablePlayers = state.players.filter(player => player.status === 'available' && player.tier >= 1 && player.tier <= 4);
-      const tierCounts = [1, 2, 3, 4].map(tier => ({
+      const availablePlayers = state.players.filter(player => player.status === 'available' && player.tier >= 1 && player.tier <= 5);
+      const tierCounts = [1, 2, 3, 4, 5].map(tier => ({
         tier,
         name: state.settings.tierNames[tier],
         count: availablePlayers.filter(player => player.tier === tier).length,
@@ -563,7 +764,7 @@
           status: weakTiers.length ? 'warn' : 'pass',
           detail: weakTiers.length
             ? `${weakTiers.map(item => `${item.name}${item.count}`).join('、')}，低于当前队伍数`
-            : '四档卡池数量均不低于当前队伍数',
+            : '费用卡池数量满足当前队伍规模',
           view: 'players',
         },
       ];
