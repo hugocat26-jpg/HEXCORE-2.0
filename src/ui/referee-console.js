@@ -57,6 +57,53 @@
     return ['info', 'draw', 'warn', 'success'].includes(level) ? level : 'info';
   }
 
+  function currentTheme() {
+    const theme = Hexcore2.state.ui && Hexcore2.state.ui.theme;
+    return ['default', 'neon', 'apple'].includes(theme) ? theme : 'default';
+  }
+
+  function applyTheme() {
+    if (!document || !document.documentElement) return;
+    document.documentElement.dataset.theme = currentTheme();
+  }
+
+  function hexcoreKindLabel(hexcore) {
+    if (hexcore.mode === 'passive') return '策略';
+    return '特殊';
+  }
+
+  function hexcoreTierLabel(hexcore) {
+    const labels = { cyan: '白银', amber: '黄金', violet: '棱彩' };
+    return labels[hexcore.type] || '海克斯';
+  }
+
+  function hexcoreGlyph(hexcore) {
+    const glyphs = {
+      'transmute-bronze': '&#10024;',
+      'transmute-auric': '&#10024;',
+      'transmute-prismatic': '&#10024;',
+      origin: '&#128160;',
+      'mystery-box': '&#127873;',
+      blind: '&#127919;',
+      'double-shot': '&#9889;',
+      'last-stand': '&#128737;&#65039;',
+      'lock-contract': '&#128279;',
+      hellhound: '&#128293;',
+      'elite-choice': '&#11088;',
+      'giant-slayer': '&#128481;&#65039;',
+      'ballroom-queen': '&#128081;',
+      'demon-contract': '&#128220;',
+      'decompose-knowledge': '&#128269;',
+      'pandora-box': '&#127873;',
+      'snow-cat': '&#10052;&#65039;',
+      steady: '&#9878;&#65039;',
+      'open-feast': '&#127860;',
+      photographer: '&#128247;',
+      'order-swap': '&#8644;',
+    };
+    return glyphs[hexcore.id] || '&#10022;';
+  }
+
   function sidebar() {
     const icon = Hexcore2.icon;
     const teamCount = Hexcore2.selectors.teamCount();
@@ -190,7 +237,7 @@
     return `
       <header class="topbar">
         <div class="mode">裁判代执行</div>
-        <div class="phase">当前阶段：<strong>第 ${Hexcore2.state.draft.round} 轮 / ${tierName}池</strong></div>
+        <div class="phase">当前阶段：<strong>第 ${Hexcore2.state.draft.round} 轮 / ${escapeHtml(tierName)}池</strong></div>
         <div class="captain-title">当前队长：<strong>${captain ? escapeHtml(captain.name) : '无'}</strong></div>
         <div class="top-spacer"></div>
         <div class="live-status ${Hexcore2.state.draft.phase === 'completed' ? 'done' : ''}"><span></span>${statusText}</div>
@@ -297,7 +344,7 @@
             </button>
           `).join('')}
         </div>
-        <p class="hint">提示：${captain ? `${draw && draw.pickMode === 'open_pick' ? '开饭啦已展开当前池全部可选选手，' : ''}${draw && draw.pickMode === 'hellhound' ? `本段限时 ${draw.timeLimitSeconds} 秒，超时可随机分配，` : ''}请选择一名选手加入 ${escapeHtml(captain.name)} 的队伍（${Hexcore2.selectors.teamSize(captain.id)}/${Hexcore2.state.settings.playersPerTeam}）` : '当前没有可操作队长'}</p>
+        <p class="hint">提示：${captain ? `${draw && draw.pickMode === 'open_pick' ? '开饭啦已展开当前池全部可选选手，' : ''}${draw && draw.pickMode === 'hellhound' ? `本段限时 ${escapeHtml(draw.timeLimitSeconds)} 秒，超时可随机分配，` : ''}请选择一名选手加入 ${escapeHtml(captain.name)} 的队伍（${Hexcore2.selectors.teamSize(captain.id)}/${Hexcore2.state.settings.playersPerTeam}）` : '当前没有可操作队长'}</p>
       </section>
     `;
   }
@@ -483,7 +530,7 @@
           <h2>队伍阵容概览（${teamCount} 队）</h2>
           <div><span class="filled-dot"></span>已选 <span class="empty-dot"></span>空位</div>
         </div>
-        <div class="roster-list" style="grid-template-columns: repeat(${teamCount}, minmax(120px, 1fr));">
+        <div class="roster-list">
           ${Hexcore2.state.captains.map((captain, index) => `
             <div class="team-mini ${currentCaptain && captain.id === currentCaptain.id ? 'active' : ''}">
               <div><span>${index + 1}</span><strong>${escapeHtml(captain.name)}</strong></div>
@@ -782,8 +829,8 @@
               <option value="violet" ${hexFilter === 'violet' ? 'selected' : ''}>棱彩/强力</option>
             </select>
             <button class="primary-btn" onclick='window.hexcoreUI.drawHexcoreForCaptain(${safeJsonString(selectedCaptain ? selectedCaptain.id : '')})'>${Hexcore2.icon('hex')}抽取 3 个候选</button>
-            <button class="subtle-btn" onclick="window.hexcoreUI.randomizeHexcoreDrawOrder()">制定抽取顺序</button>
-            <button class="danger-inline" onclick="window.hexcoreUI.resetAllHexcores()">重置所有海克斯</button>
+            <button class="primary-btn" onclick="window.hexcoreUI.randomizeHexcoreDrawOrder()">${Hexcore2.icon('refresh')}制定抽取顺序</button>
+            <button class="primary-btn" onclick="window.hexcoreUI.resetAllHexcores()">${Hexcore2.icon('undo')}重置所有海克斯</button>
           </div>
         </div>
         ${drawOrder.length ? `
@@ -799,7 +846,7 @@
           ${activeSession ? `
             <div class="hex-session-head">
               <strong>${escapeHtml(selectedCaptain.name)} 已拥有 ${ownedHexcores.length}/3，还需选 ${Math.max(0, 3 - ownedHexcores.length)} 个</strong>
-              <button class="danger-inline" onclick="window.hexcoreUI.cancelHexcoreDraw()">取消本次抽取</button>
+              <button class="primary-btn" onclick="window.hexcoreUI.cancelHexcoreDraw()">${Hexcore2.icon('undo')}取消本次抽取</button>
             </div>
             <div class="hex-draw-slots">
               ${session.slots.map((hexcoreId, index) => {
@@ -807,10 +854,18 @@
                 if (!hex) return '';
                 return `
                   <article class="hex-draw-card ${escapeHtml(hex.type)}">
-                    <button class="hex-refresh-btn" ${session.refreshUsed ? 'disabled' : ''} onclick="window.hexcoreUI.refreshHexcoreSlot(${index})">刷新</button>
-                    <div><strong>${escapeHtml(hex.name)}</strong><span>${hex.mode === 'passive' ? '被动自动' : '裁判手动'}</span></div>
+                    <div class="hex-draw-badges">
+                      <span class="hex-kind-badge">${hexcoreKindLabel(hex)}</span>
+                      <span class="hex-tier-pill">${hexcoreTierLabel(hex)}</span>
+                    </div>
+                    <div class="hex-card-figure" aria-hidden="true">${hexcoreGlyph(hex)}</div>
+                    <h3>${escapeHtml(hex.name)}</h3>
                     <p>${escapeHtml(hex.desc)}</p>
-                    <button class="primary-btn" onclick='window.hexcoreUI.selectHexcoreFromDraw(${safeJsonString(selectedCaptain.id)}, ${safeJsonString(hex.id)})'>选择这个海克斯</button>
+                    <div class="hex-execution-note">▲ ${hex.mode === 'passive' ? '被动自动生效' : '需要裁判执行'}</div>
+                    <div class="hex-draw-actions">
+                      <button class="hex-refresh-btn" ${session.refreshUsed ? 'disabled' : ''} onclick="window.hexcoreUI.refreshHexcoreSlot(${index})">换一张</button>
+                      <button class="primary-btn hex-select-btn" onclick='window.hexcoreUI.selectHexcoreFromDraw(${safeJsonString(selectedCaptain.id)}, ${safeJsonString(hex.id)})'>选择此海克斯</button>
+                    </div>
                   </article>
                 `;
               }).join('')}
@@ -965,6 +1020,12 @@
   function rulesPage() {
     const tierOptions = [1, 2, 3, 4].map(tier => `<option value="${tier}">${escapeHtml(Hexcore2.state.settings.tierNames[tier])}</option>`).join('');
     const disabledHexcores = new Set(Hexcore2.state.settings.disabledHexcores || []);
+    const tierNameFields = [0, 1, 2, 3, 4].map(tier => `
+      <label>
+        <span>${tier === 0 ? '队长卡池名称' : `第 ${tier} 档卡池名称`}</span>
+        <input id="rules-tier-name-${tier}" maxlength="12" value="${escapeHtml(Hexcore2.state.settings.tierNames[tier])}">
+      </label>
+    `).join('');
     return `
       ${pageHeader('规则设置', '当前版本固定为裁判代执行，保留多人登录鉴权与队长自抽扩展口。')}
       <section class="data-panel">
@@ -1007,6 +1068,12 @@
           </label>
           <button class="primary-btn" onclick="window.hexcoreUI.updateRules()">保存规则并重算流程</button>
           <button class="subtle-btn" onclick="window.hexcoreUI.saveRuleTemplate()">保存为模板</button>
+        </div>
+        <div class="tier-name-editor">
+          <h2>卡池名称</h2>
+          <div class="tier-name-grid">
+            ${tierNameFields}
+          </div>
         </div>
         <div class="round-tier-editor">
           <h2>每轮卡池顺序</h2>
@@ -1078,6 +1145,7 @@
     const lastEvent = Hexcore2.state.events[0];
     const meta = Hexcore2.storageService && Hexcore2.storageService.getMeta ? Hexcore2.storageService.getMeta() : null;
     const lastSaved = meta && meta.savedAt ? new Date(meta.savedAt).toLocaleString('zh-CN', { hour12: false }) : '暂无保存记录';
+    const theme = currentTheme();
     return `
       ${pageHeader('系统设置', '本地裁判端状态备份、导入和重置。部署访问请使用 npm start 或静态 HTTP 服务。')}
       <section class="data-panel system-summary">
@@ -1086,6 +1154,29 @@
         <div><span>撤销快照</span><strong>${(Hexcore2.state.undoStack || []).length}</strong></div>
         <div><span>最近事件</span><strong>${lastEvent ? escapeHtml(lastEvent.title) : '暂无'}</strong></div>
         <div><span>最后保存</span><strong>${escapeHtml(lastSaved)}</strong></div>
+      </section>
+      <section class="data-panel theme-settings">
+        <div>
+          <h2>界面主题</h2>
+          <p>只切换颜色、阴影和卡片质感，保持当前页面布局不变。</p>
+        </div>
+        <div class="theme-choice-grid" role="radiogroup" aria-label="界面主题">
+          <button class="theme-choice default ${theme === 'default' ? 'active' : ''}" aria-pressed="${theme === 'default'}" onclick="window.hexcoreUI.setTheme('default')">
+            <span></span>
+            <strong>默认</strong>
+            <em>当前控制台风格</em>
+          </button>
+          <button class="theme-choice neon ${theme === 'neon' ? 'active' : ''}" aria-pressed="${theme === 'neon'}" onclick="window.hexcoreUI.setTheme('neon')">
+            <span></span>
+            <strong>霓虹游戏风</strong>
+            <em>深蓝紫电竞质感</em>
+          </button>
+          <button class="theme-choice apple ${theme === 'apple' ? 'active' : ''}" aria-pressed="${theme === 'apple'}" onclick="window.hexcoreUI.setTheme('apple')">
+            <span></span>
+            <strong>Apple 浅色</strong>
+            <em>清爽磨砂质感</em>
+          </button>
+        </div>
       </section>
       <section class="data-panel settings-actions">
         <button class="primary-btn" onclick="window.hexcoreUI.runSystemCheck()">运行状态检查</button>
@@ -1144,6 +1235,7 @@
 
   Hexcore2.ui = {
     render() {
+      applyTheme();
       document.getElementById('app').innerHTML = app();
     },
   };

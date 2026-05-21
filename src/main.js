@@ -559,6 +559,14 @@
       renderAndPersist();
     },
 
+    setTheme(theme) {
+      const nextTheme = ['default', 'neon', 'apple'].includes(theme) ? theme : 'default';
+      Hexcore2.state.ui = Hexcore2.state.ui || {};
+      if (Hexcore2.state.ui.theme === nextTheme) return;
+      Hexcore2.state.ui.theme = nextTheme;
+      renderAndPersist();
+    },
+
     drawHexcoreForCurrentCaptain() {
       const captain = Hexcore2.selectors.currentCaptain();
       return this.drawHexcoreForCaptain(captain ? captain.id : '');
@@ -680,10 +688,19 @@
     randomizeHexcoreDrawOrder() {
       snapshot('制定海克斯抽取顺序前');
       Hexcore2.state.hexcoreDraft = Hexcore2.state.hexcoreDraft || {};
-      Hexcore2.state.hexcoreDraft.drawOrder = [...Hexcore2.state.captains]
+      const drawOrder = [...Hexcore2.state.captains]
         .sort(() => Math.random() - 0.5)
         .map(captain => captain.id);
-      Hexcore2.eventStore.append('海克斯抽取顺序', '裁判随机生成队长海克斯抽取顺序', 'success');
+      Hexcore2.state.hexcoreAssignments = {};
+      Hexcore2.state.captains.forEach(captain => {
+        Hexcore2.state.hexcoreAssignments[captain.id] = [];
+      });
+      resetHexcoreSession();
+      Hexcore2.state.hexcoreDraft.drawOrder = drawOrder;
+      Hexcore2.state.draft.runtimeEffects = [];
+      Hexcore2.state.ui = Hexcore2.state.ui || {};
+      Hexcore2.state.ui.hexCaptainId = drawOrder[0] || '';
+      Hexcore2.eventStore.append('海克斯抽取顺序', '裁判已清空所有队长海克斯，随机生成抽取顺序，并切换到第一顺位队长', 'success');
       renderAndPersist();
     },
 
@@ -1098,6 +1115,13 @@
         const input = document.getElementById(`rules-round-tier-${index + 1}`);
         return Number(input && input.value) || Hexcore2.selectors.roundTier(index + 1);
       });
+      const tierNames = [0, 1, 2, 3, 4].reduce((result, tier) => {
+        const input = document.getElementById(`rules-tier-name-${tier}`);
+        const fallback = Hexcore2.state.settings.tierNames[tier] || '';
+        const value = String((input && input.value) || fallback).trim().slice(0, 12);
+        result[tier] = value;
+        return result;
+      }, {});
 
       if (!Number.isInteger(teamCount) || teamCount < minTeams || teamCount > maxTeams) {
         Hexcore2.eventStore.append('规则保存失败', `队伍数量必须在 ${minTeams}-${maxTeams} 之间`, 'warn');
@@ -1126,6 +1150,11 @@
       }
       if (roundTiers.some(tier => !Number.isInteger(tier) || tier < 1 || tier > 4)) {
         Hexcore2.eventStore.append('规则保存失败', '每轮卡池必须在 1-4 之间', 'warn');
+        Hexcore2.ui.render();
+        return;
+      }
+      if ([0, 1, 2, 3, 4].some(tier => !tierNames[tier])) {
+        Hexcore2.eventStore.append('规则保存失败', '卡池名称不能为空', 'warn');
         Hexcore2.ui.render();
         return;
       }
@@ -1158,6 +1187,7 @@
       Hexcore2.state.settings.playersPerTeam = playersPerTeam;
       Hexcore2.state.settings.drawCount = nextDrawCount;
       Hexcore2.state.settings.roundTiers = roundTiers;
+      Hexcore2.state.settings.tierNames = tierNames;
       Hexcore2.state.settings.autoRandomStrategy = (autoRandomStrategyInput && autoRandomStrategyInput.value) || Hexcore2.state.settings.autoRandomStrategy;
       Hexcore2.state.settings.timeoutStrategy = (timeoutStrategyInput && timeoutStrategyInput.value) || Hexcore2.state.settings.timeoutStrategy;
       Hexcore2.state.draft.round = round;
@@ -1199,6 +1229,7 @@
         maxRounds: Hexcore2.state.draft.maxRounds,
         drawCount: Hexcore2.state.settings.drawCount,
         roundTiers: [...Hexcore2.state.settings.roundTiers],
+        tierNames: { ...Hexcore2.state.settings.tierNames },
         disabledHexcores: [...Hexcore2.state.settings.disabledHexcores],
       });
       Hexcore2.state.settings.ruleTemplates = Hexcore2.state.settings.ruleTemplates.slice(0, 8);

@@ -344,6 +344,7 @@ function testUiNavigationAndHexButtons() {
   assert(app.innerHTML.includes('新增队伍') && app.innerHTML.includes('saveCaptainName') && app.innerHTML.includes('待指定队长'), '队伍管理页面应提供实质操作，并对空队伍显示待指定队长');
   H.actions.setActiveView('rules');
   assert(app.innerHTML.includes('保存规则并重算流程'), '规则设置页面应提供保存入口');
+  assert(app.innerHTML.includes('卡池名称') && app.innerHTML.includes('rules-tier-name-4'), '规则设置页面应支持自定义卡池名称');
   assert(!app.innerHTML.includes('旧购买逻辑') && !app.innerHTML.includes('资源购买卡牌'), '规则设置不应显示旧购买逻辑说明');
   elements['captain-name-c1'] = { value: 'C1 回归改名' };
   H.actions.saveCaptainName('c1');
@@ -358,6 +359,11 @@ function testUiNavigationAndHexButtons() {
   elements['rules-draw-count'] = { value: '4' };
   elements['rules-auto-random-strategy'] = { value: 'top_scored' };
   elements['rules-timeout-strategy'] = { value: 'highest_score' };
+  elements['rules-tier-name-0'] = { value: '队长' };
+  elements['rules-tier-name-1'] = { value: '幼马' };
+  elements['rules-tier-name-2'] = { value: '战马' };
+  elements['rules-tier-name-3'] = { value: '烈马' };
+  elements['rules-tier-name-4'] = { value: '神兽' };
   elements['rules-round-tier-1'] = { value: '1' };
   elements['rules-round-tier-2'] = { value: '2' };
   elements['rules-round-tier-3'] = { value: '4' };
@@ -367,6 +373,9 @@ function testUiNavigationAndHexButtons() {
   assert(H.state.draft.round === 3, '规则设置应能调整当前轮次');
   assert(H.state.settings.drawCount === 4, '规则设置应能调整基础抽卡张数');
   assert(H.selectors.roundTier(3) === 4, '规则设置应能调整每轮卡池顺序');
+  assert(H.state.settings.tierNames[4] === '神兽', '规则设置应能保存自定义卡池名称');
+  H.actions.setActiveView('players');
+  assert(app.innerHTML.includes('神兽池'), '自定义卡池名称保存后应同步到选手库分池标题');
   assert(H.state.captains.length === targetTeamCount, '规则设置应新增缺失队伍');
   const oldOrderIndex = H.state.draft.baseOrder.indexOf('c2');
   H.actions.moveCaptainOrder('c2', 'up');
@@ -452,6 +461,32 @@ function testClearAllPlayers() {
   assert(H.state.players.length === 50 && H.state.players.some(player => player.gameId === 'DY_Raven_T48'), '清空后应能导入50人测试表格');
 }
 
+function testRandomizeHexcoreDrawOrderResetsAndSelectsFirst() {
+  const { H, app } = createHarness();
+  H.state.ui.hexCaptainId = 'c8';
+  H.state.hexcoreDraft = {
+    captainId: 'c8',
+    slots: ['origin', 'blind', 'steady'],
+    chosen: ['origin'],
+    seenIds: ['origin', 'blind', 'steady'],
+    refreshUsed: true,
+    drawOrder: [],
+  };
+  H.state.draft.runtimeEffects = [{ type: 'test_effect' }];
+
+  H.actions.randomizeHexcoreDrawOrder();
+
+  const order = H.state.hexcoreDraft.drawOrder;
+  assert(order.length === H.state.captains.length, '制定抽取顺序后应包含全部队长');
+  assert(new Set(order).size === H.state.captains.length, '制定抽取顺序后队长不应重复');
+  assert(H.state.ui.hexCaptainId === order[0], '制定抽取顺序后应切换到第一顺位队长');
+  assert(H.state.captains.every(captain => (H.state.hexcoreAssignments[captain.id] || []).length === 0), '制定抽取顺序后应清空所有队长海克斯');
+  assert(!H.state.hexcoreDraft.captainId && H.state.hexcoreDraft.slots.length === 0 && !H.state.hexcoreDraft.refreshUsed, '制定抽取顺序后应清空当前抽取会话');
+  assert(H.state.draft.runtimeEffects.length === 0, '制定抽取顺序后应清空海克斯运行时效果');
+  H.actions.setActiveView('hexcores');
+  assert(app.innerHTML.includes(`操作队长：${H.state.captains.find(captain => captain.id === order[0]).name}`), '海克斯库应显示第一顺位队长为当前操作队长');
+}
+
 function testSecurityHardening() {
   assert(staticServer.resolveRequestPath('/') === path.join(root, 'index.html'), '静态服务应正常解析首页');
   assert(staticServer.resolveRequestPath('/src/main.js') === path.join(root, 'src', 'main.js'), '静态服务应正常解析项目内资源');
@@ -486,6 +521,38 @@ function testSecurityHardening() {
   assert(!app.innerHTML.includes('onload=window.__xss_fired'), '规则模板每队人数不应保留事件属性');
   assert(!app.innerHTML.includes('<iframe src=javascript'), '规则模板轮数字段不应保留HTML');
   assert(app.innerHTML.includes('&lt;b&gt;模板&lt;/b&gt;'), '规则模板名称应保持转义输出');
+
+  const currentDrawHarness = createHarness();
+  const H2 = currentDrawHarness.H;
+  const app2 = currentDrawHarness.app;
+  [1, 2, 3, 4].forEach(tier => {
+    H2.state.settings.tierNames[tier] = '<b>马池</b>';
+  });
+  H2.state.draft.currentOrder = ['c1'];
+  H2.state.draft.currentIndex = 0;
+  H2.state.draft.currentDraw = {
+    id: 'malicious-draw',
+    captainId: 'c1',
+    round: 1,
+    tier: 1,
+    effectiveTier: 1,
+    pickMode: 'hellhound',
+    timeLimitSeconds: '<img src=x onerror=window.__xss_fired=1>',
+    cards: [{ playerId: 'p201', displayPlayerId: 'p201' }],
+  };
+  H2.normalizeState(H2.state);
+  H2.actions.setActiveView('draft');
+  assert(H2.state.draft.currentDraw.timeLimitSeconds === H2.state.settings.pickTimeoutSeconds, '导入状态中的限时字段应被规范为数字');
+  assert(!app2.innerHTML.includes('<img src=x') && !app2.innerHTML.includes('window.__xss_fired'), '导入抽卡状态不应把限时HTML渲染出来');
+  assert(app2.innerHTML.includes('&lt;b&gt;马池&lt;/b&gt;'), '自定义卡池名称在顶部状态栏应转义输出');
+
+  let sizeError = '';
+  H2.exportService.readStateFile(
+    { size: 3 * 1024 * 1024, content: '{}' },
+    () => { throw new Error('超大状态备份不应被读取'); },
+    error => { sizeError = error.message; },
+  );
+  assert(sizeError.includes('不能超过'), '超大状态备份应在读取前被拒绝');
 }
 
 async function run() {
@@ -500,6 +567,7 @@ async function run() {
     testUiNavigationAndHexButtons,
     testFeedbackAutoDismiss,
     testClearAllPlayers,
+    testRandomizeHexcoreDrawOrderResetsAndSelectsFirst,
     testSecurityHardening,
   ];
 

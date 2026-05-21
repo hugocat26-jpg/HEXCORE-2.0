@@ -194,13 +194,28 @@
       };
     }).filter(card => card.playerId);
 
-    const currentDraw = source.currentDraw && typeof source.currentDraw === 'object'
+    const currentDrawSource = source.currentDraw && typeof source.currentDraw === 'object'
+      ? source.currentDraw
+      : null;
+    const allowedPickModes = new Set(['normal', 'open_pick', 'blind_box', 'mystery_swap', 'hellhound']);
+    const pickMode = currentDrawSource
+      ? sanitizeText(currentDrawSource.pickMode, 'normal', 32)
+      : 'normal';
+    const currentDraw = currentDrawSource
       ? {
-        ...source.currentDraw,
-        cards: normalizeCards(source.currentDraw.cards),
-        reason: sanitizeText(source.currentDraw.reason, '', 120),
-        pickMode: sanitizeText(source.currentDraw.pickMode, 'normal', 32),
-        tier: clampNumber(source.currentDraw.tier, 1, 4, 1),
+        id: sanitizeText(currentDrawSource.id, `draw_${Date.now()}`, 48),
+        captainId: remapCaptain(currentDrawSource.captainId),
+        round: clampNumber(currentDrawSource.round, 1, 8, source.round || defaultState.draft.round),
+        tier: clampNumber(currentDrawSource.tier, 1, 4, 1),
+        effectiveTier: clampNumber(currentDrawSource.effectiveTier, 1, 4, currentDrawSource.tier || 1),
+        cards: normalizeCards(currentDrawSource.cards),
+        reason: sanitizeText(currentDrawSource.reason, '', 120),
+        pickMode: allowedPickModes.has(pickMode) ? pickMode : 'normal',
+        timeoutEndsAt: currentDrawSource.timeoutEndsAt ? clampNumber(currentDrawSource.timeoutEndsAt, 0, Number.MAX_SAFE_INTEGER, 0) : undefined,
+        timeoutPausedRemainingMs: currentDrawSource.timeoutPausedRemainingMs ? clampNumber(currentDrawSource.timeoutPausedRemainingMs, 0, 300000, 0) : undefined,
+        timeLimitSeconds: currentDrawSource.timeLimitSeconds ? clampNumber(currentDrawSource.timeLimitSeconds, 1, 300, defaultState.settings.pickTimeoutSeconds) : undefined,
+        hellhoundStep: currentDrawSource.hellhoundStep ? clampNumber(currentDrawSource.hellhoundStep, 0, 8, 0) : undefined,
+        mysterySwapped: Boolean(currentDrawSource.mysterySwapped),
       }
       : null;
 
@@ -251,10 +266,21 @@
       maxRounds,
       drawCount: clampNumber(source.drawCount, 1, 8, defaultState.settings.drawCount),
       roundTiers,
+      tierNames: normalizeTierNames(source.tierNames),
       disabledHexcores: Array.isArray(source.disabledHexcores)
         ? source.disabledHexcores.filter(id => typeof id === 'string').slice(0, 50)
         : [],
     };
+  }
+
+  function normalizeTierNames(tierNames) {
+    const source = tierNames && typeof tierNames === 'object' ? tierNames : {};
+    return [0, 1, 2, 3, 4].reduce((result, tier) => {
+      const fallback = defaultState.settings.tierNames[tier];
+      const value = String(source[tier] || fallback).trim().slice(0, 12);
+      result[tier] = value || fallback;
+      return result;
+    }, {});
   }
 
   function normalizeTournament(tournament, captains) {
@@ -331,14 +357,14 @@
     ui: {
       activeView: 'draft',
       eventFilter: 'all',
+      theme: 'default',
     },
   };
 
   Hexcore2.normalizeState = function normalizeState(state) {
     if (!state || typeof state !== 'object') state = clone(defaultState);
     state.settings = state.settings || clone(defaultState.settings);
-    state.settings.tierNames = state.settings.tierNames || clone(defaultState.settings.tierNames);
-    state.settings.tierNames[0] = state.settings.tierNames[0] || defaultState.settings.tierNames[0];
+    state.settings.tierNames = normalizeTierNames(state.settings.tierNames);
     state.settings.minTeams = clampNumber(state.settings.minTeams, 5, 20, defaultState.settings.minTeams);
     state.settings.maxTeams = clampNumber(state.settings.maxTeams, state.settings.minTeams, 20, defaultState.settings.maxTeams);
     state.settings.playersPerTeam = clampNumber(state.settings.playersPerTeam, 1, 8, defaultState.settings.playersPerTeam);
@@ -402,6 +428,7 @@
       : 'all';
     state.ui.eventCaptainFilter = typeof state.ui.eventCaptainFilter === 'string' ? state.ui.eventCaptainFilter.slice(0, 48) : 'all';
     state.ui.eventSearch = typeof state.ui.eventSearch === 'string' ? state.ui.eventSearch.slice(0, 80) : '';
+    state.ui.theme = ['default', 'neon', 'apple'].includes(state.ui.theme) ? state.ui.theme : 'default';
     state.ui.playerFilter = typeof state.ui.playerFilter === 'string' ? state.ui.playerFilter.slice(0, 32) : 'all';
     state.ui.hexFilter = typeof state.ui.hexFilter === 'string' ? state.ui.hexFilter.slice(0, 32) : 'all';
     state.ui.hexCaptainId = captainIdMap.get(String(state.ui.hexCaptainId || '')) || '';

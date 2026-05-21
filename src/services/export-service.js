@@ -22,6 +22,12 @@
     return new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
   }
 
+  function enforceFileSize(file, maxBytes, label) {
+    if (file && Number.isFinite(file.size) && file.size > maxBytes) {
+      throw new Error(`${label}不能超过 ${Math.round(maxBytes / 1024 / 1024)}MB`);
+    }
+  }
+
   function filteredEvents(options = {}) {
     const ui = Hexcore2.state.ui || {};
     const filter = options.filter || ui.eventFilter || 'all';
@@ -204,6 +210,13 @@
         return;
       }
 
+      try {
+        enforceFileSize(file, 2 * 1024 * 1024, '状态备份文件');
+      } catch (error) {
+        if (onError) onError(error);
+        return;
+      }
+
       const reader = new FileReader();
       reader.onload = () => {
         try {
@@ -225,6 +238,13 @@
     readPlayerFile(file, onSuccess, onError) {
       if (!file || typeof FileReader === 'undefined') {
         if (onError) onError(new Error('当前环境不支持文件读取'));
+        return;
+      }
+
+      try {
+        enforceFileSize(file, 2 * 1024 * 1024, '选手导入文件');
+      } catch (error) {
+        if (onError) onError(error);
         return;
       }
 
