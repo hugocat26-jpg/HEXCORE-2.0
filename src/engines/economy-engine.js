@@ -16,6 +16,10 @@
       refreshCount: 0,
       purchaseUsed: false,
       skipped: false,
+      wiseBenevolenceApplied: false,
+      decomposeKnowledgeApplied: false,
+      photographerRefreshUsed: false,
+      roundOneTierOneRefreshCount: 0,
     };
   }
 
@@ -59,6 +63,10 @@
     captain.hexcoreEconomy.wiseBenevolenceRefreshCredits = Math.max(
       0,
       Math.round(Number(captain.hexcoreEconomy.wiseBenevolenceRefreshCredits) || 0)
+    );
+    captain.hexcoreEconomy.decomposeKnowledgeStacks = Math.max(
+      0,
+      Math.min(3, Math.round(Number(captain.hexcoreEconomy.decomposeKnowledgeStacks) || 0))
     );
     return captain.hexcoreEconomy;
   }
@@ -136,20 +144,37 @@
     applyCaptainTurnStart(captainId, round = Hexcore2.state.draft.round) {
       const captain = captainById(captainId);
       const targetRound = roundNumber(round);
-      if (!captain || !hasHexcore(captain.id, 'wise-benevolence')) return { applied: false };
+      if (!captain) return { applied: false };
       const economy = ensureEconomy(captain);
       const state = roundState(captain.id, targetRound);
-      if (state.wiseBenevolenceApplied) return { applied: false };
       const hexcoreEconomy = ensureHexcoreEconomy(captain);
-      economy.gold += targetRound;
-      hexcoreEconomy.wiseBenevolenceRefreshCredits += 1;
-      state.wiseBenevolenceApplied = true;
-      Hexcore2.eventStore.append(
-        '贤者的博爱',
-        `${captain.name} 第 ${targetRound} 轮获得意外之喜：+${targetRound} 金币，累计免费刷新 +1（剩余 ${hexcoreEconomy.wiseBenevolenceRefreshCredits} 次）`,
-        'success'
-      );
-      return { applied: true, goldBonus: targetRound, refreshCredits: hexcoreEconomy.wiseBenevolenceRefreshCredits };
+      const result = { applied: false };
+      if (hasHexcore(captain.id, 'wise-benevolence') && !state.wiseBenevolenceApplied) {
+        economy.gold += targetRound;
+        hexcoreEconomy.wiseBenevolenceRefreshCredits += 1;
+        state.wiseBenevolenceApplied = true;
+        result.applied = true;
+        result.goldBonus = targetRound;
+        result.refreshCredits = hexcoreEconomy.wiseBenevolenceRefreshCredits;
+        Hexcore2.eventStore.append(
+          '贤者的博爱',
+          `${captain.name} 第 ${targetRound} 轮获得意外之喜：+${targetRound} 金币，累计免费刷新 +1（剩余 ${hexcoreEconomy.wiseBenevolenceRefreshCredits} 次）`,
+          'success'
+        );
+      }
+      if (hasHexcore(captain.id, 'decompose-knowledge') && !state.decomposeKnowledgeApplied) {
+        const before = hexcoreEconomy.decomposeKnowledgeStacks;
+        hexcoreEconomy.decomposeKnowledgeStacks = Math.min(3, before + 1);
+        state.decomposeKnowledgeApplied = true;
+        result.applied = true;
+        result.decomposeKnowledgeStacks = hexcoreEconomy.decomposeKnowledgeStacks;
+        Hexcore2.eventStore.append(
+          '知识来源于分解',
+          `${captain.name} 获得 1 层解构（${before} → ${hexcoreEconomy.decomposeKnowledgeStacks}/3）`,
+          'info'
+        );
+      }
+      return result;
     },
 
     canOperate(captainId, round = Hexcore2.state.draft.round) {

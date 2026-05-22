@@ -643,6 +643,48 @@ function testNewHexcores() {
   assert(steady.hexcoreEngine.activate('steady-reinforce').ok, '稳健补强应从同阵营最低费用池分配');
   assert(currentCaptain(steady).team.length === 1, '稳健补强成功后应入队1人');
 
+  const decompose = createReadyHarness().H;
+  const decomposeCaptain = currentCaptain(decompose);
+  decompose.state.hexcoreAssignments[decomposeCaptain.id] = [
+    { ...decompose.sampleData.hexcores.find(hex => hex.id === 'decompose-knowledge'), status: 'available' },
+  ];
+  decomposeCaptain.hexcoreEconomy = { decomposeKnowledgeStacks: 2 };
+  decompose.economyEngine.roundState(decomposeCaptain.id).decomposeKnowledgeApplied = false;
+  decompose.economyEngine.applyCaptainTurnStart(decomposeCaptain.id);
+  assert(decomposeCaptain.hexcoreEconomy.decomposeKnowledgeStacks === 3, '知识来源于分解应在队长选人阶段开始时叠到3层');
+  const decomposeTarget = decompose.hexcoreEngine.decomposeTargets(decomposeCaptain.id)[0];
+  decomposeCaptain.economy.gold = Math.max(5, Number(decomposeTarget.tier) || 5);
+  const decomposeResult = decompose.hexcoreEngine.activate('decompose-knowledge', { targetPlayerId: decomposeTarget.id });
+  assert(decomposeResult.ok, '知识来源于分解满3层后应可自选高费目标');
+  assert(decomposeCaptain.hexcoreEconomy.decomposeKnowledgeStacks === 0, '知识来源于分解发动后应消耗全部3层解构');
+  assert(decomposeCaptain.team.includes(decomposeTarget.id), '知识来源于分解应将目标选手加入队伍');
+
+  const decomposeSacrifice = createReadyHarness().H;
+  const sacrificeCaptain = currentCaptain(decomposeSacrifice);
+  decomposeSacrifice.state.hexcoreAssignments[sacrificeCaptain.id] = [
+    { ...decomposeSacrifice.sampleData.hexcores.find(hex => hex.id === 'decompose-knowledge'), status: 'available' },
+  ];
+  sacrificeCaptain.hexcoreEconomy = { decomposeKnowledgeStacks: 3 };
+  const sacrificePlayer = decomposeSacrifice.state.players.find(player =>
+    player.camp === decomposeSacrifice.selectors.captainCamp(sacrificeCaptain.id)
+    && player.status === 'available'
+    && player.tier === 2
+    && !decomposeSacrifice.selectors.isCaptainPlayer(player.id)
+  );
+  sacrificeCaptain.team.push(sacrificePlayer.id);
+  sacrificePlayer.status = 'drafted';
+  sacrificePlayer.teamId = sacrificeCaptain.id;
+  const expensiveTarget = decomposeSacrifice.hexcoreEngine.decomposeTargets(sacrificeCaptain.id)
+    .find(player => player.tier >= 4);
+  sacrificeCaptain.economy.gold = Math.max(0, (Number(expensiveTarget.tier) || 4) - Number(sacrificePlayer.tier) || 0);
+  const sacrificeResult = decomposeSacrifice.hexcoreEngine.activate('decompose-knowledge', {
+    targetPlayerId: expensiveTarget.id,
+    secondPlayerId: sacrificePlayer.id,
+  });
+  assert(sacrificeResult.ok, '知识来源于分解在金币不足时应允许分解2/3费队员抵扣');
+  assert(sacrificePlayer.status === 'available' && !sacrificePlayer.teamId, '被分解队员应回到可选池');
+  assert(sacrificeCaptain.team.includes(expensiveTarget.id), '抵扣后目标选手应加入队伍');
+
   const removed = createReadyHarness().H;
   assert(!removed.sampleData.hexcores.some(hex => ['directed-recruit', 'order-overtake', 'budget-refund'].includes(hex.id)), '废弃海克斯不应继续进入海克斯池');
 }

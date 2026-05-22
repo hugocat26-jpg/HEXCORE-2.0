@@ -1,6 +1,6 @@
 (function initAssignmentEngine(global) {
   const Hexcore2 = global.Hexcore2 || (global.Hexcore2 = {});
-  const goldAllowedSources = new Set(['gold_shop_purchase', 'final_random_fill', 'steady_reinforce']);
+  const goldAllowedSources = new Set(['gold_shop_purchase', 'final_random_fill', 'steady_reinforce', 'decompose_knowledge']);
 
   function captainCamp(captainId) {
     return Hexcore2.selectors.captainCamp ? Hexcore2.selectors.captainCamp(captainId) : '';
@@ -64,6 +64,21 @@
     captain.sponsorFlowUsed += 1;
     Hexcore2.eventStore.append('赞助回流', `${captain.name} 购买「${player.name}」后获得赞助返还 1 金币（${captain.sponsorFlowUsed}/2）`, 'success');
     return true;
+  }
+
+  function markSpecialPurchase(captainId, cost) {
+    const captain = Hexcore2.state.captains.find(item => item.id === captainId);
+    if (!captain) return { ok: false, reason: '当前没有可操作队长' };
+    Hexcore2.economyEngine.ensureAll();
+    const operate = Hexcore2.economyEngine.canOperate(captainId);
+    if (!operate.ok) return { ok: false, reason: operate.reason };
+    const finalCost = Math.max(0, Math.round(Number(cost) || 0));
+    if (captain.economy.gold < finalCost) {
+      return { ok: false, reason: `金币不足，本次选择需要 ${finalCost} 金币` };
+    }
+    captain.economy.gold -= finalCost;
+    Hexcore2.economyEngine.roundState(captainId).purchaseUsed = true;
+    return { ok: true, cost: finalCost, gold: captain.economy.gold };
   }
 
   Hexcore2.assignmentEngine = {
@@ -142,6 +157,33 @@
       });
       applySponsorFlow(captain, player, price);
       return { ok: true, price, gold: captain.economy.gold, appliedEffects: pricing.appliedEffects.map(effect => ({ ...effect })) };
+    },
+
+    purchaseWithOffset(captainId, playerId, offset = 0, source = 'decompose_knowledge') {
+      const state = Hexcore2.state;
+      const captain = state.captains.find(item => item.id === captainId);
+      const player = state.players.find(item => item.id === playerId);
+      if (!captain || !player || player.status !== 'available') return { ok: false, reason: '目标队员不可选择' };
+      const camp = captainCamp(captainId);
+      if (!camp || player.camp !== camp) return { ok: false, reason: '不能选择异阵营选手' };
+      if (isCaptainPlayer(player.id)) return { ok: false, reason: '队长锁定选手不可选择' };
+      const basePrice = Math.max(1, Number(player.tier) || 1);
+      const finalCost = Math.max(0, basePrice - Math.max(0, Math.round(Number(offset) || 0)));
+      const paid = markSpecialPurchase(captainId, finalCost);
+      if (!paid.ok) return paid;
+      const assigned = this.assign(captainId, playerId, source);
+      if (!assigned) {
+        captain.economy.gold += finalCost;
+        Hexcore2.economyEngine.roundState(captainId).purchaseUsed = false;
+        return { ok: false, reason: '选择失败，队伍容量或选手状态已变化' };
+      }
+      Hexcore2.eventStore.append(
+        '金币购买',
+        `${captain.name} 通过特殊海克斯选择「${player.name}」，原费用 ${basePrice}，抵扣 ${Math.max(0, basePrice - finalCost)}，实付 ${finalCost} 金币`,
+        'success',
+        { source, price: finalCost, basePrice, offset, playerId }
+      );
+      return { ok: true, price: finalCost, basePrice, offset, gold: captain.economy.gold };
     },
 
     assignRandomFromTier(captainId, tier, source = 'auto_assign') {

@@ -285,6 +285,10 @@
         refreshCount: clampNumber(item.refreshCount, 0, 99, 0),
         purchaseUsed: Boolean(item.purchaseUsed),
         skipped: Boolean(item.skipped),
+        wiseBenevolenceApplied: Boolean(item.wiseBenevolenceApplied),
+        decomposeKnowledgeApplied: Boolean(item.decomposeKnowledgeApplied),
+        photographerRefreshUsed: Boolean(item.photographerRefreshUsed),
+        roundOneTierOneRefreshCount: clampNumber(item.roundOneTierOneRefreshCount, 0, 99, 0),
       };
     }
     return {
@@ -322,6 +326,17 @@
         playerId: captainPlayerId,
         playerGameId: captainGameId,
         economy: normalizeCaptainEconomy(item.economy),
+        hexcoreEconomy: item.hexcoreEconomy && typeof item.hexcoreEconomy === 'object' ? {
+          donationApplied: Boolean(item.hexcoreEconomy.donationApplied),
+          openFeastApplied: Boolean(item.hexcoreEconomy.openFeastApplied),
+          wiseBenevolenceRefreshCredits: clampNumber(item.hexcoreEconomy.wiseBenevolenceRefreshCredits, 0, 99, 0),
+          decomposeKnowledgeStacks: clampNumber(item.hexcoreEconomy.decomposeKnowledgeStacks, 0, 3, 0),
+        } : {},
+        sponsorFlowUsed: clampNumber(item.sponsorFlowUsed, 0, 2, 0),
+        giantSlayerDiscountUsed: item.giantSlayerDiscountUsed && typeof item.giantSlayerDiscountUsed === 'object' ? {
+          4: Boolean(item.giantSlayerDiscountUsed[4]),
+          5: Boolean(item.giantSlayerDiscountUsed[5]),
+        } : {},
       };
       return captain && typeof captain === 'object' ? Object.assign(captain, normalized) : normalized;
     });

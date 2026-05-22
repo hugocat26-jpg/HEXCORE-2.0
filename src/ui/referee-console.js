@@ -140,7 +140,7 @@
 
   function hexcoreExecutionQueue(captainId) {
     const queue = Hexcore2.hexcoreEngine.executionQueue(captainId);
-    const targetableIds = new Set(['reserved-seat', 'urgent-restock', 'camp-blockade', 'price-interference']);
+    const targetableIds = new Set(['reserved-seat', 'urgent-restock', 'camp-blockade', 'price-interference', 'decompose-knowledge']);
     return `
       <div class="hex-execution-queue">
         <div class="hex-queue-head">
@@ -236,11 +236,20 @@
         </label>
       `;
     } else if (hex.id === 'decompose-knowledge') {
+      const targets = Hexcore2.hexcoreEngine.decomposeTargets ? Hexcore2.hexcoreEngine.decomposeTargets(captain.id) : [];
+      const sacrifices = Hexcore2.hexcoreEngine.decomposableTeamPlayers ? Hexcore2.hexcoreEngine.decomposableTeamPlayers(captain) : [];
       body = `
         <label>
-          <small>分析队内选手</small>
+          <small>自选目标</small>
           <select id="hex-target-first">
-            ${selectOptions(context.teamPlayers, '至少拥有 1 名队员后可用')}
+            ${targets.map(player => `<option value="${escapeHtml(player.id)}">${escapeHtml(player.name)} · ${player.tier}费 · 评分 ${player.score}</option>`).join('') || '<option value="">没有可自选目标</option>'}
+          </select>
+        </label>
+        <label>
+          <small>金币不足时分解抵扣</small>
+          <select id="hex-target-second">
+            <option value="">不分解队员</option>
+            ${sacrifices.map(player => `<option value="${escapeHtml(player.id)}">${escapeHtml(player.name)} · ${player.tier}费抵 ${player.tier} 金币</option>`).join('')}
           </select>
         </label>
       `;

@@ -15,6 +15,7 @@
     'giant-slayer',
     'photographer',
     'wise-benevolence',
+    'decompose-knowledge',
   ]);
 
   function hasHexcore(captainId, hexcoreId) {
@@ -128,6 +129,31 @@
     return null;
   }
 
+  function ensureHexcoreEconomy(captain) {
+    captain.hexcoreEconomy = captain.hexcoreEconomy || {};
+    captain.hexcoreEconomy.decomposeKnowledgeStacks = Math.max(
+      0,
+      Math.min(3, Math.round(Number(captain.hexcoreEconomy.decomposeKnowledgeStacks) || 0))
+    );
+    return captain.hexcoreEconomy;
+  }
+
+  function decomposeTargets(captainId) {
+    const available = Hexcore2.selectors.availableCampPlayers(captainId)
+      .sort((a, b) => (Number(b.tier) || 0) - (Number(a.tier) || 0) || (Number(b.score) || 0) - (Number(a.score) || 0));
+    const high = available.filter(player => player.tier === 4 || player.tier === 5);
+    if (high.length) return high;
+    const tier3 = available.filter(player => player.tier === 3);
+    if (tier3.length) return tier3;
+    return available.filter(player => player.tier === 2);
+  }
+
+  function decomposableTeamPlayers(captain) {
+    return (captain.team || [])
+      .map(playerId => Hexcore2.state.players.find(player => player.id === playerId))
+      .filter(player => player && (player.tier === 2 || player.tier === 3));
+  }
+
   Hexcore2.hexcoreEngine = {
     hasHexcore,
 
@@ -165,6 +191,7 @@
         'giant-slayer': '高费优惠',
         photographer: '免费刷新',
         'wise-benevolence': '经济刷新',
+        'decompose-knowledge': '自选分解',
       };
 
       return hexcores.map((hex, index) => {
@@ -210,6 +237,15 @@
           return Hexcore2.state.captains.some(item => item.id !== captain.id && item.economy && Number(item.economy.gold) > 0)
             ? active(base, '可执行', '从金币最高的三名其他队长处每人获得1金币。')
             : blocked(base, '无可吸取目标', '其他队长当前没有可吸取金币。');
+        }
+        if (hex.id === 'decompose-knowledge') {
+          const hexcoreEconomy = ensureHexcoreEconomy(captain);
+          const targets = decomposeTargets(captain.id);
+          if (hexcoreEconomy.decomposeKnowledgeStacks < 3) {
+            return blocked(base, '解构不足', `当前 ${hexcoreEconomy.decomposeKnowledgeStacks}/3 层；每次轮到该队长选人开始时自动 +1。`);
+          }
+          if (!targets.length) return blocked(base, '无可选目标', '同阵营没有4/5费可选选手，顺延到3/2费后仍无目标。');
+          return target(base, '需选择选手', `消耗3层解构，自选 ${targets[0].tier >= 4 ? '4/5费' : `${targets[0].tier}费顺延`} 可选选手；金币不足时可分解队内2/3费队员抵扣。`, { targetCount: targets.length });
         }
         return active(base, '可执行', '当前条件满足。');
       });
@@ -295,10 +331,46 @@
         Hexcore2.eventStore.append('吸血习性', `${captain.name} 从 ${targets.map(item => item.name).join('、')} 处共获得 ${targets.length} 金币`, 'warn');
       }
 
-      markUsed(hexcore);
+      if (hexcore.id === 'decompose-knowledge') {
+        const hexcoreEconomy = ensureHexcoreEconomy(captain);
+        if (hexcoreEconomy.decomposeKnowledgeStacks < 3) return logFail('解构层数不足，需要3层才能发动');
+        const targets = decomposeTargets(captain.id);
+        const targetPlayer = targets.find(player => player.id === options.targetPlayerId || player.id === options.firstPlayerId);
+        if (!targetPlayer) return logFail('请选择当前允许自选的目标选手');
+        const targetPrice = Math.max(1, Number(targetPlayer.tier) || 1);
+        const sacrifice = decomposableTeamPlayers(captain).find(player => player.id === options.secondPlayerId);
+        let offset = 0;
+        if (captain.economy.gold < targetPrice) {
+          if (!sacrifice) return logFail(`金币不足，需要 ${targetPrice} 金币；请选择一名队内2/3费队员分解抵扣`);
+          offset = Math.max(0, Number(sacrifice.tier) || 0);
+          if (captain.economy.gold + offset < targetPrice) return logFail(`分解「${sacrifice.name}」后仍金币不足`);
+          captain.team = captain.team.filter(playerId => playerId !== sacrifice.id);
+          sacrifice.status = 'available';
+          delete sacrifice.teamId;
+          Hexcore2.eventStore.append('知识来源于分解', `${captain.name} 分解队员「${sacrifice.name}」，抵扣 ${offset} 金币，该选手回到可选池`, 'warn');
+        }
+        const result = Hexcore2.assignmentEngine.purchaseWithOffset(captain.id, targetPlayer.id, offset, 'decompose_knowledge');
+        if (!result.ok) {
+          if (sacrifice && !captain.team.includes(sacrifice.id)) {
+            captain.team.push(sacrifice.id);
+            sacrifice.status = 'drafted';
+            sacrifice.teamId = captain.id;
+          }
+          return logFail(result.reason || '知识来源于分解执行失败');
+        }
+        hexcoreEconomy.decomposeKnowledgeStacks = 0;
+        state.draft.pickedThisTurn = true;
+        state.draft.currentDraw = null;
+        Hexcore2.eventStore.append('知识来源于分解', `${captain.name} 消耗3层解构，自选「${targetPlayer.name}」入队`, 'success');
+      }
+
+      if (hexcore.id !== 'decompose-knowledge') markUsed(hexcore);
       Hexcore2.eventStore.append('海克斯激活', `${captain.name} 使用【${hexcore.name}】${options.targetCaptainId ? `，目标：${captainName(options.targetCaptainId)}` : ''}`, 'info');
-      return { ok: true, advanceTurn: hexcore.id === 'steady-reinforce' };
+      return { ok: true, advanceTurn: hexcore.id === 'steady-reinforce' || hexcore.id === 'decompose-knowledge' };
     },
+
+    decomposeTargets,
+    decomposableTeamPlayers,
 
     effectStatusForCaptain(captainId) {
       const effects = Hexcore2.state.draft.runtimeEffects || [];
