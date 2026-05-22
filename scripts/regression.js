@@ -170,7 +170,7 @@ function installReadyTestData(H) {
     c5: take('reserved-seat', 'urgent-restock', 'discount-coupon'),
     c6: take('camp-scout', 'camp-blockade', 'giant-slayer'),
     c7: take('vampiric-habit', 'price-interference', 'photographer'),
-    c8: take('reserved-seat', 'steady-reinforce', 'discount-coupon'),
+    c8: take('reserved-seat', 'steady-reinforce', 'wise-benevolence'),
     c9: take('urgent-restock', 'camp-scout', 'sponsor-flow'),
     c10: take('camp-blockade', 'price-interference', 'giant-slayer'),
   };
@@ -603,6 +603,33 @@ function testNewHexcores() {
   };
   noTierOne.economyEngine.roundState(noTierOneCaptain.id).freeShopUsed = true;
   assert(noTierOne.economyEngine.nextRefreshCost(noTierOneCaptain.id) > 0, '同阵营1费池耗尽后不应继续触发补1费免费刷新');
+
+  const wise = createReadyHarness().H;
+  const wiseCaptain = wise.state.captains.find(captain => (wise.state.hexcoreAssignments[captain.id] || []).some(hex => hex.id === 'wise-benevolence'));
+  wise.state.draft.round = 2;
+  wise.state.draft.currentDraw = null;
+  wise.state.draft.currentOrder = wise.state.captains.map(captain => captain.id);
+  wise.state.draft.currentIndex = wise.state.draft.currentOrder.indexOf(wiseCaptain.id);
+  const wiseBeforeGold = wiseCaptain.economy.gold;
+  wise.actions.drawCards();
+  assert(wiseCaptain.economy.gold === wiseBeforeGold + wise.state.settings.roundIncome + 2, `贤者的博爱应在该队长第2轮选人阶段额外获得2金币，前 ${wiseBeforeGold}，后 ${wiseCaptain.economy.gold}，收入 ${wise.state.settings.roundIncome}`);
+  assert(wiseCaptain.hexcoreEconomy.wiseBenevolenceRefreshCredits === 1, '贤者的博爱应累计1次免费刷新次数');
+  assert(wise.economyEngine.roundState(wiseCaptain.id, 2).wiseBenevolenceApplied, `贤者的博爱本轮应记录已触发，防止刷新时重复发放，当前轮 ${wise.state.draft.round}，状态 ${JSON.stringify(wiseCaptain.economy.roundState)}`);
+  wise.state.draft.currentDraw = {
+    id: 'wise_refresh_test',
+    captainId: wiseCaptain.id,
+    round: 2,
+    pickMode: 'shop',
+    generatedBy: 'free_shop',
+    cards: [],
+    appliedEffects: [],
+  };
+  wise.economyEngine.roundState(wiseCaptain.id, 2).freeShopUsed = true;
+  assert(wise.economyEngine.nextRefreshCost(wiseCaptain.id) === 0 && wise.economyEngine.nextRefreshReason(wiseCaptain.id) === 'wise_benevolence', '贤者的博爱累计刷新次数应让下一次刷新免费');
+  const wiseRefreshGold = wiseCaptain.economy.gold;
+  wise.actions.refreshShop();
+  assert(wiseCaptain.economy.gold === wiseRefreshGold, `贤者的博爱免费刷新不应扣金币，刷新前 ${wiseRefreshGold}，刷新后 ${wiseCaptain.economy.gold}`);
+  assert(wiseCaptain.hexcoreEconomy.wiseBenevolenceRefreshCredits === 0, `贤者的博爱免费刷新应消耗1次累计刷新次数，当前剩余 ${wiseCaptain.hexcoreEconomy.wiseBenevolenceRefreshCredits}`);
 
   const vampire = createReadyHarness().H;
   vampire.state.draft.currentIndex = 6;

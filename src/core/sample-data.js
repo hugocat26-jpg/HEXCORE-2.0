@@ -15,6 +15,7 @@
     { id: 'vampiric-habit', name: '吸血习性', type: 'violet', mode: 'manual', uses: 1, desc: '从当前金币余额最高的三名其他队长处每人获得1金币，金币为0的队长跳过。' },
     { id: 'giant-slayer', name: '巨人杀手', type: 'violet', mode: 'passive', uses: 0, desc: '首次购买4费和5费卡时，各优惠1金币。' },
     { id: 'photographer', name: '摄影艺术家', type: 'violet', mode: 'passive', uses: 0, desc: '每轮拥有多一次免费刷新商店，刷新不累计。' },
+    { id: 'wise-benevolence', name: '贤者的博爱', type: 'violet', mode: 'passive', uses: 0, desc: '每个你的选人阶段，获得+n金币和+1可累计刷新次数，n为当前轮数。' },
   ];
 
   Hexcore2.sampleData = {

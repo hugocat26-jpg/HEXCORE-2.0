@@ -413,6 +413,7 @@
       }
 
       Hexcore2.economyEngine.applyRoundIncome(Hexcore2.state.draft.round);
+      Hexcore2.economyEngine.applyCaptainTurnStart(captain.id);
       const operate = Hexcore2.economyEngine.canOperate(captain.id);
       if (!operate.ok) {
         Hexcore2.eventStore.append('商店生成失败', operate.reason, 'warn');
@@ -451,6 +452,7 @@
         return;
       }
       Hexcore2.economyEngine.applyRoundIncome(Hexcore2.state.draft.round);
+      Hexcore2.economyEngine.applyCaptainTurnStart(captain.id);
       const roundState = Hexcore2.economyEngine.roundState(captain.id);
       if (!roundState.freeShopUsed) {
         this.drawCards();
@@ -468,7 +470,9 @@
         generatedBy: 'paid_refresh',
         refreshCostPaid: result.cost,
         reason: result.cost === 0
-          ? (result.freeReason === 'round_one_tier_one' ? '第一轮未见1费卡，免费刷新' : '海克斯免费刷新')
+          ? (result.freeReason === 'round_one_tier_one'
+            ? '第一轮未见1费卡，免费刷新'
+            : (result.freeReason === 'wise_benevolence' ? '贤者的博爱免费刷新' : '海克斯免费刷新'))
           : `付费刷新，消耗 ${result.cost} 金币`,
       });
       appendAppliedHexcoreEvents(Hexcore2.state.draft.currentDraw);
@@ -477,7 +481,7 @@
       Hexcore2.eventStore.append(
         result.cost === 0 ? '免费刷新' : '商店刷新',
         result.cost === 0
-          ? `${captain.name} 免费刷新商店，原因：${result.freeReason === 'round_one_tier_one' ? '第一轮商店未出现1费卡' : '摄影艺术家'}`
+          ? `${captain.name} 免费刷新商店，原因：${result.freeReason === 'round_one_tier_one' ? '第一轮商店未出现1费卡' : (result.freeReason === 'wise_benevolence' ? '贤者的博爱' : '摄影艺术家')}`
           : `${captain.name} 花费 ${result.cost} 金币刷新商店，剩余 ${result.gold} 金币`,
         'draw'
       );

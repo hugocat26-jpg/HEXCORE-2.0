@@ -14,6 +14,7 @@
     'vampiric-habit',
     'giant-slayer',
     'photographer',
+    'wise-benevolence',
   ]);
 
   function hasHexcore(captainId, hexcoreId) {
@@ -163,6 +164,7 @@
         'vampiric-habit': '经济干扰',
         'giant-slayer': '高费优惠',
         photographer: '免费刷新',
+        'wise-benevolence': '经济刷新',
       };
 
       return hexcores.map((hex, index) => {

@@ -50,6 +50,19 @@
     return economy.roundState[roundNumber(round)];
   }
 
+  function hasHexcore(captainId, hexcoreId) {
+    return (Hexcore2.state.hexcoreAssignments[captainId] || []).some(hex => hex.id === hexcoreId);
+  }
+
+  function ensureHexcoreEconomy(captain) {
+    captain.hexcoreEconomy = captain.hexcoreEconomy || {};
+    captain.hexcoreEconomy.wiseBenevolenceRefreshCredits = Math.max(
+      0,
+      Math.round(Number(captain.hexcoreEconomy.wiseBenevolenceRefreshCredits) || 0)
+    );
+    return captain.hexcoreEconomy;
+  }
+
   function roundOneTierOneRefreshReason(captainId, round) {
     if (roundNumber(round) !== 1) return '';
     const draw = Hexcore2.state.draft.currentDraw;
@@ -64,9 +77,12 @@
   function freeRefreshReason(captainId, round) {
     const state = roundState(captainId, round);
     const captain = captainById(captainId);
-    const hasPhotographer = captain && (Hexcore2.state.hexcoreAssignments[captain.id] || []).some(hex => hex.id === 'photographer');
+    const hasPhotographer = captain && hasHexcore(captain.id, 'photographer');
     if (hasPhotographer && !state.photographerRefreshUsed) return 'photographer';
-    return roundOneTierOneRefreshReason(captainId, round);
+    const tierOneReason = roundOneTierOneRefreshReason(captainId, round);
+    if (tierOneReason) return tierOneReason;
+    const hexcoreEconomy = captain ? ensureHexcoreEconomy(captain) : {};
+    return hexcoreEconomy.wiseBenevolenceRefreshCredits > 0 ? 'wise_benevolence' : '';
   }
 
   Hexcore2.economyEngine = {
@@ -81,7 +97,7 @@
       let applied = 0;
       Hexcore2.state.captains.forEach(captain => {
         const economy = ensureEconomy(captain);
-        const hasOpenFeast = (Hexcore2.state.hexcoreAssignments[captain.id] || []).some(hex => hex.id === 'open-feast');
+        const hasOpenFeast = hasHexcore(captain.id, 'open-feast');
         if (!economy.incomeAppliedRounds.includes(targetRound)) {
           if (targetRound > 1) {
             economy.gold += Hexcore2.state.settings.roundIncome;
@@ -117,6 +133,25 @@
       return freeRefreshReason(captainId, round);
     },
 
+    applyCaptainTurnStart(captainId, round = Hexcore2.state.draft.round) {
+      const captain = captainById(captainId);
+      const targetRound = roundNumber(round);
+      if (!captain || !hasHexcore(captain.id, 'wise-benevolence')) return { applied: false };
+      const economy = ensureEconomy(captain);
+      const state = roundState(captain.id, targetRound);
+      if (state.wiseBenevolenceApplied) return { applied: false };
+      const hexcoreEconomy = ensureHexcoreEconomy(captain);
+      economy.gold += targetRound;
+      hexcoreEconomy.wiseBenevolenceRefreshCredits += 1;
+      state.wiseBenevolenceApplied = true;
+      Hexcore2.eventStore.append(
+        '贤者的博爱',
+        `${captain.name} 第 ${targetRound} 轮获得意外之喜：+${targetRound} 金币，累计免费刷新 +1（剩余 ${hexcoreEconomy.wiseBenevolenceRefreshCredits} 次）`,
+        'success'
+      );
+      return { applied: true, goldBonus: targetRound, refreshCredits: hexcoreEconomy.wiseBenevolenceRefreshCredits };
+    },
+
     canOperate(captainId, round = Hexcore2.state.draft.round) {
       const captain = captainById(captainId);
       if (!captain || Hexcore2.state.draft.phase === 'completed') {
@@ -132,6 +167,7 @@
     },
 
     markFreeShop(captainId, round = Hexcore2.state.draft.round) {
+      this.applyCaptainTurnStart(captainId, round);
       roundState(captainId, round).freeShopUsed = true;
     },
 
@@ -148,6 +184,10 @@
         if (reason === 'photographer') state.photographerRefreshUsed = true;
         if (reason === 'round_one_tier_one') {
           state.roundOneTierOneRefreshCount = Math.max(0, Number(state.roundOneTierOneRefreshCount) || 0) + 1;
+        }
+        if (reason === 'wise_benevolence') {
+          const hexcoreEconomy = ensureHexcoreEconomy(captain);
+          hexcoreEconomy.wiseBenevolenceRefreshCredits = Math.max(0, hexcoreEconomy.wiseBenevolenceRefreshCredits - 1);
         }
         return { ok: true, cost, gold: economy.gold, freeReason: reason || 'free' };
       }

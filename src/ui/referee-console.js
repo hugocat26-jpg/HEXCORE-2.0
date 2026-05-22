@@ -126,6 +126,7 @@
       'vampiric-habit': '&#129656;',
       'giant-slayer': '&#128481;',
       photographer: '&#128247;',
+      'wise-benevolence': '&#127775;',
     };
     return glyphs[hexcore.id] || '&#10022;';
   }
@@ -470,7 +471,9 @@
       : '';
     const refreshLabel = roundState && !roundState.freeShopUsed
       ? '首次免费'
-      : (nextRefreshCost === 0 ? (nextRefreshReason === 'round_one_tier_one' ? '缺1费免费' : '海克斯免费') : `${nextRefreshCost}金币`);
+      : (nextRefreshCost === 0
+        ? (nextRefreshReason === 'round_one_tier_one' ? '缺1费免费' : (nextRefreshReason === 'wise_benevolence' ? '博爱免费' : '海克斯免费'))
+        : `${nextRefreshCost}金币`);
     const workflow = Hexcore2.selectors.workflowStatus();
     const statusText = !workflow.playersDraftReady
       ? `前置流程未完成：${workflow.stage.label}`
@@ -628,7 +631,9 @@
       : '';
     const nextRefreshLabel = roundState
       ? (roundState.freeShopUsed
-        ? (nextRefreshCost === 0 ? (nextRefreshReason === 'round_one_tier_one' ? '免费（第一轮补1费）' : '免费') : `${nextRefreshCost} 金币`)
+        ? (nextRefreshCost === 0
+          ? (nextRefreshReason === 'round_one_tier_one' ? '免费（第一轮补1费）' : (nextRefreshReason === 'wise_benevolence' ? '免费（贤者的博爱）' : '免费'))
+          : `${nextRefreshCost} 金币`)
         : '免费')
       : '等待进入操作';
     function teamOwnerName(player) {
@@ -690,10 +695,10 @@
       ? Hexcore2.economyEngine.nextRefreshReason(captain.id)
       : '';
     const refreshButtonText = roundState && roundState.freeShopUsed && nextRefreshCost === 0
-      ? (nextRefreshReason === 'round_one_tier_one' ? '免费补1费' : '免费刷新')
+      ? (nextRefreshReason === 'round_one_tier_one' ? '免费补1费' : (nextRefreshReason === 'wise_benevolence' ? '博爱刷新' : '免费刷新'))
       : '付费刷新';
     const refreshButtonHint = roundState && roundState.freeShopUsed && nextRefreshCost === 0
-      ? (nextRefreshReason === 'round_one_tier_one' ? '第一轮未见1费卡' : '海克斯免费')
+      ? (nextRefreshReason === 'round_one_tier_one' ? '第一轮未见1费卡' : (nextRefreshReason === 'wise_benevolence' ? '消耗累计刷新次数' : '海克斯免费'))
       : '费用 1/2/3/4 封顶';
     const canPurchase = Boolean(draw && draw.cards && draw.cards.length && !Hexcore2.state.draft.pickedThisTurn && roundState && !roundState.purchaseUsed && !roundState.skipped);
     return `
