@@ -777,6 +777,27 @@ function testNewHexcores() {
   heavenly.actions.drawCards();
   assert(heavenly.state.draft.currentDraw && heavenly.state.draft.currentDraw.captainId === heavenlyTarget.id, '神兵天降补偿回合应允许目标队长重新开店');
 
+  const mystery = createReadyHarness().H;
+  const mysteryCaptain = currentCaptain(mystery);
+  mystery.state.hexcoreAssignments[mysteryCaptain.id] = [
+    { ...mystery.sampleData.hexcores.find(hex => hex.id === 'mystery-box') },
+  ];
+  mystery.state.draft.currentDraw = null;
+  mystery.state.draft.pickedThisTurn = false;
+  mysteryCaptain.economy.gold = 6;
+  const mysteryBeforeGold = mysteryCaptain.economy.gold;
+  const mysteryBeforeTeamSize = mysteryCaptain.team.length;
+  const mysteryCandidates = mystery.selectors.availableCampPlayers(mysteryCaptain.id)
+    .filter(player => player.tier >= 2 && player.tier <= 5);
+  assert(mysteryCandidates.length > 0, '测试前提：神秘贤者盲盒应存在2-5费同阵营可选选手');
+  const mysteryResult = mystery.hexcoreEngine.activate('mystery-box');
+  assert(mysteryResult.ok, `神秘贤者盲盒应可支付3金币随机抽取：${mysteryResult.reason || 'ok'}`);
+  assert(mysteryCaptain.economy.gold === mysteryBeforeGold - 3, '神秘贤者盲盒应固定消耗3金币');
+  assert(mysteryCaptain.team.length === mysteryBeforeTeamSize + 1, '神秘贤者盲盒应随机加入1名队员');
+  assert(mysteryCaptain.team.some(playerId => mysteryCandidates.some(player => player.id === playerId)), '神秘贤者盲盒应从同阵营2-5费可选池抽取');
+  assert(mystery.economyEngine.roundState(mysteryCaptain.id).purchaseUsed, '神秘贤者盲盒应消耗本轮购买权');
+  assert((mystery.state.hexcoreAssignments[mysteryCaptain.id] || []).find(hex => hex.id === 'mystery-box').status === 'used', '神秘贤者盲盒每局使用后应标记已使用');
+
   const removed = createReadyHarness().H;
   assert(!removed.sampleData.hexcores.some(hex => ['directed-recruit', 'order-overtake', 'budget-refund'].includes(hex.id)), '废弃海克斯不应继续进入海克斯池');
 }

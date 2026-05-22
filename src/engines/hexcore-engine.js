@@ -15,6 +15,7 @@
     'giant-slayer',
     'photographer',
     'wise-benevolence',
+    'mystery-box',
     'decompose-knowledge',
     'stuck-together',
     'storm-fog',
@@ -268,6 +269,7 @@
         'giant-slayer': '高费优惠',
         photographer: '免费刷新',
         'wise-benevolence': '经济刷新',
+        'mystery-box': '随机盲抽',
         'decompose-knowledge': '自选分解',
         'stuck-together': '延迟锁定',
         'storm-fog': '天气迷雾',
@@ -319,6 +321,15 @@
           return Hexcore2.state.captains.some(item => item.id !== captain.id && item.economy && Number(item.economy.gold) > 0)
             ? active(base, '可执行', '从金币最高的三名其他队长处每人获得1金币。')
             : blocked(base, '无可吸取目标', '其他队长当前没有可吸取金币。');
+        }
+        if (hex.id === 'mystery-box') {
+          const targets = Hexcore2.selectors.availableCampPlayers(captain.id)
+            .filter(player => player.tier >= 2 && player.tier <= 5);
+          if (shopOpen) return blocked(base, '商店已打开', '盲盒需在本轮商店打开前使用。');
+          if (roundState.purchaseUsed || roundState.skipped) return blocked(base, '购买权已使用', '盲盒会消耗本轮购买权。');
+          if (!targets.length) return blocked(base, '无可抽目标', '同阵营没有2-5费可选选手。');
+          if (!captain.economy || Number(captain.economy.gold) < 3) return blocked(base, '金币不足', '神秘贤者·盲盒需要支付3金币。');
+          return active(base, '可执行', `支付3金币，从 ${targets.length} 名同阵营2-5费可选选手中随机盲抽1人。`);
         }
         if (hex.id === 'decompose-knowledge') {
           const hexcoreEconomy = ensureHexcoreEconomy(captain);
@@ -438,6 +449,27 @@
         Hexcore2.eventStore.append('吸血习性', `${captain.name} 从 ${targets.map(item => item.name).join('、')} 处共获得 ${targets.length} 金币`, 'warn');
       }
 
+      if (hexcore.id === 'mystery-box') {
+        if (isShopOpenFor(captain.id)) return logFail('神秘贤者·盲盒需在商店打开前使用');
+        const roundState = currentRoundState(captain.id);
+        if (roundState.purchaseUsed || roundState.skipped) return logFail('本轮购买权已使用或已跳过');
+        if (!captain.economy || Number(captain.economy.gold) < 3) return logFail('金币不足，神秘贤者·盲盒需要3金币');
+        const targets = Hexcore2.selectors.availableCampPlayers(captain.id)
+          .filter(player => player.tier >= 2 && player.tier <= 5);
+        if (!targets.length) return logFail('同阵营没有2-5费可选选手');
+        const player = targets[Math.floor(Math.random() * targets.length)];
+        captain.economy.gold -= 3;
+        const assigned = Hexcore2.assignmentEngine.assign(captain.id, player.id, 'mystery_box');
+        if (!assigned) {
+          captain.economy.gold += 3;
+          return logFail('盲盒抽取失败，队伍容量或选手状态已变化');
+        }
+        roundState.purchaseUsed = true;
+        state.draft.pickedThisTurn = true;
+        state.draft.currentDraw = null;
+        Hexcore2.eventStore.append('神秘贤者·盲盒', `${captain.name} 支付3金币，盲抽获得「${player.name}」`, 'success');
+      }
+
       if (hexcore.id === 'decompose-knowledge') {
         const hexcoreEconomy = ensureHexcoreEconomy(captain);
         if (hexcoreEconomy.decomposeKnowledgeStacks < 3) return logFail('解构层数不足，需要3层才能发动');
@@ -535,7 +567,7 @@
         ? `，目标：${captainName(options.targetCaptainId)}`
         : '';
       Hexcore2.eventStore.append('海克斯激活', `${captain.name} 使用【${hexcore.name}】${targetLabel}`, 'info');
-      return { ok: true, advanceTurn: hexcore.id === 'steady-reinforce' || hexcore.id === 'decompose-knowledge' };
+      return { ok: true, advanceTurn: hexcore.id === 'steady-reinforce' || hexcore.id === 'decompose-knowledge' || hexcore.id === 'mystery-box' };
     },
 
     decomposeTargets,

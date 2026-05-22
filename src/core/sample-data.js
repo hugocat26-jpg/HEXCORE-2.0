@@ -16,6 +16,7 @@
     { id: 'giant-slayer', name: '巨人杀手', type: 'violet', mode: 'passive', uses: 0, desc: '首次购买4费和5费卡时，各优惠1金币。' },
     { id: 'photographer', name: '摄影艺术家', type: 'violet', mode: 'passive', uses: 0, desc: '每轮拥有多一次免费刷新商店，刷新不累计。' },
     { id: 'wise-benevolence', name: '贤者的博爱', type: 'violet', mode: 'passive', uses: 0, desc: '每个你的选人阶段，获得+n金币和+1可累计刷新次数，n为当前轮数。' },
+    { id: 'mystery-box', name: '神秘贤者·盲盒', type: 'violet', mode: 'manual', uses: 1, desc: '支付3金币，从同阵营2-5费可选选手中随机盲抽1人，消耗本轮购买权。' },
     { id: 'decompose-knowledge', name: '知识来源于分解', type: 'violet', mode: 'manual', uses: 0, needsTarget: 'player', desc: '每个你的选人阶段获得1层解构，最多3层；满3层后可消耗全部层数自选高费选手，金币不足时可分解队内2/3费队员抵扣。' },
     { id: 'stuck-together', name: '和我困在一起', type: 'violet', mode: 'manual', uses: 1, needsTarget: 'player', desc: '指定一名同阵营可选选手。若到你的下一轮选人开始时该选手仍在卡池，直接加入你的队伍并消耗本轮购买权。' },
     { id: 'storm-fog', name: '骤雨 血雾 清风', type: 'violet', mode: 'manual', uses: 1, needsTarget: 'captain', desc: '选择一位队长，该队长以及接下来的两位队长商店进入天气迷雾状态；不影响使用者，自动跳过使用者顺延。' },
