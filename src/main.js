@@ -1059,11 +1059,11 @@
       }
 
       const number = nextCaptainNumber();
-      const name = prompt('请输入新队伍名称', `C${number} 新队伍`);
+      const name = prompt('请输入新队伍名称', `海斗${number}队`);
       if (!name || !name.trim()) return;
 
       snapshot('新增队伍前');
-      const captain = { id: `c${number}`, name: name.trim(), record: '待定', team: [] };
+      const captain = { id: `c${number}`, name: name.trim(), record: '', team: [] };
       Hexcore2.state.settings.teamCountCustomized = true;
       Hexcore2.state.captains.push(captain);
       Hexcore2.state.hexcoreAssignments[captain.id] = [];
@@ -1198,8 +1198,8 @@
         const number = nextCaptainNumber();
         const captain = {
           id: `c${number}`,
-          name: `${player.name}队`,
-          record: '待定',
+          name: `海斗${number}队`,
+          record: '',
           team: [],
         };
         Hexcore2.state.captains.push(captain);
@@ -1315,7 +1315,7 @@
       Hexcore2.state.settings.teamCountCustomized = true;
       while (Hexcore2.state.captains.length < teamCount) {
         const number = nextCaptainNumber();
-        const captain = { id: `c${number}`, name: `C${number} 新队伍`, record: '待定', team: [] };
+        const captain = { id: `c${number}`, name: `海斗${number}队`, record: '', team: [] };
         Hexcore2.state.captains.push(captain);
         Hexcore2.state.hexcoreAssignments[captain.id] = [];
         Hexcore2.state.draft.baseOrder.push(captain.id);
@@ -1401,7 +1401,7 @@
       Hexcore2.state.settings.teamCountCustomized = true;
       while (Hexcore2.state.captains.length < teamCount) {
         const number = nextCaptainNumber();
-        const captain = { id: `c${number}`, name: `C${number} 新队伍`, record: '待定', team: [] };
+        const captain = { id: `c${number}`, name: `海斗${number}队`, record: '', team: [] };
         Hexcore2.state.captains.push(captain);
         Hexcore2.state.hexcoreAssignments[captain.id] = [];
         Hexcore2.state.draft.baseOrder.push(captain.id);

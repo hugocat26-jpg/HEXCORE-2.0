@@ -216,6 +216,21 @@
     return idMap.get(String(id ?? '').trim()) || '';
   }
 
+  function defaultCaptainName(number) {
+    return `海斗${number}队`;
+  }
+
+  function defaultCaptains(count = 10) {
+    return Array.from({ length: count }, (_, index) => ({
+      id: `c${index + 1}`,
+      name: defaultCaptainName(index + 1),
+      record: '',
+      team: [],
+      playerId: '',
+      playerGameId: '',
+    }));
+  }
+
   function sanitizePlayers(players, playerIdMap) {
     const source = Array.isArray(players) ? players : clone(defaultState.players);
     const usedIds = new Set();
@@ -297,8 +312,8 @@
       const memberCapacity = teamMemberCapacityFromTotal(playersPerTeam, Boolean(captainPlayerId));
       const normalized = {
         id,
-        name: sanitizeText(item.name, `C${index + 1} 队伍`, 40),
-        record: sanitizeText(item.record, '待定', 24),
+        name: sanitizeText(item.name, defaultCaptainName(index + 1), 40),
+        record: sanitizeText(item.record, '', 24),
         team: (Array.isArray(item.team) ? item.team : [])
           .map(playerId => remapId(playerId, playerIdMap))
           .filter(Boolean)
@@ -515,9 +530,9 @@
       ruleTemplates: [],
       tierNames: { 0: '队长锁定', 1: '1费基础', 2: '2费轮换', 3: '3费主力', 4: '4费顶配', 5: '5费核心' },
     },
-    captains: clone(seed.captains.slice(0, 10)),
-    players: clone(seed.players),
-    hexcoreAssignments: clone(seed.hexcoreAssignments || { c7: seed.hexcores }),
+    captains: defaultCaptains(10),
+    players: [],
+    hexcoreAssignments: {},
     hexcoreDraft: {
       captainId: '',
       slots: [],
@@ -530,8 +545,8 @@
       phase: 'captain_action',
       round: 1,
       maxRounds: 4,
-      baseOrder: seed.captains.slice(0, 10).map(captain => captain.id),
-      currentOrder: seed.captains.slice(0, 10).map(captain => captain.id),
+      baseOrder: defaultCaptains(10).map(captain => captain.id),
+      currentOrder: defaultCaptains(10).map(captain => captain.id),
       currentIndex: 0,
       selectedSlot: 0,
       currentDraw: null,

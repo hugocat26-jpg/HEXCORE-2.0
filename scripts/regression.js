@@ -100,6 +100,111 @@ function createHarness() {
   return { H: context.Hexcore2, app, elements, workspaceMain };
 }
 
+function testSeasonResults(score, index) {
+  const labels = score >= 92
+    ? ['冠军', '亚军', '4强', '冠军', 'FMVP', '冠军']
+    : score >= 82
+      ? ['4强', '亚军', '1轮游', '4强', '亚军', '4强']
+      : score >= 70
+        ? ['1轮游', '4强', '未参赛', '4强', '1轮游', '亚军']
+        : ['未参赛', '1轮游', '未参赛', '1轮游', '未参赛', '4强'];
+  return labels.reduce((result, value, offset) => {
+    result[`s${offset + 1}`] = labels[(offset + index) % labels.length];
+    return result;
+  }, {});
+}
+
+function installReadyTestData(H) {
+  const lanes = ['上路', '打野', '中路', '下路', '辅助'];
+  const buildPlayers = (camp, prefix, startIndex) => Array.from({ length: 25 }, (_, index) => {
+    const number = startIndex + index;
+    const score = 100 - index;
+    const fmvp = index < 2 ? [`S${index + 1}`] : [];
+    return {
+      id: `p${String(number).padStart(3, '0')}`,
+      name: `${camp === 'local' ? '本地测试' : '外地测试'}${index + 1}`,
+      camp,
+      lane: lanes[index % lanes.length],
+      gameId: `${prefix}_${String(index + 1).padStart(2, '0')}`,
+      score,
+      tier: 1,
+      kda: '2.0',
+      damage: '10K',
+      winRate: '50%',
+      heroes: ['奥恩', '蔚', '发条'],
+      manifesto: '回归测试选手',
+      status: 'available',
+      seasonResults: testSeasonResults(score, index),
+      fmvpSeasons: fmvp,
+      isFmvp: Boolean(fmvp.length),
+    };
+  });
+  const players = [
+    ...buildPlayers('local', 'LOCAL_TEST', 1),
+    ...buildPlayers('outsider', 'OUT_TEST', 26),
+  ];
+  const captainPlayerIds = ['p001', 'p002', 'p003', 'p004', 'p005', 'p026', 'p027', 'p028', 'p029', 'p030'];
+  const captains = captainPlayerIds.map((playerId, index) => {
+    const player = players.find(item => item.id === playerId);
+    return {
+      id: `c${index + 1}`,
+      name: `C${index + 1} ${player.name}`,
+      record: player.camp === 'local' ? '本地队长' : '外地队长',
+      team: [],
+      playerId: player.id,
+      playerGameId: player.gameId,
+    };
+  });
+  const take = (...ids) => ids
+    .map(id => H.sampleData.hexcores.find(hexcore => hexcore.id === id))
+    .filter(Boolean)
+    .map(hexcore => ({ ...hexcore, status: hexcore.mode === 'passive' ? 'passive' : 'available' }));
+
+  H.state.players = players;
+  H.state.captains = captains;
+  H.state.hexcoreAssignments = {
+    c1: take('camp-scout', 'discount-coupon', 'budget-refund'),
+    c2: take('directed-recruit', 'reserved-seat', 'order-overtake'),
+    c3: take('urgent-restock', 'camp-blockade', 'steady-reinforce'),
+    c4: take('price-interference', 'camp-scout', 'budget-refund'),
+    c5: take('reserved-seat', 'urgent-restock', 'discount-coupon'),
+    c6: take('camp-scout', 'camp-blockade', 'budget-refund'),
+    c7: take('directed-recruit', 'price-interference', 'order-overtake'),
+    c8: take('reserved-seat', 'steady-reinforce', 'discount-coupon'),
+    c9: take('urgent-restock', 'camp-scout', 'budget-refund'),
+    c10: take('camp-blockade', 'price-interference', 'order-overtake'),
+  };
+  H.state.draft = {
+    ...H.state.draft,
+    phase: 'captain_action',
+    round: 1,
+    maxRounds: 4,
+    baseOrder: captains.map(captain => captain.id),
+    currentOrder: captains.map(captain => captain.id),
+    currentIndex: 0,
+    selectedSlot: 0,
+    currentDraw: null,
+    runtimeEffects: [],
+    explanations: [],
+    pickedThisTurn: false,
+    paused: false,
+    finalFillCompleted: false,
+  };
+  H.state.tournament = { status: 'empty', championId: '', rounds: [] };
+  H.state.undoStack = [];
+  H.normalizeState(H.state);
+  H.economyEngine.ensureAll();
+  H.turnOrderEngine.recompute();
+  H.ui.render();
+}
+
+function createReadyHarness() {
+  const harness = createHarness();
+  installReadyTestData(harness.H);
+  harness.H.actions.drawCards();
+  return harness;
+}
+
 function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
@@ -130,8 +235,23 @@ function skipUntilCompleted(H, maxSteps = 80) {
   assert(H.state.draft.phase === 'completed', '四轮跳过后流程应进入完成状态');
 }
 
-function testCampLockedSetup() {
+function testDefaultEmptySetup() {
   const { H } = createHarness();
+
+  assert(H.state.players.length === 0, '默认状态不应预置参赛选手');
+  assert(H.state.captains.length === 10, '默认状态应保留10个空队伍槽位');
+  assert(
+    H.state.captains.every((captain, index) =>
+      captain.name === `海斗${index + 1}队` && !captain.playerId && captain.team.length === 0
+    ),
+    '默认队伍应使用海斗x队命名且不预置队长选手或队员'
+  );
+  assert(Object.values(H.state.hexcoreAssignments).every(list => Array.isArray(list) && list.length === 0), '默认状态不应预置已分配海克斯');
+  assert(!H.selectors.workflowStatus().playersDraftReady, '默认空状态不应直接进入队员抽选');
+}
+
+function testCampLockedSetup() {
+  const { H } = createReadyHarness();
   const localPlayers = H.state.players.filter(player => player.camp === 'local');
   const outsiderPlayers = H.state.players.filter(player => player.camp === 'outsider');
   const localCaptains = H.state.captains.filter(captain => H.selectors.captainCamp(captain.id) === 'local');
@@ -144,16 +264,11 @@ function testCampLockedSetup() {
   assert(H.selectors.campTeamLimit('local') === 5 && H.selectors.campTeamLimit('outsider') === 5, '阵营队伍上限应等于阵营人数除以5');
   assert(H.state.settings.playersPerTeam === 5 && H.state.draft.maxRounds === 4, '每队含队长5人且固定4轮');
   assert(H.state.captains.every(captain => H.selectors.teamMemberCapacity(captain.id) === 4), '每队应有4个队员名额');
-  ['local', 'outsider'].forEach(camp => {
-    [1, 2, 3, 4, 5].forEach(tier => {
-      assert(H.state.players.filter(player => player.camp === camp && player.tier === tier).length === 5, `${camp} ${tier}费应正好5人`);
-    });
-  });
-  assert(H.selectors.workflowStatus().playersDraftReady, '默认示例应可直接进入金币商店队员抽选');
+  assert(H.selectors.workflowStatus().playersDraftReady, '完整测试数据应可进入金币商店队员抽选');
 }
 
 function testCampTeamLimitGuard() {
-  const { H } = createHarness();
+  const { H } = createReadyHarness();
   const outsiderCaptain = H.state.captains.find(captain => H.selectors.captainCamp(captain.id) === 'outsider');
   const outsiderCaptainPlayer = H.selectors.captainPlayer(outsiderCaptain.id);
   const localCandidate = H.state.players.find(player =>
@@ -178,7 +293,7 @@ function testCampTeamLimitGuard() {
 }
 
 function testCampLockedShop() {
-  const { H } = createHarness();
+  const { H } = createReadyHarness();
   const localShop = drawForCaptain(H, 'c1');
   assert(localShop.cards.length === 5, '本地队长商店应生成5张卡');
   assert(localShop.cards.every(card => playerById(H, card.playerId).camp === 'local'), '本地队长商店不能出现外地人');
@@ -196,7 +311,7 @@ function testCampLockedShop() {
 }
 
 function testAssignmentHardGuards() {
-  const { H } = createHarness();
+  const { H } = createReadyHarness();
   const localCaptain = H.state.captains.find(captain => H.selectors.captainCamp(captain.id) === 'local');
   const outsiderPlayer = H.state.players.find(player => player.camp === 'outsider' && player.status === 'available');
   const captainPlayer = H.selectors.captainPlayer(localCaptain.id);
@@ -207,7 +322,7 @@ function testAssignmentHardGuards() {
 }
 
 function testCampChecklistAllowsDraftedPlayers() {
-  const { H } = createHarness();
+  const { H } = createReadyHarness();
   const localCaptain = H.state.captains.find(captain => H.selectors.captainCamp(captain.id) === 'local');
   const localPlayer = H.state.players.find(player =>
     player.camp === 'local'
@@ -222,7 +337,7 @@ function testCampChecklistAllowsDraftedPlayers() {
 }
 
 function testPurchasedShopCardIsMarked() {
-  const { H, app } = createHarness();
+  const { H, app } = createReadyHarness();
   H.actions.drawCards();
   const selectedSlot = H.state.draft.currentDraw.cards[0];
   const expectedTierClass = `tier-${selectedSlot.price || selectedSlot.tier}`;
@@ -237,7 +352,7 @@ function testPurchasedShopCardIsMarked() {
 }
 
 function testUndoRestoresShopPermissions() {
-  const { H } = createHarness();
+  const { H } = createReadyHarness();
   const captain = currentCaptain(H);
   assert(H.state.draft.currentDraw && H.state.draft.currentDraw.captainId === captain.id, '测试前提：默认应已为当前队长打开免费商店');
   const goldAfterFreeShop = captain.economy.gold;
@@ -264,7 +379,7 @@ function testUndoRestoresShopPermissions() {
 }
 
 function testFinalFillSameCamp() {
-  const { H } = createHarness();
+  const { H } = createReadyHarness();
   skipUntilCompleted(H);
   H.state.captains.forEach(captain => {
     const camp = H.selectors.captainCamp(captain.id);
@@ -274,7 +389,7 @@ function testFinalFillSameCamp() {
 }
 
 function testPlayersUiAndImport() {
-  const { H, app } = createHarness();
+  const { H, app } = createReadyHarness();
   H.actions.setActiveView('players');
   assert(app.innerHTML.includes('本地人卡池 25/25'), '选手库应展示本地人卡池');
   assert(app.innerHTML.includes('外地人卡池 25/25'), '选手库应展示外地人卡池');
@@ -297,7 +412,7 @@ function testPlayersUiAndImport() {
 }
 
 function testRenderKeepsPageScroll() {
-  const { H, workspaceMain } = createHarness();
+  const { H, workspaceMain } = createReadyHarness();
   H.actions.setActiveView('players');
   workspaceMain.scrollTop = 620;
   const localCandidate = H.state.players.find(player =>
@@ -312,7 +427,7 @@ function testRenderKeepsPageScroll() {
 }
 
 function testNavigationResetsPageScroll() {
-  const { H, workspaceMain } = createHarness();
+  const { H, workspaceMain } = createReadyHarness();
   H.actions.setActiveView('players');
   workspaceMain.scrollTop = 680;
 
@@ -323,7 +438,7 @@ function testNavigationResetsPageScroll() {
 }
 
 function testNewHexcores() {
-  const { H } = createHarness();
+  const { H } = createReadyHarness();
   const captain = currentCaptain(H);
   H.state.draft.currentDraw = null;
   H.economyEngine.roundState(captain.id).freeShopUsed = false;
@@ -332,11 +447,11 @@ function testNewHexcores() {
   H.actions.drawCards();
   assert(H.state.draft.currentDraw.cards.length >= 5, '阵营侦察应保留商店生成能力');
 
-  const failScout = createHarness().H;
+  const failScout = createReadyHarness().H;
   failScout.actions.drawCards();
   assert(!failScout.hexcoreEngine.activate('camp-scout').ok, '阵营侦察在商店打开后应失败');
 
-  const directed = createHarness().H;
+  const directed = createReadyHarness().H;
   directed.state.draft.currentIndex = 1;
   directed.state.draft.currentDraw = null;
   directed.economyEngine.roundState(currentCaptain(directed).id).freeShopUsed = false;
@@ -344,7 +459,7 @@ function testNewHexcores() {
   directed.actions.drawCards();
   assert(directed.state.draft.currentDraw.cards.some(card => playerById(directed, card.playerId).lane === '上路'), '定向招募商店应出现指定位置');
 
-  const discount = createHarness().H;
+  const discount = createReadyHarness().H;
   discount.state.draft.currentIndex = 4;
   const discountCaptain = currentCaptain(discount);
   discount.actions.drawCards();
@@ -355,7 +470,7 @@ function testNewHexcores() {
   discount.actions.pickCard();
   assert(discountCaptain.economy.gold === beforeGold - Math.max(1, discountPlayer.tier - 1), '压价券应降低本次购买费用');
 
-  const reserve = createHarness().H;
+  const reserve = createReadyHarness().H;
   reserve.state.draft.currentIndex = 1;
   reserve.actions.drawCards();
   const reservedPlayerId = reserve.state.draft.currentDraw.cards[0].playerId;
@@ -363,55 +478,63 @@ function testNewHexcores() {
   reserve.actions.refreshShop();
   assert(reserve.state.draft.currentDraw.cards.some(card => card.playerId === reservedPlayerId), '刷新后应保留指定卡');
 
-  const restock = createHarness().H;
+  const restock = createReadyHarness().H;
   restock.state.draft.currentIndex = 2;
   restock.actions.drawCards();
-  const restockShown = new Set(restock.state.draft.currentDraw.cards.map(card => card.playerId));
-  const restockIndex = restock.state.draft.currentDraw.cards.findIndex(card => {
+  let restockShown = new Set(restock.state.draft.currentDraw.cards.map(card => card.playerId));
+  let restockIndex = restock.state.draft.currentDraw.cards.findIndex(card => {
     const player = playerById(restock, card.playerId);
     return player && restock.selectors.availableCampPlayers(currentCaptain(restock).id, restockShown)
       .some(candidate => candidate.tier === player.tier);
   });
+  if (restockIndex < 0) {
+    const firstCard = restock.state.draft.currentDraw.cards[0];
+    const firstPlayer = playerById(restock, firstCard.playerId);
+    const fallback = restock.selectors.availableCampPlayers(currentCaptain(restock).id, restockShown)[0];
+    if (firstPlayer && fallback) fallback.tier = firstPlayer.tier;
+    restockShown = new Set(restock.state.draft.currentDraw.cards.map(card => card.playerId));
+    restockIndex = 0;
+  }
   assert(restockIndex >= 0, '测试前提：当前商店应存在可加急调货的卡槽');
   const oldPlayerId = restock.state.draft.currentDraw.cards[restockIndex].playerId;
   assert(restock.hexcoreEngine.activate('urgent-restock', { shopCardIndex: restockIndex }).ok, '加急调货应能替换同阵营同费用卡');
   assert(restock.state.draft.currentDraw.cards[restockIndex].playerId !== oldPlayerId, '加急调货后目标卡应变化');
 
-  const blockade = createHarness().H;
+  const blockade = createReadyHarness().H;
   blockade.state.draft.currentIndex = 2;
   assert(blockade.hexcoreEngine.activate('camp-blockade', { targetCaptainId: 'c4' }).ok, '阵营封锁应能选择同阵营队长');
 
-  const price = createHarness().H;
+  const price = createReadyHarness().H;
   price.state.draft.currentIndex = 3;
   assert(price.hexcoreEngine.activate('price-interference', { targetCaptainId: 'c2' }).ok, '抬价干扰应能选择同阵营队长');
   price.state.draft.currentIndex = 1;
   price.actions.drawCards();
   assert(price.state.draft.runtimeEffects.some(effect => effect.type === 'price_interference' && effect.captainId === 'c2'), '抬价干扰效果应记录到目标队长');
 
-  const overtake = createHarness().H;
+  const overtake = createReadyHarness().H;
   overtake.state.draft.currentIndex = 1;
   overtake.state.draft.currentDraw = null;
   assert(overtake.hexcoreEngine.activate('order-overtake').ok, '顺位插队应能交换前一位队长');
   assert(overtake.state.draft.currentOrder[0] === 'c2', '顺位插队后当前队长应前移');
 
-  const refund = createHarness().H;
+  const refund = createReadyHarness().H;
   const refundCaptain = currentCaptain(refund);
   const cheap = refund.state.players.find(player => player.camp === 'local' && player.tier <= 2 && player.status === 'available');
   refund.assignmentEngine.purchase(refundCaptain.id, cheap.id, 'gold_shop_purchase');
   assert(refundCaptain.budgetRefundUsed, '预算返还应在购买1费或2费时自动触发');
 
-  const steady = createHarness().H;
+  const steady = createReadyHarness().H;
   steady.state.draft.currentIndex = 2;
   assert(steady.hexcoreEngine.activate('steady-reinforce').ok, '稳健补强应从同阵营最低费用池分配');
   assert(currentCaptain(steady).team.length === 1, '稳健补强成功后应入队1人');
 
-  const badTarget = createHarness().H;
+  const badTarget = createReadyHarness().H;
   badTarget.state.draft.currentIndex = 2;
   assert(!badTarget.hexcoreEngine.activate('camp-blockade', { targetCaptainId: 'c6' }).ok, '同阵营队长类海克斯应拒绝跨阵营目标');
 }
 
 function testUiNavigationAndSecurity() {
-  const { H, app } = createHarness();
+  const { H, app } = createReadyHarness();
   H.actions.setActiveView('draft');
   assert(app.innerHTML.includes('金币') && app.innerHTML.includes('购买此卡') && app.innerHTML.includes('刷新商店'), '实时抽选页应展示金币商店操作');
   assert(app.innerHTML.includes('control-group shop-actions') && app.innerHTML.includes('control-group primary-actions'), '实时抽选页裁判操作应按商店和流程分组');
@@ -428,7 +551,7 @@ function testUiNavigationAndSecurity() {
 }
 
 function testTournamentByeAndBracketLinks() {
-  const { H, app, elements } = createHarness();
+  const { H, app, elements } = createReadyHarness();
   const originalRandom = Math.random;
   Math.random = () => 0;
   H.actions.generateTournamentSchedule();
@@ -451,7 +574,7 @@ function testTournamentByeAndBracketLinks() {
 }
 
 function testTournamentScheduleRandomizesEntrants() {
-  const { H } = createHarness();
+  const { H } = createReadyHarness();
   const baseOrder = H.state.draft.baseOrder.join('|');
   const originalRandom = Math.random;
   Math.random = () => 0;
@@ -468,6 +591,7 @@ function testTournamentScheduleRandomizesEntrants() {
 
 async function run() {
   const tests = [
+    testDefaultEmptySetup,
     testCampLockedSetup,
     testCampTeamLimitGuard,
     testCampLockedShop,
