@@ -20,17 +20,27 @@
 
   function purchasePrice(captainId, player) {
     let price = Math.max(1, Math.min(5, Number(player.tier) || 1));
+    const appliedEffects = [];
     const discount = activeEffect(captainId, 'discount_coupon');
     if (discount) {
       price = Math.max(1, price - 1);
-      discount.consumed = true;
+      appliedEffects.push(discount);
     }
     const interference = activeEffect(captainId, 'price_interference');
     if (interference) {
-      price = Math.min(5, price + 1);
-      interference.consumed = true;
+      price += 1;
+      appliedEffects.push(interference);
     }
-    return price;
+    return { price, appliedEffects };
+  }
+
+  function consumeAppliedEffects(effects, result = {}) {
+    effects.forEach(effect => {
+      effect.consumed = true;
+      effect.appliedRound = Hexcore2.state.draft.round;
+      effect.appliedAt = new Date().toISOString();
+      Object.assign(effect, result);
+    });
   }
 
   function applyBudgetRefund(captain, player) {
@@ -85,7 +95,8 @@
         return { ok: false, reason: '不能购买异阵营选手' };
       }
       if (isCaptainPlayer(player.id)) return { ok: false, reason: '队长锁定选手不可购买' };
-      const price = purchasePrice(captainId, player);
+      const pricing = purchasePrice(captainId, player);
+      const price = pricing.price;
       const economy = Hexcore2.economyEngine.spendForPurchase(captainId, price);
       if (!economy.ok) return economy;
       const assigned = this.assign(captainId, playerId, source);
@@ -94,14 +105,23 @@
         Hexcore2.economyEngine.roundState(captainId).purchaseUsed = false;
         return { ok: false, reason: '购买失败，队伍容量或选手状态已变化' };
       }
+      consumeAppliedEffects(pricing.appliedEffects, { appliedPrice: price, appliedPlayerId: player.id });
       Hexcore2.eventStore.append(
         '金币购买',
         `${captain.name} 花费 ${price} 金币购买「${player.name}」，剩余 ${captain.economy.gold} 金币`,
         'success',
         { source, price, playerId }
       );
+      pricing.appliedEffects.forEach(effect => {
+        Hexcore2.eventStore.append(
+          '海克斯生效',
+          `${captain.name} 购买「${player.name}」时触发：${effect.reason || effect.type}`,
+          'warn',
+          { source, price, playerId, effectType: effect.type, sourceCaptainId: effect.sourceCaptainId }
+        );
+      });
       applyBudgetRefund(captain, player);
-      return { ok: true, price, gold: captain.economy.gold };
+      return { ok: true, price, gold: captain.economy.gold, appliedEffects: pricing.appliedEffects.map(effect => ({ ...effect })) };
     },
 
     assignRandomFromTier(captainId, tier, source = 'auto_assign') {

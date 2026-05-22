@@ -62,6 +62,39 @@
     });
   }
 
+  function captainName(captainId) {
+    const captain = Hexcore2.state.captains.find(item => item.id === captainId);
+    return captain ? captain.name : '未知队长';
+  }
+
+  function effectLabel(effect) {
+    const sourceName = effect.sourceCaptainId ? captainName(effect.sourceCaptainId) : '本队';
+    const labels = {
+      camp_scout: `${sourceName} 的【阵营侦察】：本次商店额外展示 ${Number(effect.countBonus) || 1} 张同阵营卡`,
+      directed_recruit: `${sourceName} 的【定向招募】：本次商店至少尝试出现 1 张${effect.lane || '指定位置'}卡`,
+      discount_coupon: `${sourceName} 的【压价券】：本次购买费用 -1，最低 1 金币`,
+      reserved_seat: `${sourceName} 的【保留席位】：本次刷新保留指定卡牌`,
+      camp_blockade: `${sourceName} 的【阵营封锁】：本次商店展示数量 -${Number(effect.countPenalty) || 1}`,
+      price_interference: `${sourceName} 的【抬价干扰】：下一次购买费用 +1 金币`,
+      skip_round: `${sourceName} 的【跳过效果】：本轮行动被跳过`,
+      move_first: `${sourceName} 的【顺位效果】：本轮顺位前移`,
+      fixed_position: `${sourceName} 的【顺位效果】：本轮固定到指定顺位`,
+      move_down_one: `${sourceName} 的【顺位效果】：本轮顺位后移 1 位`,
+    };
+    return labels[effect.type] || (effect.reason || effect.type || '未知效果');
+  }
+
+  function effectStatus(effect, status) {
+    return {
+      type: effect.type,
+      status,
+      sourceCaptainId: effect.sourceCaptainId || '',
+      sourceCaptainName: effect.sourceCaptainId ? captainName(effect.sourceCaptainId) : '',
+      label: effectLabel(effect),
+      reason: effect.reason || '',
+    };
+  }
+
   function activeCardPlayer(card) {
     return card && Hexcore2.state.players.find(player => player.id === card.playerId);
   }
@@ -145,7 +178,7 @@
             : target(base, '需选择卡牌', '请选择当前商店中的1张卡。');
         }
         if (['camp-blockade', 'price-interference'].includes(hex.id)) {
-          const targets = hex.id === 'camp-blockade' ? unusedSameCampCaptains(captain.id) : sameCampCaptains(captain.id);
+          const targets = unusedSameCampCaptains(captain.id);
           return targets.length
             ? target(base, '需选择同阵营队长', `当前可选择 ${targets.length} 名同阵营队长。`, { targetCount: targets.length })
             : blocked(base, '无同阵营目标', '没有满足条件的同阵营队长。');
@@ -222,13 +255,13 @@
       if (hexcore.id === 'camp-blockade') {
         const target = unusedSameCampCaptains(captain.id).find(item => item.id === options.targetCaptainId);
         if (!target) return logFail('阵营封锁只能选择同阵营尚未行动队长');
-        pushEffect({ type: 'camp_blockade', sourceCaptainId: captain.id, captainId: target.id, countPenalty: 1, reason: `${captain.name} 封锁 ${target.name}` });
+        pushEffect({ type: 'camp_blockade', sourceCaptainId: captain.id, captainId: target.id, countPenalty: 1, reason: `${captain.name} 对 ${target.name} 使用阵营封锁，目标下次商店少展示 1 张卡` });
       }
 
       if (hexcore.id === 'price-interference') {
-        const target = sameCampCaptains(captain.id).find(item => item.id === options.targetCaptainId);
-        if (!target) return logFail('抬价干扰只能选择同阵营队长');
-        pushEffect({ type: 'price_interference', sourceCaptainId: captain.id, captainId: target.id, reason: `${captain.name} 干扰 ${target.name}` });
+        const target = unusedSameCampCaptains(captain.id).find(item => item.id === options.targetCaptainId);
+        if (!target) return logFail('抬价干扰只能选择同阵营尚未行动队长');
+        pushEffect({ type: 'price_interference', sourceCaptainId: captain.id, captainId: target.id, reason: `${captain.name} 对 ${target.name} 使用抬价干扰，目标下次购买费用 +1 金币` });
       }
 
       if (hexcore.id === 'order-overtake') {
@@ -253,8 +286,23 @@
       }
 
       markUsed(hexcore);
-      Hexcore2.eventStore.append('海克斯激活', `${captain.name} 使用【${hexcore.name}】`, 'info');
+      Hexcore2.eventStore.append('海克斯激活', `${captain.name} 使用【${hexcore.name}】${options.targetCaptainId ? `，目标：${captainName(options.targetCaptainId)}` : ''}`, 'info');
       return { ok: true, advanceTurn: hexcore.id === 'steady-reinforce' };
+    },
+
+    effectStatusForCaptain(captainId) {
+      const effects = Hexcore2.state.draft.runtimeEffects || [];
+      const pending = effects
+        .filter(effect => effect.captainId === captainId && !effect.consumed)
+        .map(effect => effectStatus(effect, '待生效'));
+      const draw = Hexcore2.state.draft.currentDraw;
+      const appliedFromShop = draw && draw.captainId === captainId && Array.isArray(draw.appliedEffects)
+        ? draw.appliedEffects.map(effect => effectStatus(effect, '已生效'))
+        : [];
+      const appliedFromPurchase = draw && draw.captainId === captainId && Array.isArray(draw.purchaseEffects)
+        ? draw.purchaseEffects.map(effect => effectStatus(effect, '已生效'))
+        : [];
+      return [...pending, ...appliedFromShop, ...appliedFromPurchase].slice(0, 4);
     },
 
     isBlinded() { return false; },

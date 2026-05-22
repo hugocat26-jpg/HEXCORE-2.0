@@ -389,6 +389,19 @@
       };
     }).filter(card => card.playerId);
 
+    const normalizeDrawEffects = effects => (Array.isArray(effects) ? effects : []).slice(0, 8).map(effect => {
+      const item = effect && typeof effect === 'object' ? { ...effect } : {};
+      ['captainId', 'sourceCaptainId', 'targetCaptainId', 'firstCaptainId', 'secondCaptainId'].forEach(key => {
+        if (key in item) item[key] = remapCaptain(item[key]);
+      });
+      ['playerId', 'targetPlayerId', 'firstPlayerId', 'secondPlayerId', 'appliedPlayerId'].forEach(key => {
+        if (key in item) item[key] = remapId(item[key], playerIdMap);
+      });
+      item.type = sanitizeText(item.type, 'effect', 32);
+      item.reason = sanitizeText(item.reason, '', 160);
+      return item;
+    });
+
     const currentDrawSource = source.currentDraw && typeof source.currentDraw === 'object'
       ? source.currentDraw
       : null;
@@ -408,6 +421,8 @@
         pickMode: allowedPickModes.has(pickMode) ? pickMode : 'normal',
         generatedBy: sanitizeText(currentDrawSource.generatedBy, 'free_shop', 32),
         refreshCostPaid: clampNumber(currentDrawSource.refreshCostPaid, 0, 4, 0),
+        appliedEffects: normalizeDrawEffects(currentDrawSource.appliedEffects),
+        purchaseEffects: normalizeDrawEffects(currentDrawSource.purchaseEffects),
         timeoutEndsAt: currentDrawSource.timeoutEndsAt ? clampNumber(currentDrawSource.timeoutEndsAt, 0, Number.MAX_SAFE_INTEGER, 0) : undefined,
         timeoutPausedRemainingMs: currentDrawSource.timeoutPausedRemainingMs ? clampNumber(currentDrawSource.timeoutPausedRemainingMs, 0, 300000, 0) : undefined,
         timeLimitSeconds: currentDrawSource.timeLimitSeconds ? clampNumber(currentDrawSource.timeLimitSeconds, 1, 300, defaultState.settings.pickTimeoutSeconds) : undefined,

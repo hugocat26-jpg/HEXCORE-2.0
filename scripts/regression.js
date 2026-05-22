@@ -502,14 +502,27 @@ function testNewHexcores() {
 
   const blockade = createReadyHarness().H;
   blockade.state.draft.currentIndex = 2;
-  assert(blockade.hexcoreEngine.activate('camp-blockade', { targetCaptainId: 'c4' }).ok, '阵营封锁应能选择同阵营队长');
+  blockade.state.draft.currentDraw = null;
+  assert(blockade.hexcoreEngine.activate('camp-blockade', { targetCaptainId: 'c4' }).ok, '阵营封锁应能选择同阵营尚未行动队长');
+  blockade.state.draft.currentIndex = 3;
+  blockade.actions.drawCards();
+  assert(blockade.state.draft.currentDraw.cards.length === 4, '阵营封锁生效后目标队长商店应少展示1张卡');
 
-  const price = createReadyHarness().H;
+  const { H: price, app: priceApp } = createReadyHarness();
   price.state.draft.currentIndex = 3;
-  assert(price.hexcoreEngine.activate('price-interference', { targetCaptainId: 'c2' }).ok, '抬价干扰应能选择同阵营队长');
-  price.state.draft.currentIndex = 1;
+  price.state.draft.currentDraw = null;
+  assert(price.hexcoreEngine.activate('price-interference', { targetCaptainId: 'c5' }).ok, '抬价干扰应能选择同阵营尚未行动队长');
+  assert(price.hexcoreEngine.effectStatusForCaptain('c5').some(effect => effect.label.includes('购买费用 +1')), '抬价干扰应在目标队长状态中显示待生效');
+  price.state.draft.currentIndex = 4;
   price.actions.drawCards();
-  assert(price.state.draft.runtimeEffects.some(effect => effect.type === 'price_interference' && effect.captainId === 'c2'), '抬价干扰效果应记录到目标队长');
+  assert(priceApp.innerHTML.includes('海克斯影响') && priceApp.innerHTML.includes('抬价干扰'), '目标队长回合状态栏应显示受到抬价干扰影响');
+  const priceCaptain = currentCaptain(price);
+  const priceBeforeGold = priceCaptain.economy.gold;
+  const pricePlayer = playerById(price, price.state.draft.currentDraw.cards[0].playerId);
+  price.state.draft.selectedSlot = 0;
+  price.actions.pickCard();
+  assert(priceCaptain.economy.gold === priceBeforeGold - pricePlayer.tier - 1, '抬价干扰生效后购买费用应实际增加1金币');
+  assert(price.state.draft.currentDraw.purchaseEffects.some(effect => effect.type === 'price_interference'), '购买后应记录已生效的抬价干扰');
 
   const overtake = createReadyHarness().H;
   overtake.state.draft.currentIndex = 1;

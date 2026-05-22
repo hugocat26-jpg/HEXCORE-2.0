@@ -41,6 +41,18 @@
     return explanation ? explanation.reasons : [];
   }
 
+  function currentHexcoreStatus(captain) {
+    if (!captain || !Hexcore2.hexcoreEngine || !Hexcore2.hexcoreEngine.effectStatusForCaptain) return '';
+    const statuses = Hexcore2.hexcoreEngine.effectStatusForCaptain(captain.id);
+    if (!statuses.length) return '';
+    return `
+      <div class="top-hex-status" title="${escapeHtml(statuses.map(item => `${item.status}：${item.label}`).join('；'))}">
+        <span>海克斯影响</span>
+        ${statuses.map(item => `<b class="${item.status === '已生效' ? 'applied' : 'pending'}">${escapeHtml(item.status)}：${escapeHtml(item.label)}</b>`).join('')}
+      </div>
+    `;
+  }
+
   function escapeHtml(value) {
     return String(value ?? '')
       .replace(/&/g, '&amp;')
@@ -192,10 +204,16 @@
       `;
     } else if (hex.id === 'camp-blockade' || hex.id === 'price-interference') {
       const camp = Hexcore2.selectors.captainCamp(captain.id);
-      const targets = Hexcore2.state.captains.filter(item => item.id !== captain.id && Hexcore2.selectors.captainCamp(item.id) === camp);
+      const order = Hexcore2.state.draft.currentOrder || [];
+      const pending = new Set(order.slice(Hexcore2.state.draft.currentIndex));
+      const targets = Hexcore2.state.captains.filter(item =>
+        item.id !== captain.id
+        && pending.has(item.id)
+        && Hexcore2.selectors.captainCamp(item.id) === camp
+      );
       body = `
         <label>
-          <small>同阵营队长</small>
+          <small>同阵营尚未行动队长</small>
           <select id="hex-target-first">
             ${selectOptions(targets, '没有同阵营目标')}
           </select>
@@ -469,6 +487,7 @@
         <div class="captain-title">当前队长：<strong>${captain ? escapeHtml(captain.name) : '无'}</strong></div>
         <div class="captain-title">金币：<strong>${economy ? economy.gold : 0}</strong></div>
         <div class="captain-title">刷新：<strong>${roundState && !roundState.freeShopUsed ? '首次免费' : `${nextRefreshCost}金币`}</strong></div>
+        ${currentHexcoreStatus(captain)}
         <div class="top-spacer"></div>
         <div class="live-status ${Hexcore2.state.draft.phase === 'completed' ? 'done' : ''}"><span></span>${statusText}</div>
         <div class="clock">${time}</div>

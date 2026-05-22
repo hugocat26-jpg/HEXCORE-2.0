@@ -360,6 +360,42 @@ select:focus-visible {
   flex: 1 1 auto;
 }
 
+.top-hex-status {
+  min-width: 220px;
+  max-width: 420px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.top-hex-status span {
+  flex: 0 0 auto;
+  color: var(--amber);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.top-hex-status b {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  border: 1px solid rgba(244, 182, 42, 0.36);
+  border-radius: 999px;
+  background: rgba(244, 182, 42, 0.1);
+  color: #ffe6a3;
+  padding: 4px 8px;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.top-hex-status b.applied {
+  border-color: rgba(85, 200, 121, 0.42);
+  background: rgba(85, 200, 121, 0.12);
+  color: #b9ffd1;
+}
+
 .live-status,
 .clock {
   color: #c5d5df;

@@ -69,39 +69,60 @@
 
   function consumeOneEffect(captainId, type) {
     const effect = runtimeEffectsFor(captainId, type)[0];
-    if (effect) effect.consumed = true;
+    if (effect) {
+      effect.consumed = true;
+      effect.appliedRound = Hexcore2.state.draft.round;
+      effect.appliedAt = new Date().toISOString();
+    }
     return effect;
   }
 
-  function shopSizeFor(captainId, baseSize) {
+  function trackApplied(appliedEffects, effect, detail) {
+    if (!effect) return;
+    Object.assign(effect, detail || {});
+    appliedEffects.push({ ...effect });
+  }
+
+  function shopSizeFor(captainId, baseSize, appliedEffects) {
     let size = baseSize;
     runtimeEffectsFor(captainId, 'camp_scout').forEach(effect => {
-      size += Number(effect.countBonus) || 1;
+      const countBonus = Number(effect.countBonus) || 1;
+      size += countBonus;
       effect.consumed = true;
+      effect.appliedRound = Hexcore2.state.draft.round;
+      effect.appliedAt = new Date().toISOString();
+      trackApplied(appliedEffects, effect, { countBonus });
     });
     runtimeEffectsFor(captainId, 'camp_blockade').forEach(effect => {
-      size -= Number(effect.countPenalty) || 1;
+      const countPenalty = Number(effect.countPenalty) || 1;
+      size -= countPenalty;
       effect.consumed = true;
+      effect.appliedRound = Hexcore2.state.draft.round;
+      effect.appliedAt = new Date().toISOString();
+      trackApplied(appliedEffects, effect, { countPenalty });
     });
     return Math.max(3, Math.min(6, size));
   }
 
-  function reservedPlayerFor(captainId, excludedIds) {
+  function reservedPlayerFor(captainId, excludedIds, appliedEffects) {
     const effect = consumeOneEffect(captainId, 'reserved_seat');
     if (!effect || !effect.playerId || excludedIds.has(effect.playerId)) return null;
     const player = Hexcore2.state.players.find(item => item.id === effect.playerId);
     const camp = Hexcore2.selectors.captainCamp(captainId);
     if (!player || player.status !== 'available' || player.camp !== camp) return null;
+    trackApplied(appliedEffects, effect, { appliedPlayerId: player.id });
     return player;
   }
 
-  function directedPlayerFor(captainId, excludedIds) {
+  function directedPlayerFor(captainId, excludedIds, appliedEffects) {
     const effect = consumeOneEffect(captainId, 'directed_recruit');
     if (!effect || !effect.lane) return null;
     const candidates = availableCards(captainId, excludedIds)
       .filter(player => String(player.lane || '') === String(effect.lane || ''));
     if (!candidates.length) return null;
-    return shuffle(candidates)[0];
+    const player = shuffle(candidates)[0];
+    trackApplied(appliedEffects, effect, { appliedPlayerId: player.id });
+    return player;
   }
 
   function cardFromPlayer(player, slotIndex) {
@@ -127,10 +148,11 @@
       const round = roundNumber(options.round);
       const excludedIds = new Set();
       const baseSize = Math.min(Hexcore2.state.settings.shopSize || 5, availableCards(captainId).length);
-      const targetCount = Math.min(shopSizeFor(captainId, baseSize), availableCards(captainId).length);
+      const appliedEffects = [];
+      const targetCount = Math.min(shopSizeFor(captainId, baseSize, appliedEffects), availableCards(captainId).length);
       const cards = [];
       const weights = this.probabilityForRound(round);
-      const seeded = [reservedPlayerFor(captainId, excludedIds), directedPlayerFor(captainId, excludedIds)].filter(Boolean);
+      const seeded = [reservedPlayerFor(captainId, excludedIds, appliedEffects), directedPlayerFor(captainId, excludedIds, appliedEffects)].filter(Boolean);
       seeded.forEach(player => {
         if (cards.length >= targetCount || excludedIds.has(player.id)) return;
         excludedIds.add(player.id);
@@ -157,6 +179,7 @@
         generatedBy: options.generatedBy || 'free_shop',
         refreshCostPaid: Math.max(0, Number(options.refreshCostPaid) || 0),
         reason: options.reason || '',
+        appliedEffects,
         cards,
       };
     },

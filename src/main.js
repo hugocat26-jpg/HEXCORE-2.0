@@ -65,6 +65,19 @@
     if (Hexcore2.historyService) Hexcore2.historyService.push(label);
   }
 
+  function appendAppliedHexcoreEvents(draw) {
+    if (!draw || !Array.isArray(draw.appliedEffects) || !draw.appliedEffects.length) return;
+    const captain = Hexcore2.state.captains.find(item => item.id === draw.captainId);
+    draw.appliedEffects.forEach(effect => {
+      Hexcore2.eventStore.append(
+        '海克斯生效',
+        `${captain ? captain.name : '当前队长'} 开店时触发：${effect.reason || effect.type}`,
+        'warn',
+        { effectType: effect.type, sourceCaptainId: effect.sourceCaptainId, captainId: draw.captainId }
+      );
+    });
+  }
+
   function normalizeAfterConfigChange() {
     if (Hexcore2.normalizeState) Hexcore2.normalizeState(Hexcore2.state);
     Hexcore2.turnOrderEngine.recompute();
@@ -407,6 +420,7 @@
         generatedBy: 'free_shop',
         reason: '本轮首次免费商店',
       });
+      appendAppliedHexcoreEvents(Hexcore2.state.draft.currentDraw);
       Hexcore2.economyEngine.markFreeShop(captain.id);
       Hexcore2.state.draft.selectedSlot = 0;
       Hexcore2.state.draft.pickedThisTurn = false;
@@ -445,6 +459,7 @@
         refreshCostPaid: result.cost,
         reason: `付费刷新，消耗 ${result.cost} 金币`,
       });
+      appendAppliedHexcoreEvents(Hexcore2.state.draft.currentDraw);
       Hexcore2.state.draft.selectedSlot = 0;
       Hexcore2.state.draft.pickedThisTurn = false;
       Hexcore2.eventStore.append(
@@ -485,6 +500,7 @@
         Hexcore2.ui.render();
         return;
       }
+      draw.purchaseEffects = Array.isArray(result.appliedEffects) ? result.appliedEffects : [];
       slot.purchased = true;
       slot.purchasedAt = new Date().toISOString();
       Hexcore2.state.draft.pickedThisTurn = true;
