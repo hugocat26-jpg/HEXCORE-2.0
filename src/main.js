@@ -177,6 +177,16 @@
     Hexcore2.state.hexcoreDraft.refreshUsed = false;
   }
 
+  function applyHexcoreOnAcquire(captain, hexcore) {
+    if (!captain || !hexcore || !captain.economy) return;
+    captain.hexcoreEconomy = captain.hexcoreEconomy || {};
+    if (hexcore.id === 'donation' && !captain.hexcoreEconomy.donationApplied) {
+      captain.economy.gold += 2;
+      captain.hexcoreEconomy.donationApplied = true;
+      Hexcore2.eventStore.append('捐赠', `${captain.name} 获得赞助捐赠，初始资金 +2`, 'success');
+    }
+  }
+
   function browserTimerAvailable() {
     return typeof global.setTimeout === 'function'
       && typeof global.clearTimeout === 'function'
@@ -827,6 +837,7 @@
       const list = Hexcore2.state.hexcoreAssignments[captainId] || [];
       Hexcore2.state.hexcoreAssignments[captainId] = list;
       list.push({ ...hexcore, status: hexcore.mode === 'passive' ? 'passive' : 'available' });
+      applyHexcoreOnAcquire(captain, hexcore);
       session.chosen = [...(session.chosen || []), hexcoreId];
       const ownedCount = list.length;
 
@@ -991,6 +1002,7 @@
       snapshot(`分配海克斯前：${captain.name}`);
       Hexcore2.state.hexcoreAssignments[captainId] = list;
       list.push({ ...hexcore, status: hexcore.mode === 'passive' ? 'passive' : 'available' });
+      applyHexcoreOnAcquire(captain, hexcore);
       Hexcore2.eventStore.append('分配海克斯', `${captain.name} 获得指定海克斯【${hexcore.name}】`, 'success');
       renderAndPersist();
     },

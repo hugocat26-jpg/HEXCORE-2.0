@@ -163,16 +163,16 @@ function installReadyTestData(H) {
   H.state.players = players;
   H.state.captains = captains;
   H.state.hexcoreAssignments = {
-    c1: take('camp-scout', 'discount-coupon', 'budget-refund'),
-    c2: take('directed-recruit', 'reserved-seat', 'order-overtake'),
+    c1: take('camp-scout', 'discount-coupon', 'sponsor-flow'),
+    c2: take('donation', 'reserved-seat', 'photographer'),
     c3: take('urgent-restock', 'camp-blockade', 'steady-reinforce'),
-    c4: take('price-interference', 'camp-scout', 'budget-refund'),
+    c4: take('price-interference', 'camp-scout', 'open-feast'),
     c5: take('reserved-seat', 'urgent-restock', 'discount-coupon'),
-    c6: take('camp-scout', 'camp-blockade', 'budget-refund'),
-    c7: take('directed-recruit', 'price-interference', 'order-overtake'),
+    c6: take('camp-scout', 'camp-blockade', 'giant-slayer'),
+    c7: take('vampiric-habit', 'price-interference', 'photographer'),
     c8: take('reserved-seat', 'steady-reinforce', 'discount-coupon'),
-    c9: take('urgent-restock', 'camp-scout', 'budget-refund'),
-    c10: take('camp-blockade', 'price-interference', 'order-overtake'),
+    c9: take('urgent-restock', 'camp-scout', 'sponsor-flow'),
+    c10: take('camp-blockade', 'price-interference', 'giant-slayer'),
   };
   H.state.draft = {
     ...H.state.draft,
@@ -451,14 +451,6 @@ function testNewHexcores() {
   failScout.actions.drawCards();
   assert(!failScout.hexcoreEngine.activate('camp-scout').ok, '阵营侦察在商店打开后应失败');
 
-  const directed = createReadyHarness().H;
-  directed.state.draft.currentIndex = 1;
-  directed.state.draft.currentDraw = null;
-  directed.economyEngine.roundState(currentCaptain(directed).id).freeShopUsed = false;
-  assert(directed.hexcoreEngine.activate('directed-recruit', { lane: '上路' }).ok, '定向招募应接受位置目标');
-  directed.actions.drawCards();
-  assert(directed.state.draft.currentDraw.cards.some(card => playerById(directed, card.playerId).lane === '上路'), '定向招募商店应出现指定位置');
-
   const discount = createReadyHarness().H;
   discount.state.draft.currentIndex = 4;
   const discountCaptain = currentCaptain(discount);
@@ -503,19 +495,27 @@ function testNewHexcores() {
   const blockade = createReadyHarness().H;
   blockade.state.draft.currentIndex = 2;
   blockade.state.draft.currentDraw = null;
-  assert(blockade.hexcoreEngine.activate('camp-blockade', { targetCaptainId: 'c4' }).ok, '阵营封锁应能选择同阵营尚未行动队长');
+  assert(blockade.hexcoreEngine.activate('camp-blockade', { targetCaptainId: 'c6' }).ok, '阵营封锁应能选择任意阵营队长');
   blockade.state.draft.currentIndex = 3;
   blockade.actions.drawCards();
+  blockade.state.draft.currentIndex = 5;
+  blockade.state.draft.currentDraw = null;
+  blockade.economyEngine.roundState('c6').freeShopUsed = false;
+  blockade.actions.drawCards();
   assert(blockade.state.draft.currentDraw.cards.length === 4, '阵营封锁生效后目标队长商店应少展示1张卡');
+  const delayedBlockade = createReadyHarness().H;
+  delayedBlockade.state.draft.currentIndex = 2;
+  delayedBlockade.state.draft.currentDraw = null;
+  assert(delayedBlockade.hexcoreEngine.activate('camp-blockade', { targetCaptainId: 'c1' }).ok, '阵营封锁可对本轮已行动队长使用并延迟到下轮生效');
 
   const { H: price, app: priceApp } = createReadyHarness();
   price.state.draft.currentIndex = 3;
   price.state.draft.currentDraw = null;
-  assert(price.hexcoreEngine.activate('price-interference', { targetCaptainId: 'c5' }).ok, '抬价干扰应能选择同阵营尚未行动队长');
-  assert(price.hexcoreEngine.effectStatusForCaptain('c5').some(effect => effect.label.includes('购买费用 +1')), '抬价干扰应在目标队长状态中显示待生效');
-  price.state.draft.currentIndex = 4;
+  assert(price.hexcoreEngine.activate('price-interference', { targetCaptainId: 'c6' }).ok, '抬价干扰应能选择任意阵营队长');
+  assert(price.hexcoreEngine.effectStatusForCaptain('c6').some(effect => effect.label.includes('购买费用 +1')), '抬价干扰应在目标队长状态中显示待生效');
+  price.state.draft.currentIndex = 5;
   price.actions.drawCards();
-  assert(priceApp.innerHTML.includes('海克斯影响') && priceApp.innerHTML.includes('抬价干扰'), '目标队长回合状态栏应显示受到抬价干扰影响');
+  assert(priceApp.innerHTML.includes('+1') && priceApp.innerHTML.includes('shop-price-badge'), '抬价干扰目标商店卡应显示醒目的+1费用标记');
   const priceCaptain = currentCaptain(price);
   const priceBeforeGold = priceCaptain.economy.gold;
   const pricePlayer = playerById(price, price.state.draft.currentDraw.cards[0].playerId);
@@ -524,26 +524,57 @@ function testNewHexcores() {
   assert(priceCaptain.economy.gold === priceBeforeGold - pricePlayer.tier - 1, '抬价干扰生效后购买费用应实际增加1金币');
   assert(price.state.draft.currentDraw.purchaseEffects.some(effect => effect.type === 'price_interference'), '购买后应记录已生效的抬价干扰');
 
-  const overtake = createReadyHarness().H;
-  overtake.state.draft.currentIndex = 1;
-  overtake.state.draft.currentDraw = null;
-  assert(overtake.hexcoreEngine.activate('order-overtake').ok, '顺位插队应能交换前一位队长');
-  assert(overtake.state.draft.currentOrder[0] === 'c2', '顺位插队后当前队长应前移');
+  const sponsor = createReadyHarness().H;
+  const sponsorCaptain = currentCaptain(sponsor);
+  const sponsorPlayer = sponsor.state.players.find(player => player.camp === 'local' && player.tier >= 3 && player.status === 'available');
+  sponsorCaptain.economy.gold = 10;
+  const sponsorBeforeGold = sponsorCaptain.economy.gold;
+  sponsor.assignmentEngine.purchase(sponsorCaptain.id, sponsorPlayer.id, 'gold_shop_purchase');
+  assert(sponsorCaptain.sponsorFlowUsed === 1 && sponsorCaptain.economy.gold === sponsorBeforeGold - sponsorPlayer.tier + 1, '赞助回流应在购买3费及以上选手后返还1金币');
 
-  const refund = createReadyHarness().H;
-  const refundCaptain = currentCaptain(refund);
-  const cheap = refund.state.players.find(player => player.camp === 'local' && player.tier <= 2 && player.status === 'available');
-  refund.assignmentEngine.purchase(refundCaptain.id, cheap.id, 'gold_shop_purchase');
-  assert(refundCaptain.budgetRefundUsed, '预算返还应在购买1费或2费时自动触发');
+  const giant = createReadyHarness().H;
+  const giantCaptain = giant.state.captains.find(captain => (giant.state.hexcoreAssignments[captain.id] || []).some(hex => hex.id === 'giant-slayer'));
+  const giantPlayer = giant.state.players.find(player => player.camp === giant.selectors.captainCamp(giantCaptain.id) && player.tier === 4 && player.status === 'available');
+  giantCaptain.economy.gold = 10;
+  const giantBeforeGold = giantCaptain.economy.gold;
+  giant.assignmentEngine.purchase(giantCaptain.id, giantPlayer.id, 'gold_shop_purchase');
+  assert(giantCaptain.giantSlayerDiscountUsed[4] && giantCaptain.economy.gold === giantBeforeGold - 3, '巨人杀手首次购买4费卡应优惠1金币');
+
+  const donation = createReadyHarness().H;
+  const donationCaptain = currentCaptain(donation);
+  const donationBeforeGold = donationCaptain.economy.gold;
+  donation.state.hexcoreAssignments[donationCaptain.id].pop();
+  donation.actions.assignHexcoreToCaptain(donationCaptain.id, 'donation');
+  assert(donationCaptain.economy.gold === donationBeforeGold + 2, '捐赠被分配后应立刻增加2金币');
+
+  const feast = createReadyHarness().H;
+  const feastCaptain = feast.state.captains.find(captain => (feast.state.hexcoreAssignments[captain.id] || []).some(hex => hex.id === 'open-feast'));
+  feast.state.draft.round = 3;
+  const feastBeforeGold = feastCaptain.economy.gold;
+  feast.economyEngine.applyRoundIncome(3);
+  assert(feastCaptain.economy.gold === feastBeforeGold + feast.state.settings.roundIncome + 3, '开饭啦应在第3轮额外获得3金币');
+
+  const photo = createReadyHarness().H;
+  const photoCaptain = photo.state.captains.find(captain => (photo.state.hexcoreAssignments[captain.id] || []).some(hex => hex.id === 'photographer'));
+  drawForCaptain(photo, photoCaptain.id);
+  const photoBeforeGold = photoCaptain.economy.gold;
+  photo.actions.refreshShop();
+  assert(photoCaptain.economy.gold === photoBeforeGold && photo.economyEngine.roundState(photoCaptain.id).photographerRefreshUsed, '摄影艺术家每轮第一次刷新应免费且不累计到额外金币消耗');
+
+  const vampire = createReadyHarness().H;
+  vampire.state.draft.currentIndex = 6;
+  const vampireCaptain = currentCaptain(vampire);
+  const vampireBeforeGold = vampireCaptain.economy.gold;
+  assert(vampire.hexcoreEngine.activate('vampiric-habit').ok, '吸血习性应可从金币最高的其他队长处吸取金币');
+  assert(vampireCaptain.economy.gold === vampireBeforeGold + 3, '吸血习性应最多获得3金币');
 
   const steady = createReadyHarness().H;
   steady.state.draft.currentIndex = 2;
   assert(steady.hexcoreEngine.activate('steady-reinforce').ok, '稳健补强应从同阵营最低费用池分配');
   assert(currentCaptain(steady).team.length === 1, '稳健补强成功后应入队1人');
 
-  const badTarget = createReadyHarness().H;
-  badTarget.state.draft.currentIndex = 2;
-  assert(!badTarget.hexcoreEngine.activate('camp-blockade', { targetCaptainId: 'c6' }).ok, '同阵营队长类海克斯应拒绝跨阵营目标');
+  const removed = createReadyHarness().H;
+  assert(!removed.sampleData.hexcores.some(hex => ['directed-recruit', 'order-overtake', 'budget-refund'].includes(hex.id)), '废弃海克斯不应继续进入海克斯池');
 }
 
 function testUiNavigationAndSecurity() {

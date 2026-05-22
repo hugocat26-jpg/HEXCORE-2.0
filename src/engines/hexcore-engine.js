@@ -2,15 +2,18 @@
   const Hexcore2 = global.Hexcore2 || (global.Hexcore2 = {});
   const CAMP_HEXCORE_IDS = new Set([
     'camp-scout',
-    'directed-recruit',
     'discount-coupon',
     'reserved-seat',
     'urgent-restock',
     'camp-blockade',
     'price-interference',
-    'order-overtake',
-    'budget-refund',
     'steady-reinforce',
+    'donation',
+    'sponsor-flow',
+    'open-feast',
+    'vampiric-habit',
+    'giant-slayer',
+    'photographer',
   ]);
 
   function hasHexcore(captainId, hexcoreId) {
@@ -54,6 +57,19 @@
     return sameCampCaptains(sourceCaptainId).filter(captain => pending.has(captain.id));
   }
 
+  function targetableCaptains(sourceCaptainId) {
+    const state = Hexcore2.state;
+    const order = state.draft.currentOrder || [];
+    const currentIndex = state.draft.currentIndex;
+    return state.captains.filter(captain => {
+      if (captain.id === sourceCaptainId) return false;
+      if (Hexcore2.selectors.teamSize(captain.id) >= Hexcore2.selectors.teamMemberCapacity(captain.id)) return false;
+      const index = order.indexOf(captain.id);
+      if (index >= currentIndex) return true;
+      return state.draft.round < state.draft.maxRounds;
+    });
+  }
+
   function pushEffect(effect) {
     Hexcore2.state.draft.runtimeEffects.push({
       round: Hexcore2.state.draft.round,
@@ -71,7 +87,6 @@
     const sourceName = effect.sourceCaptainId ? captainName(effect.sourceCaptainId) : '本队';
     const labels = {
       camp_scout: `${sourceName} 的【阵营侦察】：本次商店额外展示 ${Number(effect.countBonus) || 1} 张同阵营卡`,
-      directed_recruit: `${sourceName} 的【定向招募】：本次商店至少尝试出现 1 张${effect.lane || '指定位置'}卡`,
       discount_coupon: `${sourceName} 的【压价券】：本次购买费用 -1，最低 1 金币`,
       reserved_seat: `${sourceName} 的【保留席位】：本次刷新保留指定卡牌`,
       camp_blockade: `${sourceName} 的【阵营封锁】：本次商店展示数量 -${Number(effect.countPenalty) || 1}`,
@@ -136,15 +151,18 @@
       const target = (base, status, reason, extra = {}) => ({ ...base, type: 'target', status, reason, executable: true, needsTarget: true, ...extra });
       const labels = {
         'camp-scout': '开店强化',
-        'directed-recruit': '选择位置',
         'discount-coupon': '购买减费',
         'reserved-seat': '保留卡牌',
         'urgent-restock': '替换卡牌',
-        'camp-blockade': '同阵营干扰',
-        'price-interference': '同阵营干扰',
-        'order-overtake': '顺位控制',
+        'camp-blockade': '商店干扰',
+        'price-interference': '费用干扰',
         'steady-reinforce': '稳健补强',
-        'budget-refund': '被动返还',
+        donation: '初始经济',
+        'sponsor-flow': '被动返还',
+        'open-feast': '轮次经济',
+        'vampiric-habit': '经济干扰',
+        'giant-slayer': '高费优惠',
+        photographer: '免费刷新',
       };
 
       return hexcores.map((hex, index) => {
@@ -162,14 +180,12 @@
         };
         if (!Hexcore2.selectors.isHexcoreEnabled(hex.id)) return blocked(base, '已禁用', '规则设置已禁用该海克斯。');
         if (!CAMP_HEXCORE_IDS.has(hex.id)) return blocked(base, '旧海克斯禁用', '阵营锁定模式不执行旧海克斯。');
-        if (hex.mode === 'passive') return passive(base, '被动待机', '购买1费或2费选手后自动返还1金币，每队全局1次。');
+        if (hex.mode === 'passive') return passive(base, '被动待机', hex.desc || '被动效果自动生效。');
         if (hex.status === 'used') return { ...base, type: 'used', status: '已使用', reason: '该海克斯次数已消耗。', executable: false };
-        if (remainingSlots <= 0 && hex.id !== 'order-overtake') return blocked(base, '队伍已满', '队伍已满员，不能再执行选人相关海克斯。');
-        if (['camp-scout', 'directed-recruit'].includes(hex.id)) {
+        if (remainingSlots <= 0 && !['camp-blockade', 'price-interference', 'vampiric-habit'].includes(hex.id)) return blocked(base, '队伍已满', '队伍已满员，不能再执行选人相关海克斯。');
+        if (hex.id === 'camp-scout') {
           if (shopOpen) return blocked(base, '商店已打开', '该海克斯必须在开店前使用。');
-          return hex.id === 'directed-recruit'
-            ? target(base, '需选择位置', '请选择上路、打野、中路、下路或辅助。')
-            : active(base, '可执行', '下一次商店额外展示1张同阵营可抽卡。');
+          return active(base, '可执行', '下一次商店额外展示1张同阵营可抽卡。');
         }
         if (['discount-coupon', 'reserved-seat', 'urgent-restock'].includes(hex.id)) {
           if (!shopOpen || roundState.purchaseUsed) return blocked(base, '无可处理商店', '该海克斯必须在当前商店打开且购买前使用。');
@@ -178,22 +194,20 @@
             : target(base, '需选择卡牌', '请选择当前商店中的1张卡。');
         }
         if (['camp-blockade', 'price-interference'].includes(hex.id)) {
-          const targets = unusedSameCampCaptains(captain.id);
+          const targets = targetableCaptains(captain.id);
           return targets.length
-            ? target(base, '需选择同阵营队长', `当前可选择 ${targets.length} 名同阵营队长。`, { targetCount: targets.length })
-            : blocked(base, '无同阵营目标', '没有满足条件的同阵营队长。');
-        }
-        if (hex.id === 'order-overtake') {
-          const order = Hexcore2.state.draft.currentOrder || [];
-          const indexInOrder = order.indexOf(captain.id);
-          return indexInOrder > 0
-            ? active(base, '可执行', '可和本轮尚未行动的前一位队长交换。')
-            : blocked(base, '无法插队', '当前没有可交换的前一位未行动队长。');
+            ? target(base, '需选择队长', `当前可选择 ${targets.length} 名队长；若目标本轮已行动，则下轮生效。`, { targetCount: targets.length })
+            : blocked(base, '无可用目标', '没有满足条件的目标队长。');
         }
         if (hex.id === 'steady-reinforce') {
           return lowestCampTierPlayer(captain.id)
             ? active(base, '可执行', '系统将从同阵营当前最低可用费用池随机分配1人。')
             : blocked(base, '无可抽选手', '同阵营没有任何可抽选手。');
+        }
+        if (hex.id === 'vampiric-habit') {
+          return Hexcore2.state.captains.some(item => item.id !== captain.id && item.economy && Number(item.economy.gold) > 0)
+            ? active(base, '可执行', '从金币最高的三名其他队长处每人获得1金币。')
+            : blocked(base, '无可吸取目标', '其他队长当前没有可吸取金币。');
         }
         return active(base, '可执行', '当前条件满足。');
       });
@@ -212,15 +226,6 @@
       if (hexcore.id === 'camp-scout') {
         if (isShopOpenFor(captain.id)) return logFail('阵营侦察必须在开店前使用');
         pushEffect({ type: 'camp_scout', captainId: captain.id, countBonus: 1, reason: `${captain.name} 使用阵营侦察` });
-      }
-
-      if (hexcore.id === 'directed-recruit') {
-        if (isShopOpenFor(captain.id)) return logFail('定向招募必须在开店前使用');
-        const lane = String(options.lane || options.targetLane || options.targetPlayerId || '').trim();
-        if (!lane) return logFail('定向招募需要选择一个位置');
-        const hasTarget = Hexcore2.selectors.availableCampPlayers(captain.id).some(player => player.lane === lane);
-        if (!hasTarget) return logFail(`同阵营没有可抽取的${lane}选手`);
-        pushEffect({ type: 'directed_recruit', captainId: captain.id, lane, reason: `${captain.name} 定向招募 ${lane}` });
       }
 
       if (hexcore.id === 'discount-coupon') {
@@ -253,25 +258,15 @@
       }
 
       if (hexcore.id === 'camp-blockade') {
-        const target = unusedSameCampCaptains(captain.id).find(item => item.id === options.targetCaptainId);
-        if (!target) return logFail('阵营封锁只能选择同阵营尚未行动队长');
+        const target = targetableCaptains(captain.id).find(item => item.id === options.targetCaptainId);
+        if (!target) return logFail('阵营封锁需要选择一名仍有生效窗口的队长');
         pushEffect({ type: 'camp_blockade', sourceCaptainId: captain.id, captainId: target.id, countPenalty: 1, reason: `${captain.name} 对 ${target.name} 使用阵营封锁，目标下次商店少展示 1 张卡` });
       }
 
       if (hexcore.id === 'price-interference') {
-        const target = unusedSameCampCaptains(captain.id).find(item => item.id === options.targetCaptainId);
-        if (!target) return logFail('抬价干扰只能选择同阵营尚未行动队长');
+        const target = targetableCaptains(captain.id).find(item => item.id === options.targetCaptainId);
+        if (!target) return logFail('抬价干扰需要选择一名仍有生效窗口的队长');
         pushEffect({ type: 'price_interference', sourceCaptainId: captain.id, captainId: target.id, reason: `${captain.name} 对 ${target.name} 使用抬价干扰，目标下次购买费用 +1 金币` });
-      }
-
-      if (hexcore.id === 'order-overtake') {
-        const order = state.draft.currentOrder;
-        const index = order.indexOf(captain.id);
-        if (index <= 0) return logFail('当前没有可插队的前一位未行动队长');
-        const prev = order[index - 1];
-        order[index - 1] = captain.id;
-        order[index] = prev;
-        state.draft.currentIndex = order.indexOf(captain.id);
       }
 
       if (hexcore.id === 'steady-reinforce') {
@@ -283,6 +278,19 @@
         if (!assigned) return logFail('稳健补强分配失败');
         roundState.purchaseUsed = true;
         state.draft.pickedThisTurn = true;
+      }
+
+      if (hexcore.id === 'vampiric-habit') {
+        const targets = [...state.captains]
+          .filter(item => item.id !== captain.id && item.economy && Number(item.economy.gold) > 0)
+          .sort((a, b) => Number(b.economy.gold) - Number(a.economy.gold))
+          .slice(0, 3);
+        if (!targets.length) return logFail('当前没有可吸取金币的队长');
+        targets.forEach(target => {
+          target.economy.gold -= 1;
+          captain.economy.gold += 1;
+        });
+        Hexcore2.eventStore.append('吸血习性', `${captain.name} 从 ${targets.map(item => item.name).join('、')} 处共获得 ${targets.length} 金币`, 'warn');
       }
 
       markUsed(hexcore);

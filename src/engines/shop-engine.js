@@ -114,17 +114,6 @@
     return player;
   }
 
-  function directedPlayerFor(captainId, excludedIds, appliedEffects) {
-    const effect = consumeOneEffect(captainId, 'directed_recruit');
-    if (!effect || !effect.lane) return null;
-    const candidates = availableCards(captainId, excludedIds)
-      .filter(player => String(player.lane || '') === String(effect.lane || ''));
-    if (!candidates.length) return null;
-    const player = shuffle(candidates)[0];
-    trackApplied(appliedEffects, effect, { appliedPlayerId: player.id });
-    return player;
-  }
-
   function cardFromPlayer(player, slotIndex) {
     return {
       slotId: `slot_${slotIndex + 1}`,
@@ -152,7 +141,7 @@
       const targetCount = Math.min(shopSizeFor(captainId, baseSize, appliedEffects), availableCards(captainId).length);
       const cards = [];
       const weights = this.probabilityForRound(round);
-      const seeded = [reservedPlayerFor(captainId, excludedIds, appliedEffects), directedPlayerFor(captainId, excludedIds, appliedEffects)].filter(Boolean);
+      const seeded = [reservedPlayerFor(captainId, excludedIds, appliedEffects)].filter(Boolean);
       seeded.forEach(player => {
         if (cards.length >= targetCount || excludedIds.has(player.id)) return;
         excludedIds.add(player.id);

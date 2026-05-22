@@ -19,7 +19,8 @@
   }
 
   function purchasePrice(captainId, player) {
-    let price = Math.max(1, Math.min(5, Number(player.tier) || 1));
+    const basePrice = Math.max(1, Number(player.tier) || 1);
+    let price = basePrice;
     const appliedEffects = [];
     const discount = activeEffect(captainId, 'discount_coupon');
     if (discount) {
@@ -31,7 +32,19 @@
       price += 1;
       appliedEffects.push(interference);
     }
-    return { price, appliedEffects };
+    const captain = Hexcore2.state.captains.find(item => item.id === captainId);
+    const hasGiantSlayer = captain && (Hexcore2.state.hexcoreAssignments[captain.id] || []).some(hex => hex.id === 'giant-slayer');
+    const used = captain && captain.giantSlayerDiscountUsed ? captain.giantSlayerDiscountUsed : {};
+    if (hasGiantSlayer && (basePrice === 4 || basePrice === 5) && !used[basePrice]) {
+      price = Math.max(1, price - 1);
+      appliedEffects.push({
+        type: 'giant_slayer',
+        captainId,
+        tier: basePrice,
+        reason: `巨人杀手：首次购买${basePrice}费卡优惠1金币`,
+      });
+    }
+    return { price, basePrice, appliedEffects };
   }
 
   function consumeAppliedEffects(effects, result = {}) {
@@ -43,12 +56,13 @@
     });
   }
 
-  function applyBudgetRefund(captain, player) {
-    const hasRefund = (Hexcore2.state.hexcoreAssignments[captain.id] || []).some(hex => hex.id === 'budget-refund');
-    if (!hasRefund || captain.budgetRefundUsed || Number(player.tier) > 2) return false;
+  function applySponsorFlow(captain, player, paidPrice) {
+    const hasSponsorFlow = (Hexcore2.state.hexcoreAssignments[captain.id] || []).some(hex => hex.id === 'sponsor-flow');
+    captain.sponsorFlowUsed = Math.max(0, Number(captain.sponsorFlowUsed) || 0);
+    if (!hasSponsorFlow || captain.sponsorFlowUsed >= 2 || Number(paidPrice) < 3) return false;
     captain.economy.gold += 1;
-    captain.budgetRefundUsed = true;
-    Hexcore2.eventStore.append('预算返还', `${captain.name} 购买 ${player.tier}费选手「${player.name}」，返还 1 金币`, 'success');
+    captain.sponsorFlowUsed += 1;
+    Hexcore2.eventStore.append('赞助回流', `${captain.name} 购买「${player.name}」后获得赞助返还 1 金币（${captain.sponsorFlowUsed}/2）`, 'success');
     return true;
   }
 
@@ -106,6 +120,12 @@
         return { ok: false, reason: '购买失败，队伍容量或选手状态已变化' };
       }
       consumeAppliedEffects(pricing.appliedEffects, { appliedPrice: price, appliedPlayerId: player.id });
+      pricing.appliedEffects.forEach(effect => {
+        if (effect.type === 'giant_slayer') {
+          captain.giantSlayerDiscountUsed = captain.giantSlayerDiscountUsed || {};
+          captain.giantSlayerDiscountUsed[effect.tier] = true;
+        }
+      });
       Hexcore2.eventStore.append(
         '金币购买',
         `${captain.name} 花费 ${price} 金币购买「${player.name}」，剩余 ${captain.economy.gold} 金币`,
@@ -120,7 +140,7 @@
           { source, price, playerId, effectType: effect.type, sourceCaptainId: effect.sourceCaptainId }
         );
       });
-      applyBudgetRefund(captain, player);
+      applySponsorFlow(captain, player, price);
       return { ok: true, price, gold: captain.economy.gold, appliedEffects: pricing.appliedEffects.map(effect => ({ ...effect })) };
     },
 

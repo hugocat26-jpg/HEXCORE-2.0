@@ -114,15 +114,18 @@
       photographer: '&#128247;',
       'order-swap': '&#8644;',
       'camp-scout': '&#128269;',
-      'directed-recruit': '&#127919;',
       'discount-coupon': '&#127903;',
       'reserved-seat': '&#128204;',
       'urgent-restock': '&#128260;',
       'camp-blockade': '&#128737;',
       'price-interference': '&#128200;',
-      'order-overtake': '&#9197;',
-      'budget-refund': '&#128176;',
       'steady-reinforce': '&#9878;',
+      donation: '&#127873;',
+      'sponsor-flow': '&#128176;',
+      'open-feast': '&#127860;',
+      'vampiric-habit': '&#129656;',
+      'giant-slayer': '&#128481;',
+      photographer: '&#128247;',
     };
     return glyphs[hexcore.id] || '&#10022;';
   }
@@ -136,7 +139,7 @@
 
   function hexcoreExecutionQueue(captainId) {
     const queue = Hexcore2.hexcoreEngine.executionQueue(captainId);
-    const targetableIds = new Set(['directed-recruit', 'reserved-seat', 'urgent-restock', 'camp-blockade', 'price-interference']);
+    const targetableIds = new Set(['reserved-seat', 'urgent-restock', 'camp-blockade', 'price-interference']);
     return `
       <div class="hex-execution-queue">
         <div class="hex-queue-head">
@@ -177,17 +180,7 @@
     };
 
     let body = '';
-    if (hex.id === 'directed-recruit') {
-      const lanes = ['上路', '打野', '中路', '下路', '辅助'];
-      body = `
-        <label>
-          <small>指定位置</small>
-          <select id="hex-target-first">
-            ${lanes.map(lane => `<option value="${escapeHtml(lane)}">${escapeHtml(lane)}</option>`).join('')}
-          </select>
-        </label>
-      `;
-    } else if (hex.id === 'reserved-seat' || hex.id === 'urgent-restock') {
+    if (hex.id === 'reserved-seat' || hex.id === 'urgent-restock') {
       const cards = (Hexcore2.state.draft.currentDraw && Hexcore2.state.draft.currentDraw.captainId === captain.id)
         ? Hexcore2.state.draft.currentDraw.cards
         : [];
@@ -203,19 +196,17 @@
         </label>
       `;
     } else if (hex.id === 'camp-blockade' || hex.id === 'price-interference') {
-      const camp = Hexcore2.selectors.captainCamp(captain.id);
       const order = Hexcore2.state.draft.currentOrder || [];
-      const pending = new Set(order.slice(Hexcore2.state.draft.currentIndex));
       const targets = Hexcore2.state.captains.filter(item =>
         item.id !== captain.id
-        && pending.has(item.id)
-        && Hexcore2.selectors.captainCamp(item.id) === camp
+        && Hexcore2.selectors.teamSize(item.id) < Hexcore2.selectors.teamMemberCapacity(item.id)
+        && (order.indexOf(item.id) >= Hexcore2.state.draft.currentIndex || Hexcore2.state.draft.round < Hexcore2.state.draft.maxRounds)
       );
       body = `
         <label>
-          <small>同阵营尚未行动队长</small>
+          <small>目标队长</small>
           <select id="hex-target-first">
-            ${selectOptions(targets, '没有同阵营目标')}
+            ${selectOptions(targets, '没有可用目标')}
           </select>
         </label>
       `;
@@ -631,6 +622,14 @@
       const owner = Hexcore2.state.captains.find(item => item.id === player.teamId);
       return owner ? owner.name : '';
     }
+    function priceInterferenceBonus(captainId) {
+      return Hexcore2.state.draft.runtimeEffects.some(effect =>
+        effect.type === 'price_interference'
+        && effect.captainId === captainId
+        && !effect.consumed
+      ) ? 1 : 0;
+    }
+    const priceBonus = captain ? priceInterferenceBonus(captain.id) : 0;
     return `
       <section class="draw-panel">
         <div class="panel-title-row">
@@ -650,7 +649,7 @@
             }
             return `
             <button class="player-card tier-${tier} ${index === selected ? 'selected' : ''} ${blinded ? 'blind-card' : ''} ${draw && draw.pickMode === 'mystery_swap' ? 'mystery-card' : ''}" onclick="window.hexcoreUI.selectCard(${index})">
-              <b class="shop-price-badge">${escapeHtml(tier)}费</b>
+              <b class="shop-price-badge">${escapeHtml(tier)}费${priceBonus ? `<i>+${priceBonus}</i>` : ''}</b>
               <strong>${blinded ? '身份隐藏' : escapeHtml(player.name)}</strong>
               <small>${blinded ? '选中后揭示' : `ID: ${escapeHtml(player.gameId)}${draw && draw.pickMode === 'blind_box' && realPlayer.status === 'drafted' ? ` / 已在 ${escapeHtml(teamOwnerName(realPlayer))}` : ''}`}</small>
               <span class="camp-pill">${escapeHtml(Hexcore2.selectors.campLabel(player.camp))}</span>

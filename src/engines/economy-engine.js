@@ -59,14 +59,23 @@
 
     applyRoundIncome(round = Hexcore2.state.draft.round) {
       const targetRound = roundNumber(round);
-      if (targetRound <= 1) return 0;
       let applied = 0;
       Hexcore2.state.captains.forEach(captain => {
         const economy = ensureEconomy(captain);
-        if (economy.incomeAppliedRounds.includes(targetRound)) return;
-        economy.gold += Hexcore2.state.settings.roundIncome;
-        economy.incomeAppliedRounds.push(targetRound);
-        applied += 1;
+        const hasOpenFeast = (Hexcore2.state.hexcoreAssignments[captain.id] || []).some(hex => hex.id === 'open-feast');
+        if (!economy.incomeAppliedRounds.includes(targetRound)) {
+          if (targetRound > 1) {
+            economy.gold += Hexcore2.state.settings.roundIncome;
+            applied += 1;
+          }
+          economy.incomeAppliedRounds.push(targetRound);
+        }
+        captain.hexcoreEconomy = captain.hexcoreEconomy || {};
+        if (hasOpenFeast && targetRound === 3 && !captain.hexcoreEconomy.openFeastApplied) {
+          economy.gold += 3;
+          captain.hexcoreEconomy.openFeastApplied = true;
+          Hexcore2.eventStore.append('开饭啦', `${captain.name} 第3轮获得餐补 +3 金币`, 'success');
+        }
       });
       if (applied) {
         Hexcore2.eventStore.append(
@@ -81,6 +90,9 @@
     nextRefreshCost(captainId, round = Hexcore2.state.draft.round) {
       const state = roundState(captainId, round);
       const costs = Hexcore2.state.settings.refreshCosts || [1, 2, 3, 4];
+      const captain = captainById(captainId);
+      const hasPhotographer = captain && (Hexcore2.state.hexcoreAssignments[captain.id] || []).some(hex => hex.id === 'photographer');
+      if (hasPhotographer && !state.photographerRefreshUsed) return 0;
       return costs[Math.min(state.refreshCount, costs.length - 1)] || 4;
     },
 
@@ -109,6 +121,10 @@
       const operate = this.canOperate(captainId, round);
       if (!operate.ok) return { ok: false, cost: 0, reason: operate.reason };
       const cost = this.nextRefreshCost(captainId, round);
+      if (cost === 0) {
+        roundState(captainId, round).photographerRefreshUsed = true;
+        return { ok: true, cost, gold: economy.gold, freeReason: 'photographer' };
+      }
       if (economy.gold < cost) {
         return { ok: false, cost, reason: `金币不足，本次刷新需要 ${cost} 金币` };
       }
@@ -123,7 +139,7 @@
       const economy = ensureEconomy(captain);
       const operate = this.canOperate(captainId, round);
       if (!operate.ok) return { ok: false, reason: operate.reason };
-      const cost = Math.max(1, Math.min(5, Math.round(Number(price) || 1)));
+      const cost = Math.max(1, Math.round(Number(price) || 1));
       if (economy.gold < cost) {
         return { ok: false, reason: `金币不足，购买该队员需要 ${cost} 金币` };
       }
