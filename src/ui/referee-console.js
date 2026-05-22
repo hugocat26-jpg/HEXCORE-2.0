@@ -127,6 +127,7 @@
       'giant-slayer': '&#128481;',
       photographer: '&#128247;',
       'wise-benevolence': '&#127775;',
+      'charged-cannon': '&#128165;',
     };
     return glyphs[hexcore.id] || '&#10022;';
   }
@@ -140,7 +141,7 @@
 
   function hexcoreExecutionQueue(captainId) {
     const queue = Hexcore2.hexcoreEngine.executionQueue(captainId);
-    const targetableIds = new Set(['reserved-seat', 'urgent-restock', 'camp-blockade', 'price-interference', 'decompose-knowledge', 'stuck-together', 'storm-fog']);
+    const targetableIds = new Set(['reserved-seat', 'urgent-restock', 'camp-blockade', 'price-interference', 'decompose-knowledge', 'stuck-together', 'storm-fog', 'charged-cannon']);
     return `
       <div class="hex-execution-queue">
         <div class="hex-queue-head">
@@ -218,6 +219,24 @@
           <small>起始目标队长</small>
           <select id="hex-target-first">
             ${selectOptions(targets, '没有可用目标')}
+          </select>
+        </label>
+      `;
+    } else if (hex.id === 'charged-cannon') {
+      const targets = Hexcore2.hexcoreEngine.cannonTargets ? Hexcore2.hexcoreEngine.cannonTargets(captain.id) : [];
+      const canBoost = Hexcore2.state.draft.currentIndex > 0;
+      body = `
+        <label>
+          <small>转换技</small>
+          <select id="hex-target-first">
+            <option value="delay">雷霆一击：目标顺位延后一位</option>
+            <option value="boost" ${canBoost ? '' : 'disabled'}>加速之门：自己顺位前移一位</option>
+          </select>
+        </label>
+        <label>
+          <small>雷霆一击目标</small>
+          <select id="hex-target-second">
+            ${selectOptions(targets, '没有可后移目标')}
           </select>
         </label>
       `;

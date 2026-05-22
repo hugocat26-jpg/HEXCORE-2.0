@@ -724,6 +724,31 @@ function testNewHexcores() {
   assert(fogPurchase.ok, `天气迷雾真实卡牌应可购买：${fogPurchase.reason || 'ok'}`);
   assert(storm.state.captains.find(captain => captain.id === stormTarget).team.includes(fogPlayerId), '天气迷雾购买后应按真实卡牌选手入队');
 
+  const cannonHarness = createReadyHarness();
+  const cannon = cannonHarness.H;
+  cannon.state.draft.currentIndex = 0;
+  const cannonCaptain = currentCaptain(cannon);
+  cannon.state.hexcoreAssignments[cannonCaptain.id] = [
+    { ...cannon.sampleData.hexcores.find(hex => hex.id === 'charged-cannon') },
+  ];
+  const cannonTarget = cannon.state.draft.currentOrder[1];
+  const cannonBeforeIndex = cannon.state.draft.currentOrder.indexOf(cannonTarget);
+  assert(cannon.hexcoreEngine.activate('charged-cannon', { firstCaptainId: 'delay', secondCaptainId: cannonTarget }).ok, '大炮已充能雷霆一击应可指定未行动队长');
+  const cannonAfterIndex = cannon.state.draft.currentOrder.indexOf(cannonTarget);
+  assert(cannonAfterIndex === cannonBeforeIndex + 1, `雷霆一击应让目标顺位后移一位，前 ${cannonBeforeIndex} 后 ${cannonAfterIndex}`);
+  assert(!cannon.hexcoreEngine.activate('charged-cannon', { firstCaptainId: 'delay', secondCaptainId: cannon.state.draft.currentOrder[2] }).ok, '大炮已充能每轮只能使用一次');
+
+  const boostHarness = createReadyHarness();
+  const boost = boostHarness.H;
+  boost.state.draft.currentIndex = 2;
+  const boostCaptain = currentCaptain(boost);
+  boost.state.hexcoreAssignments[boostCaptain.id] = [
+    { ...boost.sampleData.hexcores.find(hex => hex.id === 'charged-cannon') },
+  ];
+  assert(boost.hexcoreEngine.activate('charged-cannon', { firstCaptainId: 'boost' }).ok, '大炮已充能加速之门应可让自己前移');
+  assert(boost.state.draft.currentOrder.indexOf(boostCaptain.id) === 1, '加速之门应让自己本轮顺位前移一位');
+  assert(boost.state.draft.currentIndex === 1, '加速之门后当前索引应仍指向使用者');
+
   const removed = createReadyHarness().H;
   assert(!removed.sampleData.hexcores.some(hex => ['directed-recruit', 'order-overtake', 'budget-refund'].includes(hex.id)), '废弃海克斯不应继续进入海克斯池');
 }

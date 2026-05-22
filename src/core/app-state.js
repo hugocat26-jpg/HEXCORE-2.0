@@ -377,7 +377,17 @@
     return captains.reduce((result, captain) => {
       const assigned = Array.isArray(source[captain.id]) ? source[captain.id] : [];
       result[captain.id] = assigned
-        .map(hexcore => hexcoreById.get(String(hexcore && hexcore.id ? hexcore.id : hexcore)))
+        .map(hexcore => {
+          const sourceHex = hexcore && typeof hexcore === 'object' ? hexcore : {};
+          const baseHex = hexcoreById.get(String(sourceHex.id || hexcore));
+          if (!baseHex) return null;
+          const normalized = { ...baseHex };
+          if (sourceHex.status === 'used') normalized.status = 'used';
+          if (Number.isInteger(Number(sourceHex.lastUsedRound))) {
+            normalized.lastUsedRound = Math.max(0, Math.min(8, Number(sourceHex.lastUsedRound)));
+          }
+          return normalized;
+        })
         .filter(Boolean)
         .filter((hexcore, index, all) => all.findIndex(item => item.id === hexcore.id) === index)
         .slice(0, 8)

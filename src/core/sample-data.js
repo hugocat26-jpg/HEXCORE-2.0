@@ -19,6 +19,7 @@
     { id: 'decompose-knowledge', name: '知识来源于分解', type: 'violet', mode: 'manual', uses: 0, needsTarget: 'player', desc: '每个你的选人阶段获得1层解构，最多3层；满3层后可消耗全部层数自选高费选手，金币不足时可分解队内2/3费队员抵扣。' },
     { id: 'stuck-together', name: '和我困在一起', type: 'violet', mode: 'manual', uses: 1, needsTarget: 'player', desc: '指定一名同阵营可选选手。若到你的下一轮选人开始时该选手仍在卡池，直接加入你的队伍并消耗本轮购买权。' },
     { id: 'storm-fog', name: '骤雨 血雾 清风', type: 'violet', mode: 'manual', uses: 1, needsTarget: 'captain', desc: '选择一位队长，该队长以及接下来的两位队长商店进入天气迷雾状态；不影响使用者，自动跳过使用者顺延。' },
+    { id: 'charged-cannon', name: '大炮已充能', type: 'violet', mode: 'manual', uses: 0, maxUsesPerRound: 1, needsTarget: 'captain', desc: '转换技。雷霆一击：选择一名未行动队长，使其本轮顺位延后一位；加速之门：将自己本轮顺位提升一位。每轮最多使用1次。' },
   ];
 
   Hexcore2.sampleData = {

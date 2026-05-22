@@ -18,6 +18,7 @@
     'decompose-knowledge',
     'stuck-together',
     'storm-fog',
+    'charged-cannon',
   ]);
 
   function hasHexcore(captainId, hexcoreId) {
@@ -26,7 +27,16 @@
   }
 
   function markUsed(hexcore) {
-    if (hexcore && hexcore.mode !== 'passive') hexcore.status = 'used';
+    if (!hexcore || hexcore.mode === 'passive') return;
+    if (hexcore.maxUsesPerRound) {
+      hexcore.lastUsedRound = Hexcore2.state.draft.round;
+      return;
+    }
+    hexcore.status = 'used';
+  }
+
+  function usedThisRound(hexcore) {
+    return Boolean(hexcore && hexcore.maxUsesPerRound && Number(hexcore.lastUsedRound) === Number(Hexcore2.state.draft.round));
   }
 
   function currentCaptain() {
@@ -99,6 +109,7 @@
       skip_round: `${sourceName} 的【跳过效果】：本轮行动被跳过`,
       move_first: `${sourceName} 的【顺位效果】：本轮顺位前移`,
       fixed_position: `${sourceName} 的【顺位效果】：本轮固定到指定顺位`,
+      move_up_one: `${sourceName} 的【顺位效果】：本轮顺位前移 1 位`,
       move_down_one: `${sourceName} 的【顺位效果】：本轮顺位后移 1 位`,
     };
     return labels[effect.type] || (effect.reason || effect.type || '未知效果');
@@ -204,6 +215,21 @@
       );
   }
 
+  function cannonTargets(sourceCaptainId) {
+    const state = Hexcore2.state;
+    const order = state.draft.currentOrder && state.draft.currentOrder.length
+      ? state.draft.currentOrder
+      : state.draft.baseOrder;
+    return order
+      .slice(state.draft.currentIndex + 1)
+      .map(captainId => state.captains.find(captain => captain.id === captainId))
+      .filter(captain =>
+        captain
+        && captain.id !== sourceCaptainId
+        && Hexcore2.selectors.teamSize(captain.id) < Hexcore2.selectors.teamMemberCapacity(captain.id)
+      );
+  }
+
   Hexcore2.hexcoreEngine = {
     hasHexcore,
 
@@ -244,6 +270,7 @@
         'decompose-knowledge': '自选分解',
         'stuck-together': '延迟锁定',
         'storm-fog': '天气迷雾',
+        'charged-cannon': '转换顺位',
       };
 
       return hexcores.map((hex, index) => {
@@ -262,8 +289,9 @@
         if (!Hexcore2.selectors.isHexcoreEnabled(hex.id)) return blocked(base, '已禁用', '规则设置已禁用该海克斯。');
         if (!CAMP_HEXCORE_IDS.has(hex.id)) return blocked(base, '旧海克斯禁用', '阵营锁定模式不执行旧海克斯。');
         if (hex.mode === 'passive') return passive(base, '被动待机', hex.desc || '被动效果自动生效。');
+        if (usedThisRound(hex)) return blocked(base, '本轮已使用', '该海克斯每轮最多使用1次。');
         if (hex.status === 'used') return { ...base, type: 'used', status: '已使用', reason: '该海克斯次数已消耗。', executable: false };
-        if (remainingSlots <= 0 && !['camp-blockade', 'price-interference', 'vampiric-habit'].includes(hex.id)) return blocked(base, '队伍已满', '队伍已满员，不能再执行选人相关海克斯。');
+        if (remainingSlots <= 0 && !['camp-blockade', 'price-interference', 'vampiric-habit', 'charged-cannon', 'storm-fog'].includes(hex.id)) return blocked(base, '队伍已满', '队伍已满员，不能再执行选人相关海克斯。');
         if (hex.id === 'camp-scout') {
           if (shopOpen) return blocked(base, '商店已打开', '该海克斯必须在开店前使用。');
           return active(base, '可执行', '下一次商店额外展示1张同阵营可抽卡。');
@@ -312,6 +340,13 @@
             ? target(base, '需选择队长', '选择1名队长开始，向后影响共3名非使用者队长的下一次商店。', { targetCount: targets.length })
             : blocked(base, '无可用目标', '当前顺位之后没有可影响的非使用者队长。');
         }
+        if (hex.id === 'charged-cannon') {
+          const targets = cannonTargets(captain.id);
+          const canBoost = Hexcore2.state.draft.currentIndex > 0;
+          return targets.length || canBoost
+            ? target(base, '需选择转换技', `雷霆一击可影响 ${targets.length} 名未行动队长；加速之门可尝试让自己前移1位。`, { targetCount: targets.length + (canBoost ? 1 : 0) })
+            : blocked(base, '无可调整顺位', '当前顺位已无法继续调整。');
+        }
         return active(base, '可执行', '当前条件满足。');
       });
     },
@@ -324,6 +359,7 @@
       if (!hexcore || hexcore.mode === 'passive') return logFail('请选择可手动执行的新海克斯');
       if (!CAMP_HEXCORE_IDS.has(hexcore.id)) return logFail('阵营锁定模式不执行旧海克斯');
       if (hexcore.status === 'used') return logFail(`【${hexcore.name}】已经使用过`);
+      if (usedThisRound(hexcore)) return logFail(`【${hexcore.name}】本轮已经使用过`);
       if (!Hexcore2.selectors.isHexcoreEnabled(hexcore.id)) return logFail(`【${hexcore.name}】已被规则设置禁用`);
 
       if (hexcore.id === 'camp-scout') {
@@ -458,8 +494,41 @@
         Hexcore2.eventStore.append('骤雨 血雾 清风', `${captain.name} 使 ${targets.map(item => item.name).join('、')} 的下一次商店进入天气迷雾`, 'warn');
       }
 
+      if (hexcore.id === 'charged-cannon') {
+        const skill = options.firstCaptainId || options.mode || 'delay';
+        if (skill === 'boost') {
+          if (state.draft.currentIndex <= 0) return logFail('当前已经是本轮最前顺位，无法继续前移');
+          pushEffect({
+            type: 'move_up_one',
+            captainId: captain.id,
+            sourceCaptainId: captain.id,
+            priority: 520,
+            reason: `${captain.name} 使用大炮已充能：加速之门，本轮顺位前移`,
+          });
+          Hexcore2.turnOrderEngine.recompute();
+          state.draft.currentIndex = state.draft.currentOrder.indexOf(captain.id);
+          Hexcore2.eventStore.append('大炮已充能', `${captain.name} 使用加速之门，本轮顺位前移`, 'warn');
+        } else {
+          const target = cannonTargets(captain.id).find(item => item.id === (options.secondCaptainId || options.targetCaptainId));
+          if (!target) return logFail('雷霆一击需要选择一名本轮尚未行动且未满员的队长');
+          pushEffect({
+            type: 'move_down_one',
+            captainId: target.id,
+            sourceCaptainId: captain.id,
+            priority: 520,
+            reason: `${captain.name} 使用大炮已充能：雷霆一击，${target.name} 本轮顺位延后一位`,
+          });
+          Hexcore2.turnOrderEngine.recompute();
+          state.draft.currentIndex = state.draft.currentOrder.indexOf(captain.id);
+          Hexcore2.eventStore.append('大炮已充能', `${captain.name} 对 ${target.name} 使用雷霆一击，目标本轮顺位延后一位`, 'warn');
+        }
+      }
+
       if (hexcore.id !== 'decompose-knowledge') markUsed(hexcore);
-      Hexcore2.eventStore.append('海克斯激活', `${captain.name} 使用【${hexcore.name}】${options.targetCaptainId ? `，目标：${captainName(options.targetCaptainId)}` : ''}`, 'info');
+      const targetLabel = state.captains.some(item => item.id === options.targetCaptainId)
+        ? `，目标：${captainName(options.targetCaptainId)}`
+        : '';
+      Hexcore2.eventStore.append('海克斯激活', `${captain.name} 使用【${hexcore.name}】${targetLabel}`, 'info');
       return { ok: true, advanceTurn: hexcore.id === 'steady-reinforce' || hexcore.id === 'decompose-knowledge' };
     },
 
@@ -467,6 +536,7 @@
     decomposableTeamPlayers,
     stuckTogetherTargets,
     weatherFogTargets,
+    cannonTargets,
 
     effectStatusForCaptain(captainId) {
       const effects = Hexcore2.state.draft.runtimeEffects || [];

@@ -48,6 +48,9 @@
     } else if (modifier.operation === 'move_down_one') {
       const targetIndex = Math.max(0, Math.min(order.length, index + 1));
       order.splice(targetIndex, 0, modifier.captainId);
+    } else if (modifier.operation === 'move_up_one') {
+      const targetIndex = Math.max(0, index - 1);
+      order.splice(targetIndex, 0, modifier.captainId);
     } else {
       order.unshift(modifier.captainId);
     }
@@ -130,6 +133,15 @@
         .forEach(effect => modifiers.push({
           captainId: effect.captainId,
           operation: 'move_down_one',
+          priority: effect.priority,
+          reason: effect.reason,
+        }));
+
+      state.draft.runtimeEffects
+        .filter(effect => effect.type === 'move_up_one' && effect.round === state.draft.round)
+        .forEach(effect => modifiers.push({
+          captainId: effect.captainId,
+          operation: 'move_up_one',
           priority: effect.priority,
           reason: effect.reason,
         }));
