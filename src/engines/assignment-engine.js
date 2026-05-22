@@ -1,6 +1,46 @@
 (function initAssignmentEngine(global) {
   const Hexcore2 = global.Hexcore2 || (global.Hexcore2 = {});
-  const goldAllowedSources = new Set(['gold_shop_purchase', 'final_random_fill']);
+  const goldAllowedSources = new Set(['gold_shop_purchase', 'final_random_fill', 'steady_reinforce']);
+
+  function captainCamp(captainId) {
+    return Hexcore2.selectors.captainCamp ? Hexcore2.selectors.captainCamp(captainId) : '';
+  }
+
+  function isCaptainPlayer(playerId) {
+    return Hexcore2.selectors.isCaptainPlayer
+      ? Hexcore2.selectors.isCaptainPlayer(playerId)
+      : Hexcore2.state.captains.some(captain => captain.playerId === playerId);
+  }
+
+  function activeEffect(captainId, type) {
+    return Hexcore2.state.draft.runtimeEffects.find(effect =>
+      effect.type === type && effect.captainId === captainId && !effect.consumed
+    );
+  }
+
+  function purchasePrice(captainId, player) {
+    let price = Math.max(1, Math.min(5, Number(player.tier) || 1));
+    const discount = activeEffect(captainId, 'discount_coupon');
+    if (discount) {
+      price = Math.max(1, price - 1);
+      discount.consumed = true;
+    }
+    const interference = activeEffect(captainId, 'price_interference');
+    if (interference) {
+      price = Math.min(5, price + 1);
+      interference.consumed = true;
+    }
+    return price;
+  }
+
+  function applyBudgetRefund(captain, player) {
+    const hasRefund = (Hexcore2.state.hexcoreAssignments[captain.id] || []).some(hex => hex.id === 'budget-refund');
+    if (!hasRefund || captain.budgetRefundUsed || Number(player.tier) > 2) return false;
+    captain.economy.gold += 1;
+    captain.budgetRefundUsed = true;
+    Hexcore2.eventStore.append('预算返还', `${captain.name} 购买 ${player.tier}费选手「${player.name}」，返还 1 金币`, 'success');
+    return true;
+  }
 
   Hexcore2.assignmentEngine = {
     assign(captainId, playerId, source = 'normal_pick') {
@@ -12,6 +52,15 @@
       const captain = state.captains.find(item => item.id === captainId);
       const player = state.players.find(item => item.id === playerId);
       if (!captain || !player || player.status !== 'available') return false;
+      const camp = captainCamp(captainId);
+      if (!camp || player.camp !== camp) {
+        Hexcore2.eventStore.append('入队失败', `${captain ? captain.name : '目标队伍'} 不能接收异阵营选手「${player ? player.name : playerId}」`, 'warn', { source, playerId });
+        return false;
+      }
+      if (isCaptainPlayer(player.id)) {
+        Hexcore2.eventStore.append('入队失败', `「${player.name}」是队长锁定选手，不能作为队员入队`, 'warn', { source, playerId });
+        return false;
+      }
       const capacity = Hexcore2.selectors.teamMemberCapacity(captainId);
       if (captain.team.length >= capacity) return false;
 
@@ -30,7 +79,13 @@
       const captain = state.captains.find(item => item.id === captainId);
       const player = state.players.find(item => item.id === playerId);
       if (!captain || !player || player.status !== 'available') return { ok: false, reason: '目标队员不可购买' };
-      const price = Math.max(1, Math.min(5, Number(player.tier) || 1));
+      const camp = captainCamp(captainId);
+      if (!camp || player.camp !== camp) {
+        Hexcore2.eventStore.append('购买失败', `${captain.name} 不能购买异阵营选手「${player.name}」`, 'warn', { source, playerId });
+        return { ok: false, reason: '不能购买异阵营选手' };
+      }
+      if (isCaptainPlayer(player.id)) return { ok: false, reason: '队长锁定选手不可购买' };
+      const price = purchasePrice(captainId, player);
       const economy = Hexcore2.economyEngine.spendForPurchase(captainId, price);
       if (!economy.ok) return economy;
       const assigned = this.assign(captainId, playerId, source);
@@ -45,11 +100,12 @@
         'success',
         { source, price, playerId }
       );
+      applyBudgetRefund(captain, player);
       return { ok: true, price, gold: captain.economy.gold };
     },
 
     assignRandomFromTier(captainId, tier, source = 'auto_assign') {
-      const candidates = Hexcore2.selectors.availablePlayers(tier);
+      const candidates = Hexcore2.selectors.availablePlayers(tier, captainCamp(captainId));
       if (candidates.length === 0) return false;
 
       const index = Math.floor(Math.random() * candidates.length);
@@ -61,7 +117,7 @@
     },
 
     assignRandomFromTopScored(captainId, tier, limit = 5, source = 'top_scored_auto_assign') {
-      const candidates = Hexcore2.selectors.availablePlayers(tier)
+      const candidates = Hexcore2.selectors.availablePlayers(tier, captainCamp(captainId))
         .sort((a, b) => b.score - a.score)
         .slice(0, limit);
       if (candidates.length === 0) return false;
@@ -105,10 +161,13 @@
       let filled = 0;
       state.captains.forEach(captain => {
         while (captain.team.length < Hexcore2.selectors.teamMemberCapacity(captain.id)) {
+          const camp = captainCamp(captain.id);
           const candidates = state.players.filter(player =>
             player.status === 'available'
+            && player.camp === camp
             && player.tier >= 1
             && player.tier <= 5
+            && !isCaptainPlayer(player.id)
           );
           if (!candidates.length) break;
           const player = candidates[Math.floor(Math.random() * candidates.length)];

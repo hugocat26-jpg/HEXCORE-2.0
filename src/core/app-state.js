@@ -52,6 +52,19 @@
     FMVP: 5,
   };
 
+  const CAMPS = ['local', 'outsider'];
+  const CAMP_LABELS = {
+    local: '本地人',
+    outsider: '外地人',
+  };
+
+  function normalizeCamp(value) {
+    const text = String(value || '').trim().toLowerCase();
+    if (text === 'local' || text === '本地' || text === '本地人') return 'local';
+    if (text === 'outsider' || text === 'away' || text === '外地' || text === '外地人') return 'outsider';
+    return '';
+  }
+
   function normalizeResultLabel(value) {
     const text = String(value || '').trim();
     if (['FMVP', 'fmvp', 'MVP'].includes(text)) return 'FMVP';
@@ -147,39 +160,23 @@
   }
 
   function rebalancePlayerTiers(captains, players) {
-    const regularPlayers = [];
+    const captainPlayerIds = new Set(captains.map(captain => captain.playerId).filter(Boolean));
     players.forEach(player => {
-      if (isCaptainPoolPlayer(player, captains)) {
-        player.tier = 0;
+      if (captainPlayerIds.has(player.id) || isCaptainPoolPlayer(player, captains)) {
         player.status = 'captain';
         delete player.teamId;
       } else {
         if (player.status === 'captain') player.status = 'available';
-        regularPlayers.push(player);
       }
     });
 
-    const fmvpPlayers = regularPlayers
-      .filter(isHistoricalFmvp)
-      .sort(compareByOfficialTier)
-      .slice(0, 6);
-    const fiveFeeIds = new Set(fmvpPlayers.map(player => player.id));
-    fmvpPlayers.forEach(player => {
-      player.tier = 5;
-    });
-
-    const sorted = regularPlayers
-      .filter(player => !fiveFeeIds.has(player.id))
-      .sort(compareByOfficialTier);
-    const total = sorted.length;
-    const fourFeeCount = Math.round(total * 0.15);
-    const threeFeeCount = Math.round(total * 0.25);
-    const twoFeeCount = Math.round(total * 0.35);
-    sorted.forEach((player, index) => {
-      if (index < fourFeeCount) player.tier = 4;
-      else if (index < fourFeeCount + threeFeeCount) player.tier = 3;
-      else if (index < fourFeeCount + threeFeeCount + twoFeeCount) player.tier = 2;
-      else player.tier = 1;
+    CAMPS.forEach(camp => {
+      const sorted = players
+        .filter(player => player.camp === camp)
+        .sort(compareByOfficialTier);
+      sorted.forEach((player, index) => {
+        player.tier = Math.max(1, Math.min(5, 5 - Math.floor(index / 5)));
+      });
     });
   }
 
@@ -187,6 +184,11 @@
     const number = Number(value);
     if (!Number.isFinite(number)) return fallback;
     return Math.max(min, Math.min(max, Math.round(number)));
+  }
+
+  function teamMemberCapacityFromTotal(playersPerTeam, hasCaptainPlayer) {
+    const totalCapacity = clampNumber(playersPerTeam, 1, 8, defaultState.settings.playersPerTeam);
+    return Math.max(0, hasCaptainPlayer ? totalCapacity - 1 : totalCapacity);
   }
 
   const SAFE_ID_PATTERN = /^[A-Za-z0-9_-]{1,48}$/;
@@ -229,6 +231,7 @@
       const fmvpSeasons = normalizeFmvpSeasons(item, seasonResults);
       const normalized = {
         id,
+        camp: normalizeCamp(item.camp || item.阵营) || (index < 25 ? 'local' : 'outsider'),
         lane: sanitizeText(item.lane, '未分配', 16),
         name: sanitizeText(item.name, `选手${index + 1}`, 32),
         gameId: sanitizeText(item.gameId, id, 40),
@@ -291,7 +294,7 @@
       captainIdMap.set(id, id);
       const captainPlayerId = remapId(item.playerId, playerIdMap);
       const captainGameId = captainPlayerId ? sanitizeText(item.playerGameId || item.gameId, '', 40) : '';
-      const memberCapacity = captainPlayerId ? playersPerTeam : playersPerTeam + 1;
+      const memberCapacity = teamMemberCapacityFromTotal(playersPerTeam, Boolean(captainPlayerId));
       const normalized = {
         id,
         name: sanitizeText(item.name, `C${index + 1} 队伍`, 40),
@@ -306,6 +309,21 @@
         economy: normalizeCaptainEconomy(item.economy),
       };
       return captain && typeof captain === 'object' ? Object.assign(captain, normalized) : normalized;
+    });
+  }
+
+  function releaseRemovedCaptains(keptCaptains, removedCaptains, players) {
+    const keptCaptainPlayerIds = new Set(keptCaptains.map(captain => captain.playerId).filter(Boolean));
+    removedCaptains.forEach(captain => {
+      [...(captain.team || []), captain.playerId].forEach(playerId => {
+        if (!playerId || keptCaptainPlayerIds.has(playerId)) return;
+        const player = players.find(item => item.id === playerId);
+        if (!player) return;
+        player.status = 'available';
+        delete player.teamId;
+        delete player.isCaptain;
+        delete player.role;
+      });
     });
   }
 
@@ -427,7 +445,10 @@
       name: String(source.name || '未命名模板').slice(0, 40),
       savedAt: String(source.savedAt || '').slice(0, 40),
       teamCount: clampNumber(source.teamCount, defaultState.settings.minTeams, defaultState.settings.maxTeams, defaultState.settings.totalTeams),
-      playersPerTeam: clampNumber(source.playersPerTeam, 1, 8, defaultState.settings.playersPerTeam),
+      playersPerTeam: source.teamSizeIncludesCaptain === true
+        ? clampNumber(source.playersPerTeam, 2, 8, defaultState.settings.playersPerTeam)
+        : clampNumber(clampNumber(source.playersPerTeam, 1, 8, defaultState.settings.playersPerTeam) + 1, 2, 8, defaultState.settings.playersPerTeam),
+      teamSizeIncludesCaptain: true,
       maxRounds,
       drawCount: clampNumber(source.drawCount, 1, 8, defaultState.settings.drawCount),
       roundTiers,
@@ -474,10 +495,12 @@
   const defaultState = {
     mode: 'referee_single_client',
     settings: {
-      minTeams: 5,
-      maxTeams: 20,
-      totalTeams: Math.min(10, seed.captains.length),
-      playersPerTeam: 4,
+      minTeams: 10,
+      maxTeams: 10,
+      totalTeams: 10,
+      playersPerTeam: 5,
+      teamSizeIncludesCaptain: true,
+      teamCountCustomized: false,
       drawCount: 5,
       shopSize: 5,
       economyMode: 'gold_shop',
@@ -490,7 +513,7 @@
       timeoutStrategy: 'random_available',
       disabledHexcores: [],
       ruleTemplates: [],
-      tierNames: { 0: '队长专属', 1: '1费基础', 2: '2费轮换', 3: '3费主力', 4: '4费顶配', 5: '5费FMVP' },
+      tierNames: { 0: '队长锁定', 1: '1费基础', 2: '2费轮换', 3: '3费主力', 4: '4费顶配', 5: '5费核心' },
     },
     captains: clone(seed.captains.slice(0, 10)),
     players: clone(seed.players),
@@ -537,11 +560,17 @@
     const legacyNoGoldState = !state.settings || state.settings.economyMode !== 'gold_shop';
     state.settings = state.settings || clone(defaultState.settings);
     state.settings.tierNames = normalizeTierNames(state.settings.tierNames);
-    state.settings.minTeams = clampNumber(state.settings.minTeams, 5, 20, defaultState.settings.minTeams);
-    state.settings.maxTeams = clampNumber(state.settings.maxTeams, state.settings.minTeams, 20, defaultState.settings.maxTeams);
-    state.settings.playersPerTeam = clampNumber(state.settings.playersPerTeam, 1, 8, defaultState.settings.playersPerTeam);
-    state.settings.drawCount = clampNumber(state.settings.drawCount, 1, 8, defaultState.settings.drawCount);
-    state.settings.shopSize = clampNumber(state.settings.shopSize, 1, 5, defaultState.settings.shopSize);
+    state.settings.minTeams = 10;
+    state.settings.maxTeams = 10;
+    state.settings.totalTeams = 10;
+    const savedPlayersPerTeam = clampNumber(state.settings.playersPerTeam, 1, 8, defaultState.settings.playersPerTeam);
+    state.settings.playersPerTeam = state.settings.teamSizeIncludesCaptain === true
+      ? clampNumber(savedPlayersPerTeam, 2, 8, defaultState.settings.playersPerTeam)
+      : clampNumber(savedPlayersPerTeam + 1, 2, 8, defaultState.settings.playersPerTeam);
+    state.settings.teamSizeIncludesCaptain = true;
+    state.settings.teamCountCustomized = Boolean(state.settings.teamCountCustomized);
+    state.settings.drawCount = 5;
+    state.settings.shopSize = 5;
     state.settings.economyMode = 'gold_shop';
     state.settings.initialGold = clampNumber(state.settings.initialGold, 0, 99, defaultState.settings.initialGold);
     state.settings.roundIncome = clampNumber(state.settings.roundIncome, 0, 99, defaultState.settings.roundIncome);
@@ -552,6 +581,7 @@
     state.settings.roundTiers = Array.isArray(state.settings.roundTiers) && state.settings.roundTiers.length
       ? state.settings.roundTiers.map(tier => Math.max(1, Math.min(5, Number(tier) || 1)))
       : [...defaultState.settings.roundTiers];
+    state.settings.roundTiers = [1, 2, 3, 4];
     state.settings.autoRandomStrategy = state.settings.autoRandomStrategy || defaultState.settings.autoRandomStrategy;
     state.settings.timeoutStrategy = state.settings.timeoutStrategy || defaultState.settings.timeoutStrategy;
     state.settings.disabledHexcores = Array.isArray(state.settings.disabledHexcores) ? state.settings.disabledHexcores : [];
@@ -563,6 +593,18 @@
     const playerIdMap = new Map();
     state.players = sanitizePlayers(state.players, playerIdMap);
     state.captains = sanitizeCaptains(state.captains, captainIdMap, playerIdMap, state.settings.playersPerTeam);
+    if (state.captains.length !== defaultState.settings.totalTeams) {
+      const keptCaptains = state.captains.slice(0, defaultState.settings.totalTeams);
+      const removedCaptains = state.captains.slice(defaultState.settings.totalTeams);
+      releaseRemovedCaptains(keptCaptains, removedCaptains, state.players);
+      state.captains = keptCaptains;
+      state.draft = {
+        ...clone(defaultState.draft),
+        baseOrder: state.captains.map(captain => captain.id),
+        currentOrder: state.captains.map(captain => captain.id),
+      };
+    }
+    state.settings.teamCountCustomized = false;
     if (legacyNoGoldState && !state.legacyNoGoldBackup) {
       state.legacyNoGoldBackup = {
         migratedAt: new Date().toISOString(),
@@ -630,11 +672,17 @@
     state.ui.eventSearch = typeof state.ui.eventSearch === 'string' ? state.ui.eventSearch.slice(0, 80) : '';
     state.ui.theme = ['default', 'neon', 'apple'].includes(state.ui.theme) ? state.ui.theme : 'default';
     state.ui.playerFilter = typeof state.ui.playerFilter === 'string' ? state.ui.playerFilter.slice(0, 32) : 'all';
+    const campFilters = state.ui.playerCampFilters && typeof state.ui.playerCampFilters === 'object' ? state.ui.playerCampFilters : {};
+    state.ui.playerCampFilters = {
+      local: ['all', '1', '2', '3', '4', '5'].includes(String(campFilters.local)) ? String(campFilters.local) : 'all',
+      outsider: ['all', '1', '2', '3', '4', '5'].includes(String(campFilters.outsider)) ? String(campFilters.outsider) : 'all',
+    };
     state.ui.hexFilter = typeof state.ui.hexFilter === 'string' ? state.ui.hexFilter.slice(0, 32) : 'all';
     state.ui.hexCaptainId = captainIdMap.get(String(state.ui.hexCaptainId || '')) || '';
     state.ui.editingNamePlayerId = playerIdMap.get(String(state.ui.editingNamePlayerId || '')) || '';
     state.ui.editingGameIdPlayerId = playerIdMap.get(String(state.ui.editingGameIdPlayerId || '')) || '';
     state.ui.addPlayerModal = Boolean(state.ui.addPlayerModal);
+    state.ui.orderDrawerOpen = Boolean(state.ui.orderDrawerOpen);
     return state;
   };
 
@@ -651,21 +699,53 @@
       const captain = Hexcore2.state.captains.find(item => item.id === captainId);
       return captain ? captain.team.length : 0;
     },
+    teamTotalSize(captainId) {
+      const captain = Hexcore2.state.captains.find(item => item.id === captainId);
+      if (!captain) return 0;
+      return captain.team.length + (Hexcore2.selectors.captainPlayer(captainId) ? 1 : 0);
+    },
     captainPlayer(captainId) {
       const captain = Hexcore2.state.captains.find(item => item.id === captainId);
       return captain && captain.playerId
         ? Hexcore2.state.players.find(player => player.id === captain.playerId) || null
         : null;
     },
+    captainCamp(captainId) {
+      const player = Hexcore2.selectors.captainPlayer(captainId);
+      return player ? player.camp : '';
+    },
+    campLabel(camp) {
+      return CAMP_LABELS[camp] || '未分阵营';
+    },
+    isCaptainPlayer(playerId) {
+      return Hexcore2.state.captains.some(captain => captain.playerId === playerId);
+    },
     teamMemberCapacity(captainId) {
       const captain = Hexcore2.state.captains.find(item => item.id === captainId);
-      if (!captain) return Hexcore2.state.settings.playersPerTeam;
-      return Hexcore2.selectors.captainPlayer(captainId)
-        ? Hexcore2.state.settings.playersPerTeam
-        : Hexcore2.state.settings.playersPerTeam + 1;
+      if (!captain) return Math.max(0, Hexcore2.state.settings.playersPerTeam - 1);
+      return teamMemberCapacityFromTotal(
+        Hexcore2.state.settings.playersPerTeam,
+        Boolean(Hexcore2.selectors.captainPlayer(captainId))
+      );
     },
-    availablePlayers(tier) {
-      return Hexcore2.state.players.filter(player => player.tier === tier && player.status === 'available');
+    availablePlayers(tier, camp) {
+      return Hexcore2.state.players.filter(player =>
+        player.tier === tier
+        && player.status === 'available'
+        && (!camp || player.camp === camp)
+        && !Hexcore2.selectors.isCaptainPlayer(player.id)
+      );
+    },
+    availableCampPlayers(captainId, excludedIds = new Set()) {
+      const camp = Hexcore2.selectors.captainCamp(captainId);
+      return Hexcore2.state.players.filter(player =>
+        player.status === 'available'
+        && player.camp === camp
+        && player.tier >= 1
+        && player.tier <= 5
+        && !Hexcore2.selectors.isCaptainPlayer(player.id)
+        && !excludedIds.has(player.id)
+      );
     },
     currentHexcores() {
       const captain = Hexcore2.selectors.currentCaptain();
@@ -673,6 +753,23 @@
     },
     teamCount() {
       return Hexcore2.state.captains.length;
+    },
+    campPlayerCount(camp) {
+      return Hexcore2.state.players.filter(player => player.camp === camp).length;
+    },
+    campCaptainCount(camp) {
+      return Hexcore2.state.captains.filter(captain => Hexcore2.selectors.captainCamp(captain.id) === camp).length;
+    },
+    campTeamLimit(camp) {
+      const playerCount = Hexcore2.selectors.campPlayerCount(camp);
+      const playersPerTeam = Math.max(1, Number(Hexcore2.state.settings.playersPerTeam) || 5);
+      return Math.floor(playerCount / playersPerTeam);
+    },
+    canAddCampCaptain(camp, replacedCamp = '') {
+      if (!camp) return false;
+      const currentCount = Hexcore2.selectors.campCaptainCount(camp);
+      const adjustedCount = currentCount - (replacedCamp === camp ? 1 : 0) + 1;
+      return adjustedCount <= Hexcore2.selectors.campTeamLimit(camp);
     },
     isHexcoreEnabled(hexcoreId) {
       return !(Hexcore2.state.settings.disabledHexcores || []).includes(hexcoreId);
@@ -684,13 +781,22 @@
     },
     workflowChecklist() {
       const state = Hexcore2.state;
-      const teamCountOk = state.captains.length >= state.settings.minTeams && state.captains.length <= state.settings.maxTeams;
+      const teamCountOk = state.captains.length === 10;
       const namedCaptains = state.captains.filter(captain => String(captain.name || '').trim()).length;
       const assignedCaptainCount = state.captains.filter(captain => Boolean(Hexcore2.selectors.captainPlayer(captain.id))).length;
       const missingHexcoreCaptains = state.captains.filter(captain => (state.hexcoreAssignments[captain.id] || []).length < 3);
+      const campCounts = CAMPS.reduce((result, camp) => {
+        result[camp] = state.players.filter(player => player.camp === camp).length;
+        return result;
+      }, {});
+      const captainCampCounts = CAMPS.reduce((result, camp) => {
+        result[camp] = state.captains.filter(captain => Hexcore2.selectors.captainCamp(captain.id) === camp).length;
+        return result;
+      }, {});
       const assignedPlayerIds = new Map();
       const rosterIssues = [];
       state.captains.forEach(captain => {
+        const captainCamp = Hexcore2.selectors.captainCamp(captain.id);
         if (captain.team.length > Hexcore2.selectors.teamMemberCapacity(captain.id)) {
           rosterIssues.push(`${captain.name} 超员`);
         }
@@ -700,6 +806,7 @@
           const player = state.players.find(item => item.id === playerId);
           if (!player) rosterIssues.push(`${captain.name} 包含缺失选手`);
           if (player && player.teamId !== captain.id) rosterIssues.push(`${player.name} 归属不一致`);
+          if (player && captainCamp && player.camp !== captainCamp) rosterIssues.push(`${captain.name} 含异阵营队员 ${player.name}`);
         });
         if (captain.playerId && !Hexcore2.selectors.captainPlayer(captain.id)) {
           rosterIssues.push(`${captain.name} 队长不在选手库`);
@@ -708,20 +815,43 @@
       const openSlots = state.captains.reduce((sum, captain) => (
         sum + Math.max(0, Hexcore2.selectors.teamMemberCapacity(captain.id) - captain.team.length)
       ), 0);
-      const availablePlayers = state.players.filter(player => player.status === 'available' && player.tier >= 1 && player.tier <= 5);
+      const availablePlayers = state.players.filter(player => player.status === 'available' && player.tier >= 1 && player.tier <= 5 && !Hexcore2.selectors.isCaptainPlayer(player.id));
       const tierCounts = [1, 2, 3, 4, 5].map(tier => ({
         tier,
         name: state.settings.tierNames[tier],
         count: availablePlayers.filter(player => player.tier === tier).length,
       }));
-      const weakTiers = tierCounts.filter(item => item.count < state.captains.length);
+      const weakTiers = [];
+      const campIssues = [];
+      if (state.players.length !== 50) campIssues.push(`总人数 ${state.players.length}/50`);
+      CAMPS.forEach(camp => {
+        const limit = Hexcore2.selectors.campTeamLimit(camp);
+        if (campCounts[camp] !== 25) campIssues.push(`${CAMP_LABELS[camp]} ${campCounts[camp]}/25`);
+        if (captainCampCounts[camp] !== 5) campIssues.push(`${CAMP_LABELS[camp]}队长 ${captainCampCounts[camp]}/5`);
+        if (captainCampCounts[camp] > limit) campIssues.push(`${CAMP_LABELS[camp]}队伍 ${captainCampCounts[camp]}/${limit}，超过阵营人数/5`);
+        const drawablePool = state.players.filter(player =>
+          player.camp === camp
+          && player.tier >= 1
+          && player.tier <= 5
+          && player.status !== 'disabled'
+          && !Hexcore2.selectors.isCaptainPlayer(player.id)
+        ).length;
+        if (drawablePool !== 20) campIssues.push(`${CAMP_LABELS[camp]}可抽池 ${drawablePool}/20`);
+      });
       const items = [
         {
           id: 'team-count',
           label: '队伍数量',
           status: teamCountOk ? 'pass' : 'block',
-          detail: `当前 ${state.captains.length} 队，允许 ${state.settings.minTeams}-${state.settings.maxTeams} 队`,
+          detail: `当前 ${state.captains.length}/10 队`,
           view: 'rules',
+        },
+        {
+          id: 'camp-count',
+          label: '阵营人数',
+          status: campIssues.length ? 'block' : 'pass',
+          detail: campIssues.length ? campIssues.slice(0, 4).join('；') : '本地人25/25，外地人25/25；双方队长各5/5',
+          view: 'players',
         },
         {
           id: 'team-name',
@@ -764,7 +894,7 @@
           status: weakTiers.length ? 'warn' : 'pass',
           detail: weakTiers.length
             ? `${weakTiers.map(item => `${item.name}${item.count}`).join('、')}，低于当前队伍数`
-            : '费用卡池数量满足当前队伍规模',
+            : '每个阵营按评分独立分成 1-5 费各5人',
           view: 'players',
         },
       ];
@@ -779,7 +909,7 @@
       const state = Hexcore2.state;
       const checklist = Hexcore2.selectors.workflowChecklist();
       const blockedIds = new Set(checklist.blockingItems.map(item => item.id));
-      if (blockedIds.has('team-count') || blockedIds.has('team-name') || state.players.length === 0) {
+      if (blockedIds.has('team-count') || blockedIds.has('camp-count') || blockedIds.has('team-name') || state.players.length === 0) {
         return { id: 'data-prep', label: '数据准备', order: 1, checklist };
       }
       if (blockedIds.has('captain-player') || blockedIds.has('roster-integrity') || blockedIds.has('player-capacity')) {
@@ -797,7 +927,7 @@
       const stage = Hexcore2.selectors.workflowStage();
       const checklist = stage.checklist;
       const captainReady = !checklist.blockingItems.some(item =>
-        ['team-count', 'team-name', 'captain-player', 'roster-integrity', 'player-capacity'].includes(item.id)
+        ['team-count', 'camp-count', 'team-name', 'captain-player', 'roster-integrity', 'player-capacity'].includes(item.id)
       );
       const hexcoreReady = captainReady && !checklist.blockingItems.some(item => item.id === 'hexcore-draw');
       return {

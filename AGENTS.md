@@ -29,3 +29,19 @@
 `incomplete` 表示还有计划项未完成，必须继续按开发计划推进。
 
 如果完成状态无法从代码和文档中可靠判断，默认按 `incomplete` 处理，继续执行下一项，而不是提前推送。
+
+## 阵营锁定实施循环钩子
+
+执行 `docs/14_阵营锁定10队金币商店模式_实施规范.md` 时，必须使用专用循环钩子：
+
+```powershell
+npm run camp-loop -- --status=incomplete
+```
+
+当且仅当 14 号文档的推荐执行顺序和验收标准全部完成时，才允许使用：
+
+```powershell
+npm run camp-loop -- --status=complete
+```
+
+每轮循环必须重新读取 14 号文档，加载 Build Web Apps 技能继续实施，并在阶段完成后使用 Codex Security 审查和修复。计划完成后必须使用 Codex Security 与 Build Web Apps 联合审查，修复问题，更新文档和执行记录，再提交并推送 Gitee。

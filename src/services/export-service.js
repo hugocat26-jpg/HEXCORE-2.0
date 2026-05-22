@@ -56,6 +56,33 @@
     return events.map(event => `[${event.time}] ${event.title} - ${event.body}`);
   }
 
+  function csvCell(value) {
+    const text = String(value ?? '');
+    return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+  }
+
+  function campLabel(camp) {
+    return camp === 'local' ? '本地人' : (camp === 'outsider' ? '外地人' : '');
+  }
+
+  function buildPlayersCsv(players) {
+    const headers = ['id', 'name', 'gameId', 'lane', 'camp', '阵营', 'score', 'tier', 'status', 'heroes', 'manifesto'];
+    const rows = (players || []).map(player => [
+      player.id,
+      player.name,
+      player.gameId,
+      player.lane,
+      player.camp,
+      campLabel(player.camp),
+      player.score,
+      player.tier,
+      player.status,
+      Array.isArray(player.heroes) ? player.heroes.join('、') : player.heroes,
+      player.manifesto,
+    ]);
+    return [headers, ...rows].map(row => row.map(csvCell).join(',')).join('\n');
+  }
+
   function validateStateBackup(state) {
     if (!state || !Array.isArray(state.captains) || !Array.isArray(state.players) || !state.draft) {
       throw new Error('备份文件结构不正确');
@@ -111,6 +138,13 @@
     return '';
   }
 
+  function normalizeCamp(value) {
+    const text = String(value || '').trim().toLowerCase();
+    if (text === 'local' || text === '本地' || text === '本地人') return 'local';
+    if (text === 'outsider' || text === 'away' || text === '外地' || text === '外地人') return 'outsider';
+    return '';
+  }
+
   function parsePlayerRows(filename, text) {
     const raw = String(text || '').trim();
     if (!raw) throw new Error('导入文件为空');
@@ -149,6 +183,7 @@
     const name = String(readImportField(source, ['name', '名称', 'playerName', '选手名称'])).trim();
     const lane = String(readImportField(source, ['lane', '位置', '偏好位置'])).trim();
     const gameId = String(readImportField(source, ['gameId', '游戏ID', 'ID', 'uid'])).trim();
+    const camp = normalizeCamp(readImportField(source, ['camp', '阵营', 'campLabel']));
     if (!name) {
       throw new Error(`第 ${index + 1} 行缺少选手名称`);
     }
@@ -157,6 +192,9 @@
     }
     if (!gameId) {
       throw new Error(`第 ${index + 1} 行缺少游戏ID`);
+    }
+    if (!camp) {
+      throw new Error(`第 ${index + 1} 行缺少或无法识别阵营`);
     }
     if (String(rawScore).trim() === '' || !Number.isFinite(scoreNumber) || scoreNumber < 0 || scoreNumber > 120) {
       throw new Error(`第 ${index + 1} 行评分非法`);
@@ -180,6 +218,7 @@
     return {
       id: String(source.id || source.playerId || source.内部ID || '').trim(),
       name: name.slice(0, 32),
+      camp,
       lane: lane.slice(0, 16),
       gameId: gameId.slice(0, 40),
       score,
@@ -303,6 +342,15 @@
       const json = JSON.stringify(Hexcore2.state, null, 2);
       const ok = downloadText(`HEXCORE2_状态备份_${fileDate()}.json`, json, 'application/json;charset=utf-8');
       if (ok) Hexcore2.eventStore.append('数据备份', '裁判导出了当前状态备份', 'info');
+      return ok;
+    },
+
+    buildPlayersCsv,
+
+    exportPlayersCsv() {
+      const csv = buildPlayersCsv(Hexcore2.state.players);
+      const ok = downloadText(`HEXCORE2_选手库_${fileDate()}.csv`, csv, 'text/csv;charset=utf-8');
+      if (ok) Hexcore2.eventStore.append('选手导出', `裁判导出了选手库 CSV（${Hexcore2.state.players.length} 人，含阵营字段）`, 'info');
       return ok;
     },
 

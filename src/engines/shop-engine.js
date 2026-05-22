@@ -17,9 +17,14 @@
     return Math.max(1, Math.min(4, Math.round(value) || 1));
   }
 
-  function availableCards(excludedIds = new Set()) {
+  function availableCards(captainId, excludedIds = new Set()) {
+    if (Hexcore2.selectors.availableCampPlayers) {
+      return Hexcore2.selectors.availableCampPlayers(captainId, excludedIds);
+    }
+    const camp = Hexcore2.selectors.captainCamp ? Hexcore2.selectors.captainCamp(captainId) : '';
     return Hexcore2.state.players.filter(player =>
       player.status === 'available'
+      && player.camp === camp
       && player.tier >= 1
       && player.tier <= 5
       && !excludedIds.has(player.id)
@@ -45,15 +50,70 @@
     return entries[entries.length - 1].tier;
   }
 
-  function buildCandidatesByTier(excludedIds) {
+  function buildCandidatesByTier(captainId, excludedIds) {
     const map = new Map([1, 2, 3, 4, 5].map(tier => [tier, []]));
-    availableCards(excludedIds).forEach(player => {
+    availableCards(captainId, excludedIds).forEach(player => {
       map.get(player.tier).push(player);
     });
     map.forEach((players, tier) => {
       map.set(tier, shuffle(players));
     });
     return map;
+  }
+
+  function runtimeEffectsFor(captainId, type) {
+    return Hexcore2.state.draft.runtimeEffects.filter(effect =>
+      effect.type === type && effect.captainId === captainId && !effect.consumed
+    );
+  }
+
+  function consumeOneEffect(captainId, type) {
+    const effect = runtimeEffectsFor(captainId, type)[0];
+    if (effect) effect.consumed = true;
+    return effect;
+  }
+
+  function shopSizeFor(captainId, baseSize) {
+    let size = baseSize;
+    runtimeEffectsFor(captainId, 'camp_scout').forEach(effect => {
+      size += Number(effect.countBonus) || 1;
+      effect.consumed = true;
+    });
+    runtimeEffectsFor(captainId, 'camp_blockade').forEach(effect => {
+      size -= Number(effect.countPenalty) || 1;
+      effect.consumed = true;
+    });
+    return Math.max(3, Math.min(6, size));
+  }
+
+  function reservedPlayerFor(captainId, excludedIds) {
+    const effect = consumeOneEffect(captainId, 'reserved_seat');
+    if (!effect || !effect.playerId || excludedIds.has(effect.playerId)) return null;
+    const player = Hexcore2.state.players.find(item => item.id === effect.playerId);
+    const camp = Hexcore2.selectors.captainCamp(captainId);
+    if (!player || player.status !== 'available' || player.camp !== camp) return null;
+    return player;
+  }
+
+  function directedPlayerFor(captainId, excludedIds) {
+    const effect = consumeOneEffect(captainId, 'directed_recruit');
+    if (!effect || !effect.lane) return null;
+    const candidates = availableCards(captainId, excludedIds)
+      .filter(player => String(player.lane || '') === String(effect.lane || ''));
+    if (!candidates.length) return null;
+    return shuffle(candidates)[0];
+  }
+
+  function cardFromPlayer(player, slotIndex) {
+    return {
+      slotId: `slot_${slotIndex + 1}`,
+      playerId: player.id,
+      tier: player.tier,
+      price: player.tier,
+      camp: player.camp,
+      visibleToReferee: true,
+      visibleToCaptain: true,
+    };
   }
 
   Hexcore2.shopEngine = {
@@ -66,25 +126,25 @@
     generate(captainId, options = {}) {
       const round = roundNumber(options.round);
       const excludedIds = new Set();
-      const targetCount = Math.min(Hexcore2.state.settings.shopSize || 5, availableCards().length);
+      const baseSize = Math.min(Hexcore2.state.settings.shopSize || 5, availableCards(captainId).length);
+      const targetCount = Math.min(shopSizeFor(captainId, baseSize), availableCards(captainId).length);
       const cards = [];
       const weights = this.probabilityForRound(round);
+      const seeded = [reservedPlayerFor(captainId, excludedIds), directedPlayerFor(captainId, excludedIds)].filter(Boolean);
+      seeded.forEach(player => {
+        if (cards.length >= targetCount || excludedIds.has(player.id)) return;
+        excludedIds.add(player.id);
+        cards.push(cardFromPlayer(player, cards.length));
+      });
 
-      for (let index = 0; index < targetCount; index += 1) {
-        const candidatesByTier = buildCandidatesByTier(excludedIds);
+      while (cards.length < targetCount) {
+        const candidatesByTier = buildCandidatesByTier(captainId, excludedIds);
         const tier = chooseWeightedTier(weights, candidatesByTier);
         const candidates = candidatesByTier.get(tier) || [];
         const player = candidates[0];
         if (!player) break;
         excludedIds.add(player.id);
-        cards.push({
-          slotId: `slot_${index + 1}`,
-          playerId: player.id,
-          tier: player.tier,
-          price: player.tier,
-          visibleToReferee: true,
-          visibleToCaptain: true,
-        });
+        cards.push(cardFromPlayer(player, cards.length));
       }
 
       return {
