@@ -467,14 +467,18 @@
       Hexcore2.state.draft.currentDraw = Hexcore2.shopEngine.generate(captain.id, {
         generatedBy: 'paid_refresh',
         refreshCostPaid: result.cost,
-        reason: `付费刷新，消耗 ${result.cost} 金币`,
+        reason: result.cost === 0
+          ? (result.freeReason === 'round_one_tier_one' ? '第一轮未见1费卡，免费刷新' : '海克斯免费刷新')
+          : `付费刷新，消耗 ${result.cost} 金币`,
       });
       appendAppliedHexcoreEvents(Hexcore2.state.draft.currentDraw);
       Hexcore2.state.draft.selectedSlot = 0;
       Hexcore2.state.draft.pickedThisTurn = false;
       Hexcore2.eventStore.append(
-        '商店刷新',
-        `${captain.name} 花费 ${result.cost} 金币刷新商店，剩余 ${result.gold} 金币`,
+        result.cost === 0 ? '免费刷新' : '商店刷新',
+        result.cost === 0
+          ? `${captain.name} 免费刷新商店，原因：${result.freeReason === 'round_one_tier_one' ? '第一轮商店未出现1费卡' : '摄影艺术家'}`
+          : `${captain.name} 花费 ${result.cost} 金币刷新商店，剩余 ${result.gold} 金币`,
         'draw'
       );
       renderAndPersist();

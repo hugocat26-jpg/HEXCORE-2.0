@@ -561,6 +561,49 @@ function testNewHexcores() {
   photo.actions.refreshShop();
   assert(photoCaptain.economy.gold === photoBeforeGold && photo.economyEngine.roundState(photoCaptain.id).photographerRefreshUsed, '摄影艺术家每轮第一次刷新应免费且不累计到额外金币消耗');
 
+  const tierOneRefresh = createReadyHarness().H;
+  const tierOneCaptain = currentCaptain(tierOneRefresh);
+  const tierTwoCards = tierOneRefresh.state.players
+    .filter(player => player.camp === tierOneRefresh.selectors.captainCamp(tierOneCaptain.id) && player.tier === 2 && player.status === 'available')
+    .slice(0, 3);
+  tierOneRefresh.state.draft.currentDraw = {
+    id: 'test_no_tier_one',
+    captainId: tierOneCaptain.id,
+    round: 1,
+    pickMode: 'shop',
+    generatedBy: 'free_shop',
+    cards: tierTwoCards.map((player, index) => ({ slotId: `slot_${index + 1}`, playerId: player.id, tier: player.tier, price: player.tier })),
+    appliedEffects: [],
+  };
+  tierOneRefresh.economyEngine.roundState(tierOneCaptain.id).freeShopUsed = true;
+  const tierOneBeforeGold = tierOneCaptain.economy.gold;
+  assert(tierOneRefresh.economyEngine.nextRefreshCost(tierOneCaptain.id) === 0, '第一轮商店未出现1费且仍有1费池时应允许免费刷新');
+  tierOneRefresh.actions.refreshShop();
+  assert(tierOneCaptain.economy.gold === tierOneBeforeGold, '第一轮补1费刷新不应扣金币');
+
+  const noTierOne = createReadyHarness().H;
+  const noTierOneCaptain = currentCaptain(noTierOne);
+  noTierOne.state.players
+    .filter(player => player.camp === noTierOne.selectors.captainCamp(noTierOneCaptain.id) && player.tier === 1)
+    .forEach(player => {
+      player.status = 'drafted';
+      player.teamId = 'test_taken';
+    });
+  const noTierOneTierTwoCards = noTierOne.state.players
+    .filter(player => player.camp === noTierOne.selectors.captainCamp(noTierOneCaptain.id) && player.tier === 2 && player.status === 'available')
+    .slice(0, 3);
+  noTierOne.state.draft.currentDraw = {
+    id: 'test_no_tier_one_pool',
+    captainId: noTierOneCaptain.id,
+    round: 1,
+    pickMode: 'shop',
+    generatedBy: 'free_shop',
+    cards: noTierOneTierTwoCards.map((player, index) => ({ slotId: `slot_${index + 1}`, playerId: player.id, tier: player.tier, price: player.tier })),
+    appliedEffects: [],
+  };
+  noTierOne.economyEngine.roundState(noTierOneCaptain.id).freeShopUsed = true;
+  assert(noTierOne.economyEngine.nextRefreshCost(noTierOneCaptain.id) > 0, '同阵营1费池耗尽后不应继续触发补1费免费刷新');
+
   const vampire = createReadyHarness().H;
   vampire.state.draft.currentIndex = 6;
   const vampireCaptain = currentCaptain(vampire);

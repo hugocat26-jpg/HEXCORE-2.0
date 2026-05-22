@@ -465,6 +465,12 @@
     const economy = captain && captain.economy ? captain.economy : null;
     const roundState = captain && Hexcore2.economyEngine ? Hexcore2.economyEngine.roundState(captain.id) : null;
     const nextRefreshCost = captain && Hexcore2.economyEngine ? Hexcore2.economyEngine.nextRefreshCost(captain.id) : 0;
+    const nextRefreshReason = captain && Hexcore2.economyEngine && Hexcore2.economyEngine.nextRefreshReason
+      ? Hexcore2.economyEngine.nextRefreshReason(captain.id)
+      : '';
+    const refreshLabel = roundState && !roundState.freeShopUsed
+      ? '首次免费'
+      : (nextRefreshCost === 0 ? (nextRefreshReason === 'round_one_tier_one' ? '缺1费免费' : '海克斯免费') : `${nextRefreshCost}金币`);
     const workflow = Hexcore2.selectors.workflowStatus();
     const statusText = !workflow.playersDraftReady
       ? `前置流程未完成：${workflow.stage.label}`
@@ -477,7 +483,7 @@
         <div class="phase">当前阶段：<strong>第 ${Hexcore2.state.draft.round} 轮 / 金币商店</strong></div>
         <div class="captain-title">当前队长：<strong>${captain ? escapeHtml(captain.name) : '无'}</strong></div>
         <div class="captain-title">金币：<strong>${economy ? economy.gold : 0}</strong></div>
-        <div class="captain-title">刷新：<strong>${roundState && !roundState.freeShopUsed ? '首次免费' : `${nextRefreshCost}金币`}</strong></div>
+        <div class="captain-title">刷新：<strong>${escapeHtml(refreshLabel)}</strong></div>
         ${currentHexcoreStatus(captain)}
         <div class="top-spacer"></div>
         <div class="live-status ${Hexcore2.state.draft.phase === 'completed' ? 'done' : ''}"><span></span>${statusText}</div>
@@ -617,6 +623,14 @@
     const economy = captain && captain.economy ? captain.economy : null;
     const roundState = captain && Hexcore2.economyEngine ? Hexcore2.economyEngine.roundState(captain.id) : null;
     const nextRefreshCost = captain && Hexcore2.economyEngine ? Hexcore2.economyEngine.nextRefreshCost(captain.id) : 0;
+    const nextRefreshReason = captain && Hexcore2.economyEngine && Hexcore2.economyEngine.nextRefreshReason
+      ? Hexcore2.economyEngine.nextRefreshReason(captain.id)
+      : '';
+    const nextRefreshLabel = roundState
+      ? (roundState.freeShopUsed
+        ? (nextRefreshCost === 0 ? (nextRefreshReason === 'round_one_tier_one' ? '免费（第一轮补1费）' : '免费') : `${nextRefreshCost} 金币`)
+        : '免费')
+      : '等待进入操作';
     function teamOwnerName(player) {
       if (!player || !player.teamId) return '';
       const owner = Hexcore2.state.captains.find(item => item.id === player.teamId);
@@ -638,7 +652,7 @@
         </div>
         <div class="draw-timeout-bar">
           <strong>${captain ? `${escapeHtml(captain.name)} · ${economy ? economy.gold : 0} 金币` : '无当前队长'}</strong>
-          <span>${roundState ? `本轮状态：${roundState.purchaseUsed ? '已购买' : (roundState.skipped ? '已跳过' : '可购买')} · 下一次刷新 ${roundState.freeShopUsed ? `${nextRefreshCost} 金币` : '免费'}` : '等待进入操作'}</span>
+          <span>${roundState ? `本轮状态：${roundState.purchaseUsed ? '已购买' : (roundState.skipped ? '已跳过' : '可购买')} · 下一次刷新 ${escapeHtml(nextRefreshLabel)}` : '等待进入操作'}</span>
         </div>
         <div class="cards-grid ${draw && draw.pickMode === 'open_pick' ? 'open-pick-grid' : ''}">
           ${cards.map(({ slot, player, realPlayer }, index) => {
@@ -671,6 +685,16 @@
     const draw = Hexcore2.state.draft.currentDraw;
     const captain = Hexcore2.selectors.currentCaptain();
     const roundState = captain && Hexcore2.economyEngine ? Hexcore2.economyEngine.roundState(captain.id) : null;
+    const nextRefreshCost = captain && Hexcore2.economyEngine ? Hexcore2.economyEngine.nextRefreshCost(captain.id) : 0;
+    const nextRefreshReason = captain && Hexcore2.economyEngine && Hexcore2.economyEngine.nextRefreshReason
+      ? Hexcore2.economyEngine.nextRefreshReason(captain.id)
+      : '';
+    const refreshButtonText = roundState && roundState.freeShopUsed && nextRefreshCost === 0
+      ? (nextRefreshReason === 'round_one_tier_one' ? '免费补1费' : '免费刷新')
+      : '付费刷新';
+    const refreshButtonHint = roundState && roundState.freeShopUsed && nextRefreshCost === 0
+      ? (nextRefreshReason === 'round_one_tier_one' ? '第一轮未见1费卡' : '海克斯免费')
+      : '费用 1/2/3/4 封顶';
     const canPurchase = Boolean(draw && draw.cards && draw.cards.length && !Hexcore2.state.draft.pickedThisTurn && roundState && !roundState.purchaseUsed && !roundState.skipped);
     return `
       <section class="control-panel">
@@ -679,7 +703,7 @@
           <div class="control-group shop-actions">
             <span class="control-group-label">商店</span>
             <button class="action-btn cyan" onclick="window.hexcoreUI.drawCards()">${icon('cube')}<strong>${roundState && roundState.freeShopUsed ? '刷新商店' : '免费开店'}</strong><span>${roundState && roundState.freeShopUsed ? '按刷新费用扣金币' : '本轮首次免费5张'}</span></button>
-            <button class="action-btn cyan" onclick="window.hexcoreUI.refreshShop()">${icon('refresh')}<strong>付费刷新</strong><span>费用 1/2/3/4 封顶</span></button>
+            <button class="action-btn cyan" onclick="window.hexcoreUI.refreshShop()">${icon('refresh')}<strong>${escapeHtml(refreshButtonText)}</strong><span>${escapeHtml(refreshButtonHint)}</span></button>
           </div>
           <div class="control-group primary-actions">
             <span class="control-group-label">流程</span>

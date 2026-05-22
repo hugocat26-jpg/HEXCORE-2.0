@@ -50,6 +50,25 @@
     return economy.roundState[roundNumber(round)];
   }
 
+  function roundOneTierOneRefreshReason(captainId, round) {
+    if (roundNumber(round) !== 1) return '';
+    const draw = Hexcore2.state.draft.currentDraw;
+    if (!draw || draw.captainId !== captainId || draw.pickMode !== 'shop') return '';
+    const cards = Array.isArray(draw.cards) ? draw.cards : [];
+    if (!cards.length || cards.some(card => Number(card.price || card.tier) === 1)) return '';
+    const availableTierOne = Hexcore2.selectors.availableCampPlayers(captainId)
+      .some(player => Number(player.tier) === 1);
+    return availableTierOne ? 'round_one_tier_one' : '';
+  }
+
+  function freeRefreshReason(captainId, round) {
+    const state = roundState(captainId, round);
+    const captain = captainById(captainId);
+    const hasPhotographer = captain && (Hexcore2.state.hexcoreAssignments[captain.id] || []).some(hex => hex.id === 'photographer');
+    if (hasPhotographer && !state.photographerRefreshUsed) return 'photographer';
+    return roundOneTierOneRefreshReason(captainId, round);
+  }
+
   Hexcore2.economyEngine = {
     ensureAll() {
       Hexcore2.state.captains.forEach(ensureEconomy);
@@ -88,12 +107,14 @@
     },
 
     nextRefreshCost(captainId, round = Hexcore2.state.draft.round) {
-      const state = roundState(captainId, round);
       const costs = Hexcore2.state.settings.refreshCosts || [1, 2, 3, 4];
-      const captain = captainById(captainId);
-      const hasPhotographer = captain && (Hexcore2.state.hexcoreAssignments[captain.id] || []).some(hex => hex.id === 'photographer');
-      if (hasPhotographer && !state.photographerRefreshUsed) return 0;
+      if (freeRefreshReason(captainId, round)) return 0;
+      const state = roundState(captainId, round);
       return costs[Math.min(state.refreshCount, costs.length - 1)] || 4;
+    },
+
+    nextRefreshReason(captainId, round = Hexcore2.state.draft.round) {
+      return freeRefreshReason(captainId, round);
     },
 
     canOperate(captainId, round = Hexcore2.state.draft.round) {
@@ -122,8 +143,13 @@
       if (!operate.ok) return { ok: false, cost: 0, reason: operate.reason };
       const cost = this.nextRefreshCost(captainId, round);
       if (cost === 0) {
-        roundState(captainId, round).photographerRefreshUsed = true;
-        return { ok: true, cost, gold: economy.gold, freeReason: 'photographer' };
+        const reason = freeRefreshReason(captainId, round);
+        const state = roundState(captainId, round);
+        if (reason === 'photographer') state.photographerRefreshUsed = true;
+        if (reason === 'round_one_tier_one') {
+          state.roundOneTierOneRefreshCount = Math.max(0, Number(state.roundOneTierOneRefreshCount) || 0) + 1;
+        }
+        return { ok: true, cost, gold: economy.gold, freeReason: reason || 'free' };
       }
       if (economy.gold < cost) {
         return { ok: false, cost, reason: `金币不足，本次刷新需要 ${cost} 金币` };
