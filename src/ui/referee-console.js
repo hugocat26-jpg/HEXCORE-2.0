@@ -128,6 +128,7 @@
       photographer: '&#128247;',
       'wise-benevolence': '&#127775;',
       'charged-cannon': '&#128165;',
+      'heavenly-descent': '&#128171;',
     };
     return glyphs[hexcore.id] || '&#10022;';
   }
@@ -730,6 +731,34 @@
           }).join('')}
         </div>
         <p class="hint">提示：${captain ? `本轮最多购买 1 名队员。刷新不消耗购买权，购买或跳过后本轮权限立即固化。${escapeHtml(captain.name)} 队伍人数 ${Hexcore2.selectors.teamTotalSize(captain.id)}/${Hexcore2.state.settings.playersPerTeam}（队员 ${Hexcore2.selectors.teamSize(captain.id)}/${Hexcore2.selectors.teamMemberCapacity(captain.id)}）。` : '当前没有可操作队长'}</p>
+      </section>
+    `;
+  }
+
+  function heavenlyDescentBanner() {
+    const windowState = Hexcore2.state.draft && Hexcore2.state.draft.heavenlyWindow;
+    if (!windowState || !windowState.active || windowState.resolved) return '';
+    const remaining = windowState.expiresAt ? Math.max(0, Math.ceil((Number(windowState.expiresAt) - Date.now()) / 1000)) : 0;
+    if (remaining <= 0) return '';
+    const targetCaptain = Hexcore2.state.captains.find(captain => captain.id === windowState.captainId);
+    const player = playerById(windowState.playerId);
+    const owners = Hexcore2.state.captains.filter(captain =>
+      (Hexcore2.state.hexcoreAssignments[captain.id] || []).some(hexcore =>
+        hexcore.id === 'heavenly-descent'
+        && hexcore.status !== 'used'
+        && Hexcore2.selectors.isHexcoreEnabled(hexcore.id)
+      )
+    );
+    if (!owners.length) return '';
+    return `
+      <section class="heavenly-window-banner">
+        <div>
+          <strong>神兵天降可发动</strong>
+          <span>${remaining} 秒内可回滚 ${escapeHtml(targetCaptain ? targetCaptain.name : '目标队长')} 刚购买的「${escapeHtml(player ? player.name : '选手')}」，返还 ${Number(windowState.price) || 0} 金币并加入本轮末尾补偿回合。</span>
+        </div>
+        <div class="heavenly-window-actions">
+          ${owners.map(owner => `<button onclick='window.hexcoreUI.useHeavenlyDescent(${safeJsonString(owner.id)})'>${escapeHtml(owner.name)} 发动</button>`).join('')}
+        </div>
       </section>
     `;
   }
@@ -1674,6 +1703,7 @@
         <div class="workspace-main">
           ${workflowGatePanel()}
           ${turnOrder()}
+          ${heavenlyDescentBanner()}
           <div class="content-grid">
             <div class="draft-main-column">
               ${playerCards()}

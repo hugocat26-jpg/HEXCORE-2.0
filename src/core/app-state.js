@@ -467,6 +467,19 @@
       currentIndex: clampNumber(source.currentIndex, 0, Math.max(0, captains.length - 1), 0),
       selectedSlot: clampNumber(source.selectedSlot, 0, 12, 0),
       currentDraw,
+      heavenlyWindow: source.heavenlyWindow && typeof source.heavenlyWindow === 'object'
+        ? {
+          active: Boolean(source.heavenlyWindow.active),
+          resolved: Boolean(source.heavenlyWindow.resolved),
+          round: clampNumber(source.heavenlyWindow.round, 1, 8, source.round || defaultState.draft.round),
+          captainId: remapCaptain(source.heavenlyWindow.captainId),
+          playerId: remapId(source.heavenlyWindow.playerId, playerIdMap),
+          slotId: sanitizeText(source.heavenlyWindow.slotId, '', 64),
+          price: clampNumber(source.heavenlyWindow.price, 0, 99, 0),
+          expiresAt: clampNumber(source.heavenlyWindow.expiresAt, 0, Number.MAX_SAFE_INTEGER, 0),
+          createdAt: clampNumber(source.heavenlyWindow.createdAt, 0, Number.MAX_SAFE_INTEGER, 0),
+        }
+        : null,
       runtimeEffects: Array.isArray(source.runtimeEffects) ? source.runtimeEffects.slice(0, 80).map(effect => {
         const item = effect && typeof effect === 'object' ? { ...effect } : {};
         ['captainId', 'sourceCaptainId', 'targetCaptainId', 'firstCaptainId', 'secondCaptainId'].forEach(key => {

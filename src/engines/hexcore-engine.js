@@ -19,6 +19,7 @@
     'stuck-together',
     'storm-fog',
     'charged-cannon',
+    'heavenly-descent',
   ]);
 
   function hasHexcore(captainId, hexcoreId) {
@@ -271,6 +272,7 @@
         'stuck-together': '延迟锁定',
         'storm-fog': '天气迷雾',
         'charged-cannon': '转换顺位',
+        'heavenly-descent': '响应窗口',
       };
 
       return hexcores.map((hex, index) => {
@@ -347,6 +349,9 @@
             ? target(base, '需选择转换技', `雷霆一击可影响 ${targets.length} 名未行动队长；加速之门可尝试让自己前移1位。`, { targetCount: targets.length + (canBoost ? 1 : 0) })
             : blocked(base, '无可调整顺位', '当前顺位已无法继续调整。');
         }
+        if (hex.id === 'heavenly-descent') {
+          return passive(base, '等待窗口', '任意队长确认购买后的10秒内，页面顶部会出现神兵天降发动入口。');
+        }
         return active(base, '可执行', '当前条件满足。');
       });
     },
@@ -361,6 +366,7 @@
       if (hexcore.status === 'used') return logFail(`【${hexcore.name}】已经使用过`);
       if (usedThisRound(hexcore)) return logFail(`【${hexcore.name}】本轮已经使用过`);
       if (!Hexcore2.selectors.isHexcoreEnabled(hexcore.id)) return logFail(`【${hexcore.name}】已被规则设置禁用`);
+      if (hexcore.id === 'heavenly-descent') return logFail('神兵天降需在购买成功后的顶部10秒发动窗口中使用');
 
       if (hexcore.id === 'camp-scout') {
         if (isShopOpenFor(captain.id)) return logFail('阵营侦察必须在开店前使用');

@@ -1197,6 +1197,48 @@ h2 span {
     linear-gradient(180deg, rgba(13, 32, 42, 0.97), rgba(7, 16, 24, 0.97));
 }
 
+.heavenly-window-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 0 0 12px;
+  padding: 12px 14px;
+  border: 1px solid rgba(255, 198, 92, 0.58);
+  border-radius: 8px;
+  background:
+    linear-gradient(90deg, rgba(255, 182, 72, 0.18), rgba(92, 224, 255, 0.08)),
+    var(--panel-bg);
+  box-shadow: 0 0 0 1px rgba(255, 198, 92, 0.12), 0 12px 28px rgba(0, 0, 0, 0.18);
+}
+
+.heavenly-window-banner strong {
+  display: block;
+  color: #ffd36f;
+  font-size: 16px;
+  margin-bottom: 4px;
+}
+
+.heavenly-window-banner span {
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.heavenly-window-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.heavenly-window-actions button {
+  min-width: 108px;
+  border-color: rgba(255, 198, 92, 0.62);
+  color: #ffe2a3;
+  background: rgba(142, 91, 19, 0.36);
+}
+
 .player-card.weather-fog-card::before {
   content: "";
   position: absolute;

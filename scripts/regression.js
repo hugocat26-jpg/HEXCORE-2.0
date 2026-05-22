@@ -749,6 +749,34 @@ function testNewHexcores() {
   assert(boost.state.draft.currentOrder.indexOf(boostCaptain.id) === 1, '加速之门应让自己本轮顺位前移一位');
   assert(boost.state.draft.currentIndex === 1, '加速之门后当前索引应仍指向使用者');
 
+  const heavenlyHarness = createReadyHarness();
+  const heavenly = heavenlyHarness.H;
+  const heavenlyOwner = heavenly.state.captains.find(captain => captain.id === 'c2');
+  heavenly.state.hexcoreAssignments[heavenlyOwner.id] = [
+    ...(heavenly.state.hexcoreAssignments[heavenlyOwner.id] || []),
+    { ...heavenly.sampleData.hexcores.find(hex => hex.id === 'heavenly-descent') },
+  ];
+  const heavenlyTarget = heavenly.state.captains.find(captain => captain.id === 'c5');
+  drawForCaptain(heavenly, heavenlyTarget.id);
+  heavenlyTarget.economy.gold = 20;
+  const heavenlyBeforeGold = heavenlyTarget.economy.gold;
+  const heavenlyPlayerId = heavenly.state.draft.currentDraw.cards[0].playerId;
+  heavenly.state.draft.selectedSlot = 0;
+  heavenly.actions.pickCard();
+  const heavenlyPaid = heavenlyBeforeGold - heavenlyTarget.economy.gold;
+  assert(heavenly.state.draft.heavenlyWindow && heavenly.state.draft.heavenlyWindow.active, '购买后应开启神兵天降10秒发动窗口');
+  assert(heavenlyHarness.app.innerHTML.includes('神兵天降可发动'), '实时抽选页应展示神兵天降发动倒计时');
+  assert(heavenlyTarget.team.includes(heavenlyPlayerId), '测试前提：目标队长已购买选手');
+  assert(heavenly.actions.useHeavenlyDescent(heavenlyOwner.id).ok, '神兵天降应可在窗口内发动');
+  assert(!heavenlyTarget.team.includes(heavenlyPlayerId), '神兵天降应将刚购买选手移回卡池');
+  assert(playerById(heavenly, heavenlyPlayerId).status === 'available', '被神兵天降退回的选手应恢复可选');
+  assert(heavenlyTarget.economy.gold === heavenlyBeforeGold, `神兵天降应返还购买费用，前 ${heavenlyBeforeGold}，购买实付 ${heavenlyPaid}，后 ${heavenlyTarget.economy.gold}`);
+  assert(heavenly.state.draft.currentOrder[heavenly.state.draft.currentOrder.length - 1] === heavenlyTarget.id, '神兵天降应把目标队长追加到本轮末尾补偿回合');
+  assert((heavenly.state.hexcoreAssignments[heavenlyOwner.id] || []).find(hex => hex.id === 'heavenly-descent').status === 'used', '神兵天降每局使用后应标记已使用');
+  heavenly.state.draft.currentIndex = heavenly.state.draft.currentOrder.length - 1;
+  heavenly.actions.drawCards();
+  assert(heavenly.state.draft.currentDraw && heavenly.state.draft.currentDraw.captainId === heavenlyTarget.id, '神兵天降补偿回合应允许目标队长重新开店');
+
   const removed = createReadyHarness().H;
   assert(!removed.sampleData.hexcores.some(hex => ['directed-recruit', 'order-overtake', 'budget-refund'].includes(hex.id)), '废弃海克斯不应继续进入海克斯池');
 }

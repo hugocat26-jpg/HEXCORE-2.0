@@ -267,6 +267,104 @@
     schedulePickTimeoutTick();
   }
 
+  function clearHeavenlyWindow() {
+    if (Hexcore2.heavenlyWindowTimer && typeof global.clearTimeout === 'function') {
+      global.clearTimeout(Hexcore2.heavenlyWindowTimer);
+    }
+    Hexcore2.heavenlyWindowTimer = null;
+    const windowState = Hexcore2.state.draft && Hexcore2.state.draft.heavenlyWindow;
+    if (windowState && windowState.active && !windowState.resolved) {
+      windowState.active = false;
+      windowState.resolved = true;
+    }
+  }
+
+  function activeHeavenlyWindow() {
+    const windowState = Hexcore2.state.draft && Hexcore2.state.draft.heavenlyWindow;
+    if (!windowState || !windowState.active || windowState.resolved) return null;
+    if (windowState.expiresAt && Date.now() > windowState.expiresAt) {
+      clearHeavenlyWindow();
+      return null;
+    }
+    return windowState;
+  }
+
+  function scheduleHeavenlyWindowTick() {
+    if (!browserTimerAvailable()) return;
+    if (Hexcore2.heavenlyWindowTimer && typeof global.clearTimeout === 'function') {
+      global.clearTimeout(Hexcore2.heavenlyWindowTimer);
+    }
+    Hexcore2.heavenlyWindowTimer = null;
+    const windowState = Hexcore2.state.draft && Hexcore2.state.draft.heavenlyWindow;
+    if (!windowState || !windowState.active || windowState.resolved) return;
+    Hexcore2.heavenlyWindowTimer = global.setTimeout(() => {
+      const active = activeHeavenlyWindow();
+      Hexcore2.ui.render();
+      if (active) scheduleHeavenlyWindowTick();
+    }, 1000);
+    if (Hexcore2.heavenlyWindowTimer && typeof Hexcore2.heavenlyWindowTimer.unref === 'function') {
+      Hexcore2.heavenlyWindowTimer.unref();
+    }
+  }
+
+  function heavenlyOwners() {
+    return Hexcore2.state.captains.filter(captain =>
+      (Hexcore2.state.hexcoreAssignments[captain.id] || []).some(hexcore =>
+        hexcore.id === 'heavenly-descent'
+        && hexcore.mode !== 'passive'
+        && hexcore.status !== 'used'
+        && Hexcore2.selectors.isHexcoreEnabled(hexcore.id)
+      )
+    );
+  }
+
+  function openHeavenlyWindow(captain, slot, price) {
+    if (!captain || !slot || !heavenlyOwners().length) {
+      Hexcore2.state.draft.heavenlyWindow = null;
+      return;
+    }
+    const now = Date.now();
+    Hexcore2.state.draft.heavenlyWindow = {
+      active: true,
+      resolved: false,
+      round: Hexcore2.state.draft.round,
+      captainId: captain.id,
+      playerId: slot.playerId,
+      slotId: slot.slotId || '',
+      price: Math.max(0, Number(price) || 0),
+      createdAt: now,
+      expiresAt: now + 10000,
+    };
+    scheduleHeavenlyWindowTick();
+  }
+
+  function prepareCompensationTurn(captainId) {
+    const state = Hexcore2.state;
+    const order = state.draft.currentOrder || [];
+    const isRepeatedTurn = order.slice(0, state.draft.currentIndex).includes(captainId);
+    if (!isRepeatedTurn) return false;
+    const effect = (state.draft.runtimeEffects || []).find(item =>
+      item.type === 'compensation_turn'
+      && item.captainId === captainId
+      && Number(item.round) === Number(state.draft.round)
+      && !item.consumed
+    );
+    if (!effect) return false;
+    const captain = state.captains.find(item => item.id === captainId);
+    const roundState = Hexcore2.economyEngine.roundState(captainId, state.draft.round);
+    roundState.purchaseUsed = false;
+    roundState.skipped = false;
+    roundState.freeShopUsed = false;
+    effect.consumed = true;
+    effect.appliedRound = state.draft.round;
+    effect.appliedAt = new Date().toISOString();
+    state.draft.currentDraw = null;
+    state.draft.selectedSlot = 0;
+    state.draft.pickedThisTurn = false;
+    Hexcore2.eventStore.append('补偿回合', `${captain ? captain.name : '目标队长'} 进入神兵天降补偿回合，可重新购买1名队员`, 'warn');
+    return true;
+  }
+
   function captainName(captainId) {
     const captain = Hexcore2.state.captains.find(item => item.id === captainId);
     return captain ? captain.name : '待定';
@@ -404,6 +502,7 @@
         Hexcore2.ui.render();
         return;
       }
+      prepareCompensationTurn(captain.id);
 
       const teamSize = Hexcore2.selectors.teamSize(captain.id);
       if (teamSize >= Hexcore2.selectors.teamMemberCapacity(captain.id)) {
@@ -527,6 +626,7 @@
       slot.purchased = true;
       slot.purchasedAt = new Date().toISOString();
       Hexcore2.state.draft.pickedThisTurn = true;
+      openHeavenlyWindow(captain, slot, result.price);
       renderAndPersist();
     },
 
@@ -553,6 +653,7 @@
       const previous = Hexcore2.selectors.currentCaptain();
       if (!options.skipSnapshot) snapshot(`切换队长前：${previous ? previous.name : '未知'}`);
       clearPickTimeout(true);
+      clearHeavenlyWindow();
       if (previous && Hexcore2.state.draft.phase !== 'completed') {
         const state = Hexcore2.economyEngine.roundState(previous.id);
         const full = Hexcore2.selectors.teamSize(previous.id) >= Hexcore2.selectors.teamMemberCapacity(previous.id);
@@ -570,9 +671,71 @@
         Hexcore2.eventStore.append('选人完成', '四轮金币抽卡已结束，系统已检查并处理阵容随机补位', 'success');
       } else {
         const captain = Hexcore2.selectors.currentCaptain();
+        if (captain) prepareCompensationTurn(captain.id);
         Hexcore2.eventStore.append('裁判操作', `进入 ${captain ? captain.name : '无'} 的选人环节`, 'info');
       }
       Hexcore2.ui.render();
+    },
+
+    useHeavenlyDescent(sourceCaptainId) {
+      const windowState = activeHeavenlyWindow();
+      if (!windowState) {
+        Hexcore2.eventStore.append('神兵天降失败', '当前没有可发动的10秒窗口', 'warn');
+        Hexcore2.ui.render();
+        return { ok: false, reason: '当前没有可发动窗口' };
+      }
+      const sourceCaptain = Hexcore2.state.captains.find(item => item.id === sourceCaptainId);
+      const sourceHexcore = sourceCaptain && (Hexcore2.state.hexcoreAssignments[sourceCaptain.id] || [])
+        .find(hexcore => hexcore.id === 'heavenly-descent' && hexcore.status !== 'used');
+      const targetCaptain = Hexcore2.state.captains.find(item => item.id === windowState.captainId);
+      const player = Hexcore2.state.players.find(item => item.id === windowState.playerId);
+      if (!sourceCaptain || !sourceHexcore || !Hexcore2.selectors.isHexcoreEnabled('heavenly-descent')) {
+        Hexcore2.eventStore.append('神兵天降失败', '请选择仍持有且未使用神兵天降的队长', 'warn');
+        Hexcore2.ui.render();
+        return { ok: false, reason: '没有可用神兵天降' };
+      }
+      if (!targetCaptain || !player || player.teamId !== targetCaptain.id || !targetCaptain.team.includes(player.id)) {
+        windowState.active = false;
+        windowState.resolved = true;
+        Hexcore2.eventStore.append('神兵天降失败', '目标购买结果已变化，无法回滚', 'warn');
+        Hexcore2.ui.render();
+        return { ok: false, reason: '目标购买结果已变化' };
+      }
+
+      snapshot(`神兵天降发动前：${sourceCaptain.name}`);
+      targetCaptain.team = targetCaptain.team.filter(playerId => playerId !== player.id);
+      player.status = 'available';
+      delete player.teamId;
+      targetCaptain.economy.gold += Math.max(0, Number(windowState.price) || 0);
+      const roundState = Hexcore2.economyEngine.roundState(targetCaptain.id, windowState.round);
+      roundState.purchaseUsed = true;
+      roundState.skipped = false;
+
+      const draw = Hexcore2.state.draft.currentDraw;
+      if (draw && draw.captainId === targetCaptain.id && Array.isArray(draw.cards)) {
+        draw.cards.forEach(card => {
+          if (card.playerId === player.id || card.slotId === windowState.slotId) {
+            delete card.purchased;
+            delete card.purchasedAt;
+          }
+        });
+      }
+
+      sourceHexcore.status = 'used';
+      Hexcore2.state.draft.runtimeEffects.push({
+        type: 'compensation_turn',
+        round: windowState.round,
+        captainId: targetCaptain.id,
+        sourceCaptainId: sourceCaptain.id,
+        playerId: player.id,
+        reason: `${sourceCaptain.name} 发动神兵天降，${targetCaptain.name} 本轮末尾获得补偿回合`,
+      });
+      Hexcore2.state.draft.currentOrder.push(targetCaptain.id);
+      windowState.active = false;
+      windowState.resolved = true;
+      Hexcore2.eventStore.append('神兵天降', `${sourceCaptain.name} 发动神兵天降，退回「${player.name}」并返还 ${windowState.price} 金币，${targetCaptain.name} 加入本轮末尾补偿回合`, 'warn');
+      renderAndPersist();
+      return { ok: true };
     },
 
     useHexcore(id, targetCaptainId, secondTargetCaptainId) {
@@ -2158,4 +2321,5 @@
   } else {
     Hexcore2.ui.render();
   }
+  scheduleHeavenlyWindowTick();
 })(window);
