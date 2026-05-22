@@ -140,7 +140,7 @@
 
   function hexcoreExecutionQueue(captainId) {
     const queue = Hexcore2.hexcoreEngine.executionQueue(captainId);
-    const targetableIds = new Set(['reserved-seat', 'urgent-restock', 'camp-blockade', 'price-interference', 'decompose-knowledge']);
+    const targetableIds = new Set(['reserved-seat', 'urgent-restock', 'camp-blockade', 'price-interference', 'decompose-knowledge', 'stuck-together']);
     return `
       <div class="hex-execution-queue">
         <div class="hex-queue-head">
@@ -250,6 +250,16 @@
           <select id="hex-target-second">
             <option value="">不分解队员</option>
             ${sacrifices.map(player => `<option value="${escapeHtml(player.id)}">${escapeHtml(player.name)} · ${player.tier}费抵 ${player.tier} 金币</option>`).join('')}
+          </select>
+        </label>
+      `;
+    } else if (hex.id === 'stuck-together') {
+      const targets = Hexcore2.hexcoreEngine.stuckTogetherTargets ? Hexcore2.hexcoreEngine.stuckTogetherTargets(captain.id) : [];
+      body = `
+        <label>
+          <small>锁定选手</small>
+          <select id="hex-target-first">
+            ${targets.map(player => `<option value="${escapeHtml(player.id)}">${escapeHtml(player.name)} · ${player.tier}费 · 评分 ${player.score}</option>`).join('') || '<option value="">没有可锁定目标</option>'}
           </select>
         </label>
       `;

@@ -414,6 +414,11 @@
 
       Hexcore2.economyEngine.applyRoundIncome(Hexcore2.state.draft.round);
       Hexcore2.economyEngine.applyCaptainTurnStart(captain.id);
+      const autoBeforeDraw = Hexcore2.hexcoreEngine.autoAssignBeforeDraw(captain.id);
+      if (autoBeforeDraw.handled) {
+        renderAndPersist();
+        return;
+      }
       const operate = Hexcore2.economyEngine.canOperate(captain.id);
       if (!operate.ok) {
         Hexcore2.eventStore.append('商店生成失败', operate.reason, 'warn');

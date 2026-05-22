@@ -685,6 +685,22 @@ function testNewHexcores() {
   assert(sacrificePlayer.status === 'available' && !sacrificePlayer.teamId, '被分解队员应回到可选池');
   assert(sacrificeCaptain.team.includes(expensiveTarget.id), '抵扣后目标选手应加入队伍');
 
+  const stuck = createReadyHarness().H;
+  const stuckCaptain = currentCaptain(stuck);
+  stuck.state.hexcoreAssignments[stuckCaptain.id] = [
+    { ...stuck.sampleData.hexcores.find(hex => hex.id === 'stuck-together'), status: 'available' },
+  ];
+  const stuckTarget = stuck.hexcoreEngine.stuckTogetherTargets(stuckCaptain.id)[0];
+  assert(stuck.hexcoreEngine.activate('stuck-together', { targetPlayerId: stuckTarget.id }).ok, '和我困在一起应可指定同阵营可选选手');
+  assert(stuck.state.draft.runtimeEffects.some(effect => effect.type === 'stuck_together' && effect.playerId === stuckTarget.id), '和我困在一起应记录下一轮延迟检查效果');
+  stuck.state.draft.round = 2;
+  stuck.economyEngine.roundState(stuckCaptain.id, 2).purchaseUsed = false;
+  stuck.economyEngine.roundState(stuckCaptain.id, 2).skipped = false;
+  const stuckResult = stuck.hexcoreEngine.autoAssignBeforeDraw(stuckCaptain.id);
+  assert(stuckResult.handled && stuckResult.assigned, '和我困在一起下一轮目标仍可选时应自动入队');
+  assert(stuckCaptain.team.includes(stuckTarget.id), '和我困在一起应将锁定目标加入队伍');
+  assert(stuck.economyEngine.roundState(stuckCaptain.id, 2).purchaseUsed, '和我困在一起自动入队后应消耗本轮购买权');
+
   const removed = createReadyHarness().H;
   assert(!removed.sampleData.hexcores.some(hex => ['directed-recruit', 'order-overtake', 'budget-refund'].includes(hex.id)), '废弃海克斯不应继续进入海克斯池');
 }

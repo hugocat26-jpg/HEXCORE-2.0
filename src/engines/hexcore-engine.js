@@ -16,6 +16,7 @@
     'photographer',
     'wise-benevolence',
     'decompose-knowledge',
+    'stuck-together',
   ]);
 
   function hasHexcore(captainId, hexcoreId) {
@@ -154,6 +155,20 @@
       .filter(player => player && (player.tier === 2 || player.tier === 3));
   }
 
+  function stuckTogetherTargets(captainId) {
+    return Hexcore2.selectors.availableCampPlayers(captainId)
+      .sort((a, b) => (Number(b.tier) || 0) - (Number(a.tier) || 0) || (Number(b.score) || 0) - (Number(a.score) || 0));
+  }
+
+  function pendingStuckTogether(captainId) {
+    return (Hexcore2.state.draft.runtimeEffects || []).find(effect =>
+      effect.type === 'stuck_together'
+      && effect.captainId === captainId
+      && !effect.consumed
+      && Number(effect.triggerRound) <= Number(Hexcore2.state.draft.round)
+    );
+  }
+
   Hexcore2.hexcoreEngine = {
     hasHexcore,
 
@@ -192,6 +207,7 @@
         photographer: '免费刷新',
         'wise-benevolence': '经济刷新',
         'decompose-knowledge': '自选分解',
+        'stuck-together': '延迟锁定',
       };
 
       return hexcores.map((hex, index) => {
@@ -246,6 +262,13 @@
           }
           if (!targets.length) return blocked(base, '无可选目标', '同阵营没有4/5费可选选手，顺延到3/2费后仍无目标。');
           return target(base, '需选择选手', `消耗3层解构，自选 ${targets[0].tier >= 4 ? '4/5费' : `${targets[0].tier}费顺延`} 可选选手；金币不足时可分解队内2/3费队员抵扣。`, { targetCount: targets.length });
+        }
+        if (hex.id === 'stuck-together') {
+          if (state.draft.round >= state.draft.maxRounds) return blocked(base, '无后续轮次', '该海克斯需要等到你的下一轮选人开始时结算。');
+          const targets = stuckTogetherTargets(captain.id);
+          return targets.length
+            ? target(base, '需选择选手', `选择1名同阵营可选选手；若到第 ${state.draft.round + 1} 轮仍未被买走，将直接入队。`, { targetCount: targets.length })
+            : blocked(base, '无可锁定目标', '同阵营没有可锁定的可选选手。');
         }
         return active(base, '可执行', '当前条件满足。');
       });
@@ -364,6 +387,21 @@
         Hexcore2.eventStore.append('知识来源于分解', `${captain.name} 消耗3层解构，自选「${targetPlayer.name}」入队`, 'success');
       }
 
+      if (hexcore.id === 'stuck-together') {
+        if (state.draft.round >= state.draft.maxRounds) return logFail('最后一轮无法使用【和我困在一起】');
+        const targetPlayer = stuckTogetherTargets(captain.id).find(player => player.id === options.targetPlayerId || player.id === options.firstPlayerId);
+        if (!targetPlayer) return logFail('请选择一名同阵营可选选手');
+        pushEffect({
+          type: 'stuck_together',
+          captainId: captain.id,
+          sourceCaptainId: captain.id,
+          playerId: targetPlayer.id,
+          triggerRound: state.draft.round + 1,
+          reason: `${captain.name} 与「${targetPlayer.name}」困在一起，若到下一轮仍可选则直接入队`,
+        });
+        Hexcore2.eventStore.append('和我困在一起', `${captain.name} 指定「${targetPlayer.name}」，将在第 ${state.draft.round + 1} 轮开始时检查`, 'warn');
+      }
+
       if (hexcore.id !== 'decompose-knowledge') markUsed(hexcore);
       Hexcore2.eventStore.append('海克斯激活', `${captain.name} 使用【${hexcore.name}】${options.targetCaptainId ? `，目标：${captainName(options.targetCaptainId)}` : ''}`, 'info');
       return { ok: true, advanceTurn: hexcore.id === 'steady-reinforce' || hexcore.id === 'decompose-knowledge' };
@@ -371,6 +409,7 @@
 
     decomposeTargets,
     decomposableTeamPlayers,
+    stuckTogetherTargets,
 
     effectStatusForCaptain(captainId) {
       const effects = Hexcore2.state.draft.runtimeEffects || [];
@@ -404,7 +443,29 @@
     advanceHellhound() { return { handled: false }; },
     extraDrawCount() { return 0; },
     drawReasons() { return []; },
-    autoAssignBeforeDraw() { return { handled: false }; },
+    autoAssignBeforeDraw(captainId = currentCaptain() && currentCaptain().id) {
+      const captain = Hexcore2.state.captains.find(item => item.id === captainId);
+      const effect = captain ? pendingStuckTogether(captain.id) : null;
+      if (!captain || !effect) return { handled: false };
+      effect.consumed = true;
+      effect.appliedRound = Hexcore2.state.draft.round;
+      effect.appliedAt = new Date().toISOString();
+      const player = Hexcore2.state.players.find(item => item.id === effect.playerId);
+      if (!player || player.status !== 'available') {
+        Hexcore2.eventStore.append('和我困在一起', `${captain.name} 的锁定目标已不在可选池，效果失效`, 'warn');
+        return { handled: true, assigned: false };
+      }
+      const assigned = Hexcore2.assignmentEngine.assign(captain.id, player.id, 'stuck_together');
+      if (!assigned) {
+        Hexcore2.eventStore.append('和我困在一起', `${captain.name} 自动获得「${player.name}」失败，可能队伍已满或阵营状态变化`, 'warn');
+        return { handled: true, assigned: false };
+      }
+      Hexcore2.economyEngine.roundState(captain.id).purchaseUsed = true;
+      Hexcore2.state.draft.pickedThisTurn = true;
+      Hexcore2.state.draft.currentDraw = null;
+      Hexcore2.eventStore.append('和我困在一起', `${captain.name} 的目标「${player.name}」仍在卡池，已直接加入队伍`, 'success');
+      return { handled: true, assigned: true, player };
+    },
     drawOverrideBeforeDraw() { return { handled: false }; },
     nextCaptain(captainId) {
       const order = Hexcore2.state.draft.currentOrder;

@@ -1,6 +1,6 @@
 (function initAssignmentEngine(global) {
   const Hexcore2 = global.Hexcore2 || (global.Hexcore2 = {});
-  const goldAllowedSources = new Set(['gold_shop_purchase', 'final_random_fill', 'steady_reinforce', 'decompose_knowledge']);
+  const goldAllowedSources = new Set(['gold_shop_purchase', 'final_random_fill', 'steady_reinforce', 'decompose_knowledge', 'stuck_together']);
 
   function captainCamp(captainId) {
     return Hexcore2.selectors.captainCamp ? Hexcore2.selectors.captainCamp(captainId) : '';
