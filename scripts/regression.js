@@ -701,6 +701,29 @@ function testNewHexcores() {
   assert(stuckCaptain.team.includes(stuckTarget.id), '和我困在一起应将锁定目标加入队伍');
   assert(stuck.economyEngine.roundState(stuckCaptain.id, 2).purchaseUsed, '和我困在一起自动入队后应消耗本轮购买权');
 
+  const stormHarness = createReadyHarness();
+  const storm = stormHarness.H;
+  storm.state.draft.currentIndex = 0;
+  const stormCaptain = currentCaptain(storm);
+  storm.state.hexcoreAssignments[stormCaptain.id] = [
+    { ...storm.sampleData.hexcores.find(hex => hex.id === 'storm-fog'), status: 'available' },
+  ];
+  const stormTarget = storm.state.draft.currentOrder[1];
+  assert(storm.hexcoreEngine.activate('storm-fog', { targetCaptainId: stormTarget }).ok, '骤雨血雾清风应可选择顺位后方目标队长');
+  const fogEffects = storm.state.draft.runtimeEffects.filter(effect => effect.type === 'weather_fog');
+  assert(fogEffects.length === 3, `骤雨血雾清风应影响3名非使用者队长，当前 ${fogEffects.length}`);
+  assert(fogEffects.every(effect => effect.captainId !== stormCaptain.id), '骤雨血雾清风不应影响使用者自己');
+  storm.state.draft.currentIndex = storm.state.draft.currentOrder.indexOf(stormTarget);
+  storm.state.draft.currentDraw = storm.shopEngine.generate(stormTarget, { generatedBy: 'free_shop' });
+  assert(storm.state.draft.currentDraw.appliedEffects.some(effect => effect.type === 'weather_fog'), '受影响队长开店时应消费天气迷雾效果');
+  storm.ui.render();
+  assert(stormHarness.app.innerHTML.includes('weather-fog-card'), '天气迷雾商店卡应使用迷雾卡片样式');
+  const fogPlayerId = storm.state.draft.currentDraw.cards[0].playerId;
+  storm.state.captains.find(captain => captain.id === stormTarget).economy.gold = 20;
+  const fogPurchase = storm.assignmentEngine.purchase(stormTarget, fogPlayerId, 'gold_shop_purchase');
+  assert(fogPurchase.ok, `天气迷雾真实卡牌应可购买：${fogPurchase.reason || 'ok'}`);
+  assert(storm.state.captains.find(captain => captain.id === stormTarget).team.includes(fogPlayerId), '天气迷雾购买后应按真实卡牌选手入队');
+
   const removed = createReadyHarness().H;
   assert(!removed.sampleData.hexcores.some(hex => ['directed-recruit', 'order-overtake', 'budget-refund'].includes(hex.id)), '废弃海克斯不应继续进入海克斯池');
 }

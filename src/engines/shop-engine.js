@@ -114,6 +114,11 @@
     return player;
   }
 
+  function applyWeatherFog(captainId, appliedEffects) {
+    const effect = consumeOneEffect(captainId, 'weather_fog');
+    if (effect) trackApplied(appliedEffects, effect, { appliedCaptainId: captainId });
+  }
+
   function cardFromPlayer(player, slotIndex) {
     return {
       slotId: `slot_${slotIndex + 1}`,
@@ -139,6 +144,7 @@
       const baseSize = Math.min(Hexcore2.state.settings.shopSize || 5, availableCards(captainId).length);
       const appliedEffects = [];
       const targetCount = Math.min(shopSizeFor(captainId, baseSize, appliedEffects), availableCards(captainId).length);
+      applyWeatherFog(captainId, appliedEffects);
       const cards = [];
       const weights = this.probabilityForRound(round);
       const seeded = [reservedPlayerFor(captainId, excludedIds, appliedEffects)].filter(Boolean);

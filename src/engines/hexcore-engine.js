@@ -17,6 +17,7 @@
     'wise-benevolence',
     'decompose-knowledge',
     'stuck-together',
+    'storm-fog',
   ]);
 
   function hasHexcore(captainId, hexcoreId) {
@@ -94,6 +95,7 @@
       reserved_seat: `${sourceName} 的【保留席位】：本次刷新保留指定卡牌`,
       camp_blockade: `${sourceName} 的【阵营封锁】：本次商店展示数量 -${Number(effect.countPenalty) || 1}`,
       price_interference: `${sourceName} 的【抬价干扰】：下一次购买费用 +1 金币`,
+      weather_fog: `${sourceName} 的【骤雨 血雾 清风】：本次商店卡牌信息被天气迷雾隐藏`,
       skip_round: `${sourceName} 的【跳过效果】：本轮行动被跳过`,
       move_first: `${sourceName} 的【顺位效果】：本轮顺位前移`,
       fixed_position: `${sourceName} 的【顺位效果】：本轮固定到指定顺位`,
@@ -169,6 +171,39 @@
     );
   }
 
+  function weatherFogTargetChain(sourceCaptainId, firstTargetId) {
+    const state = Hexcore2.state;
+    const order = state.draft.currentOrder && state.draft.currentOrder.length
+      ? state.draft.currentOrder
+      : state.draft.baseOrder;
+    const startIndex = order.indexOf(firstTargetId);
+    if (startIndex < 0 || firstTargetId === sourceCaptainId) return [];
+    const result = [];
+    for (let index = startIndex; index < order.length && result.length < 3; index += 1) {
+      const captainId = order[index];
+      const captain = state.captains.find(item => item.id === captainId);
+      if (!captain || captain.id === sourceCaptainId) continue;
+      if (Hexcore2.selectors.teamSize(captain.id) >= Hexcore2.selectors.teamMemberCapacity(captain.id)) continue;
+      result.push(captain);
+    }
+    return result;
+  }
+
+  function weatherFogTargets(sourceCaptainId) {
+    const state = Hexcore2.state;
+    const order = state.draft.currentOrder && state.draft.currentOrder.length
+      ? state.draft.currentOrder
+      : state.draft.baseOrder;
+    return order
+      .slice(state.draft.currentIndex)
+      .map(captainId => state.captains.find(captain => captain.id === captainId))
+      .filter(captain =>
+        captain
+        && captain.id !== sourceCaptainId
+        && Hexcore2.selectors.teamSize(captain.id) < Hexcore2.selectors.teamMemberCapacity(captain.id)
+      );
+  }
+
   Hexcore2.hexcoreEngine = {
     hasHexcore,
 
@@ -208,6 +243,7 @@
         'wise-benevolence': '经济刷新',
         'decompose-knowledge': '自选分解',
         'stuck-together': '延迟锁定',
+        'storm-fog': '天气迷雾',
       };
 
       return hexcores.map((hex, index) => {
@@ -269,6 +305,12 @@
           return targets.length
             ? target(base, '需选择选手', `选择1名同阵营可选选手；若到第 ${state.draft.round + 1} 轮仍未被买走，将直接入队。`, { targetCount: targets.length })
             : blocked(base, '无可锁定目标', '同阵营没有可锁定的可选选手。');
+        }
+        if (hex.id === 'storm-fog') {
+          const targets = weatherFogTargets(captain.id);
+          return targets.length
+            ? target(base, '需选择队长', '选择1名队长开始，向后影响共3名非使用者队长的下一次商店。', { targetCount: targets.length })
+            : blocked(base, '无可用目标', '当前顺位之后没有可影响的非使用者队长。');
         }
         return active(base, '可执行', '当前条件满足。');
       });
@@ -402,6 +444,20 @@
         Hexcore2.eventStore.append('和我困在一起', `${captain.name} 指定「${targetPlayer.name}」，将在第 ${state.draft.round + 1} 轮开始时检查`, 'warn');
       }
 
+      if (hexcore.id === 'storm-fog') {
+        const targets = weatherFogTargetChain(captain.id, options.targetCaptainId || options.firstCaptainId);
+        if (!targets.length) return logFail('请选择当前顺位之后可影响的非使用者队长');
+        targets.forEach(target => {
+          pushEffect({
+            type: 'weather_fog',
+            captainId: target.id,
+            sourceCaptainId: captain.id,
+            reason: `${captain.name} 使用骤雨 血雾 清风，${target.name} 下一次商店进入天气迷雾`,
+          });
+        });
+        Hexcore2.eventStore.append('骤雨 血雾 清风', `${captain.name} 使 ${targets.map(item => item.name).join('、')} 的下一次商店进入天气迷雾`, 'warn');
+      }
+
       if (hexcore.id !== 'decompose-knowledge') markUsed(hexcore);
       Hexcore2.eventStore.append('海克斯激活', `${captain.name} 使用【${hexcore.name}】${options.targetCaptainId ? `，目标：${captainName(options.targetCaptainId)}` : ''}`, 'info');
       return { ok: true, advanceTurn: hexcore.id === 'steady-reinforce' || hexcore.id === 'decompose-knowledge' };
@@ -410,6 +466,7 @@
     decomposeTargets,
     decomposableTeamPlayers,
     stuckTogetherTargets,
+    weatherFogTargets,
 
     effectStatusForCaptain(captainId) {
       const effects = Hexcore2.state.draft.runtimeEffects || [];

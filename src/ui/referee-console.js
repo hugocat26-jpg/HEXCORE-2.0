@@ -140,7 +140,7 @@
 
   function hexcoreExecutionQueue(captainId) {
     const queue = Hexcore2.hexcoreEngine.executionQueue(captainId);
-    const targetableIds = new Set(['reserved-seat', 'urgent-restock', 'camp-blockade', 'price-interference', 'decompose-knowledge', 'stuck-together']);
+    const targetableIds = new Set(['reserved-seat', 'urgent-restock', 'camp-blockade', 'price-interference', 'decompose-knowledge', 'stuck-together', 'storm-fog']);
     return `
       <div class="hex-execution-queue">
         <div class="hex-queue-head">
@@ -206,6 +206,16 @@
       body = `
         <label>
           <small>目标队长</small>
+          <select id="hex-target-first">
+            ${selectOptions(targets, '没有可用目标')}
+          </select>
+        </label>
+      `;
+    } else if (hex.id === 'storm-fog') {
+      const targets = Hexcore2.hexcoreEngine.weatherFogTargets ? Hexcore2.hexcoreEngine.weatherFogTargets(captain.id) : [];
+      body = `
+        <label>
+          <small>起始目标队长</small>
           <select id="hex-target-first">
             ${selectOptions(targets, '没有可用目标')}
           </select>
@@ -642,6 +652,7 @@
     const selected = Hexcore2.state.draft.selectedSlot;
     const blinded = captain ? Hexcore2.hexcoreEngine.isBlinded(captain.id) : false;
     const draw = Hexcore2.state.draft.currentDraw;
+    const weatherFog = Boolean(draw && Array.isArray(draw.appliedEffects) && draw.appliedEffects.some(effect => effect.type === 'weather_fog'));
     const economy = captain && captain.economy ? captain.economy : null;
     const roundState = captain && Hexcore2.economyEngine ? Hexcore2.economyEngine.roundState(captain.id) : null;
     const nextRefreshCost = captain && Hexcore2.economyEngine ? Hexcore2.economyEngine.nextRefreshCost(captain.id) : 0;
@@ -686,14 +697,14 @@
               return '<div class="shop-empty-slot" aria-hidden="true"></div>';
             }
             return `
-            <button class="player-card tier-${tier} ${index === selected ? 'selected' : ''} ${blinded ? 'blind-card' : ''} ${draw && draw.pickMode === 'mystery_swap' ? 'mystery-card' : ''}" onclick="window.hexcoreUI.selectCard(${index})">
+            <button class="player-card tier-${tier} ${index === selected ? 'selected' : ''} ${blinded ? 'blind-card' : ''} ${weatherFog ? 'weather-fog-card' : ''} ${draw && draw.pickMode === 'mystery_swap' ? 'mystery-card' : ''}" onclick="window.hexcoreUI.selectCard(${index})">
               <b class="shop-price-badge">${escapeHtml(tier)}费${priceBonus ? `<i>+${priceBonus}</i>` : ''}</b>
-              <strong>${blinded ? '身份隐藏' : escapeHtml(player.name)}</strong>
-              <small>${blinded ? '选中后揭示' : `ID: ${escapeHtml(player.gameId)}${draw && draw.pickMode === 'blind_box' && realPlayer.status === 'drafted' ? ` / 已在 ${escapeHtml(teamOwnerName(realPlayer))}` : ''}`}</small>
-              <span class="camp-pill">${escapeHtml(Hexcore2.selectors.campLabel(player.camp))}</span>
+              <strong>${blinded || weatherFog ? '云雾遮蔽' : escapeHtml(player.name)}</strong>
+              <small>${blinded || weatherFog ? '购买后揭示真实选手' : `ID: ${escapeHtml(player.gameId)}${draw && draw.pickMode === 'blind_box' && realPlayer.status === 'drafted' ? ` / 已在 ${escapeHtml(teamOwnerName(realPlayer))}` : ''}`}</small>
+              <span class="camp-pill">${weatherFog ? '天气迷雾' : escapeHtml(Hexcore2.selectors.campLabel(player.camp))}</span>
               <div class="hero-title">擅长英雄</div>
               <div class="hero-row">
-                ${(blinded ? ['?', '?', '?'] : (player.heroes && player.heroes.length ? player.heroes : ['暂无', '暂无', '暂无'])).map(hero => `<span>${escapeHtml(hero)}</span>`).join('')}
+                ${(blinded || weatherFog ? ['雾', '雨', '风'] : (player.heroes && player.heroes.length ? player.heroes : ['暂无', '暂无', '暂无'])).map(hero => `<span>${escapeHtml(hero)}</span>`).join('')}
               </div>
             </button>
           `;

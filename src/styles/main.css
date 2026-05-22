@@ -1189,6 +1189,61 @@ h2 span {
   font-weight: 800;
 }
 
+.player-card.weather-fog-card {
+  overflow: hidden;
+  border-color: rgba(92, 224, 255, 0.62);
+  background:
+    linear-gradient(145deg, rgba(61, 189, 255, 0.14), rgba(151, 80, 255, 0.12)),
+    linear-gradient(180deg, rgba(13, 32, 42, 0.97), rgba(7, 16, 24, 0.97));
+}
+
+.player-card.weather-fog-card::before {
+  content: "";
+  position: absolute;
+  inset: -36% -18%;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 20% 35%, rgba(255, 255, 255, 0.22), transparent 18%),
+    radial-gradient(circle at 56% 48%, rgba(91, 214, 255, 0.26), transparent 24%),
+    radial-gradient(circle at 82% 32%, rgba(190, 150, 255, 0.18), transparent 20%);
+  filter: blur(15px);
+  opacity: 0.86;
+  animation: weatherFogFlow 5.5s ease-in-out infinite alternate;
+}
+
+.player-card.weather-fog-card strong,
+.player-card.weather-fog-card small,
+.player-card.weather-fog-card .camp-pill,
+.player-card.weather-fog-card .hero-title,
+.player-card.weather-fog-card .hero-row {
+  position: relative;
+  z-index: 1;
+}
+
+.player-card.weather-fog-card::after {
+  content: "天气迷雾";
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  z-index: 2;
+  border: 1px solid rgba(92, 224, 255, 0.56);
+  border-radius: 999px;
+  color: #8de9ff;
+  background: rgba(35, 105, 138, 0.28);
+  padding: 4px 9px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+@keyframes weatherFogFlow {
+  from {
+    transform: translate3d(-5%, -2%, 0) rotate(-2deg) scale(1);
+  }
+  to {
+    transform: translate3d(6%, 4%, 0) rotate(2deg) scale(1.08);
+  }
+}
+
 .player-card.mystery-card {
   border-color: rgba(255, 190, 92, 0.5);
   background:
