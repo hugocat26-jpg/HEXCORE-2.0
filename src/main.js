@@ -509,7 +509,6 @@
     },
 
     drawCards() {
-      const captain = Hexcore2.selectors.currentCaptain();
       if (!playersDraftReady()) {
         Hexcore2.eventStore.append('流程未就绪', '请先完成队伍、队长和海克斯配置，再开始金币商店抽选队员', 'warn');
         Hexcore2.ui.render();
@@ -520,6 +519,10 @@
         Hexcore2.ui.render();
         return;
       }
+      if (Hexcore2.hexcoreEngine && Hexcore2.hexcoreEngine.ensureHungryWaveForRound) {
+        Hexcore2.hexcoreEngine.ensureHungryWaveForRound(Hexcore2.state.draft.round);
+      }
+      const captain = Hexcore2.selectors.currentCaptain();
       if (!captain) {
         Hexcore2.eventStore.append('裁判操作', '当前没有可操作队长，无法生成商店', 'warn');
         Hexcore2.ui.render();
@@ -669,7 +672,13 @@
       const hungryWave = Hexcore2.hexcoreEngine.resolveHungryWaveAfterPurchase
         ? Hexcore2.hexcoreEngine.resolveHungryWaveAfterPurchase(captain.id, slot.playerId, result.price)
         : { handled: false };
-      if (!hungryWave.handled) openHeavenlyWindow(captain, slot, result.price);
+      if (hungryWave.handled) {
+        Hexcore2.state.draft.pickedThisTurn = false;
+        const nextSlotIndex = draw.cards.findIndex(card => !card.purchased);
+        Hexcore2.state.draft.selectedSlot = nextSlotIndex >= 0 ? nextSlotIndex : 0;
+      } else {
+        openHeavenlyWindow(captain, slot, result.price);
+      }
       renderAndPersist();
     },
 
@@ -708,6 +717,9 @@
       const transition = Hexcore2.turnOrderEngine.advance();
 
       if (transition.type === 'next_round') {
+        if (Hexcore2.hexcoreEngine && Hexcore2.hexcoreEngine.ensureHungryWaveForRound) {
+          Hexcore2.hexcoreEngine.ensureHungryWaveForRound(transition.round);
+        }
         const captain = Hexcore2.selectors.currentCaptain();
         Hexcore2.eventStore.append('回合推进', `进入第 ${transition.round} 轮，当前队长为 ${captain ? captain.name : '无'}`, 'info');
       } else if (transition.type === 'completed') {
@@ -958,12 +970,21 @@
 
     resetLocalState() {
       const confirmed = typeof confirm === 'function'
-        ? confirm('确认清除本地状态并恢复示例初始数据？此操作会覆盖当前裁判端进度。')
+        ? confirm('确认清除本地状态并恢复默认空状态？此操作会覆盖当前裁判端进度。')
         : true;
       if (!confirmed) return;
 
       if (Hexcore2.storageService) Hexcore2.storageService.clear();
-      location.reload();
+      Hexcore2.state = Hexcore2.createDefaultState
+        ? Hexcore2.createDefaultState()
+        : Hexcore2.normalizeState({});
+      if (Hexcore2.economyEngine) {
+        Hexcore2.economyEngine.ensureAll();
+        Hexcore2.economyEngine.applyRoundIncome(Hexcore2.state.draft.round);
+      }
+      Hexcore2.turnOrderEngine.recompute();
+      Hexcore2.eventStore.append('状态重置', '已恢复默认空状态，请先导入或添加选手并配置队长', 'warn');
+      renderAndPersist();
     },
 
     setActiveView(view) {
@@ -973,6 +994,116 @@
       Hexcore2.state.ui.activeView = nextView;
       Hexcore2.state.ui.orderDrawerOpen = false;
       if (viewChanged) Hexcore2.state.ui.resetScrollOnRender = true;
+      renderAndPersist();
+    },
+
+    locateEvent(index) {
+      const event = Hexcore2.state.events[Number(index)];
+      if (!event) {
+        Hexcore2.eventStore.append('日志定位失败', '目标事件不存在或已被清理', 'warn');
+        Hexcore2.ui.render();
+        return;
+      }
+      const payload = event.payload || {};
+      const text = `${event.title || ''} ${event.body || ''}`;
+      const matchedCaptain = payload.captainId
+        ? Hexcore2.state.captains.find(captain => captain.id === payload.captainId)
+        : Hexcore2.state.captains.find(captain => text.includes(captain.name) || text.includes(captain.id));
+      const matchedPlayer = payload.playerId
+        ? Hexcore2.state.players.find(player => player.id === payload.playerId)
+        : Hexcore2.state.players.find(player =>
+          !Hexcore2.selectors.isCaptainPlayer(player.id)
+          && (text.includes(player.name) || text.includes(player.gameId || player.id))
+        );
+      const matchedHexcore = payload.hexcoreId
+        ? Hexcore2.sampleData.hexcores.find(hex => hex.id === payload.hexcoreId)
+        : Hexcore2.sampleData.hexcores.find(hex => text.includes(hex.name));
+
+      Hexcore2.state.ui = Hexcore2.state.ui || {};
+      Hexcore2.state.ui.highlightEventIndex = Number(index);
+      Hexcore2.state.ui.highlightCaptainId = matchedCaptain ? matchedCaptain.id : '';
+      Hexcore2.state.ui.highlightPlayerId = matchedPlayer ? matchedPlayer.id : '';
+      Hexcore2.state.ui.highlightHexcoreId = matchedHexcore ? matchedHexcore.id : '';
+      Hexcore2.state.ui.highlightTournament = text.includes('赛程') || text.includes('比分') || text.includes('淘汰赛');
+
+      if (matchedPlayer) {
+        Hexcore2.state.ui.activeView = 'players';
+        Hexcore2.state.ui.playerFilter = 'all';
+        Hexcore2.state.ui.resetScrollOnRender = true;
+      } else if (matchedHexcore) {
+        Hexcore2.state.ui.activeView = 'hexcores';
+        Hexcore2.state.ui.hexFilter = 'all';
+        if (matchedCaptain) Hexcore2.state.ui.hexCaptainId = matchedCaptain.id;
+        Hexcore2.state.ui.resetScrollOnRender = true;
+      } else if (Hexcore2.state.ui.highlightTournament) {
+        Hexcore2.state.ui.activeView = 'tournament';
+        Hexcore2.state.ui.resetScrollOnRender = true;
+      } else if (matchedCaptain) {
+        Hexcore2.state.ui.activeView = 'teams';
+        Hexcore2.state.ui.resetScrollOnRender = true;
+      } else {
+        Hexcore2.eventStore.append('日志定位', '该事件没有可定位的队长、选手、海克斯或赛程目标', 'info');
+      }
+      renderAndPersist();
+    },
+
+    recoverDraftState() {
+      const draft = Hexcore2.state.draft;
+      const fixes = [];
+      if (draft.round < 1 || draft.round > draft.maxRounds) {
+        draft.round = Math.max(1, Math.min(draft.maxRounds || 4, Number(draft.round) || 1));
+        fixes.push(`轮次修正为第 ${draft.round} 轮`);
+      }
+
+      const captainIds = new Set(Hexcore2.state.captains.map(captain => captain.id));
+      const orderInvalid = !Array.isArray(draft.currentOrder)
+        || !draft.currentOrder.length
+        || draft.currentOrder.some(captainId => !captainIds.has(captainId));
+      if (orderInvalid) {
+        Hexcore2.turnOrderEngine.recompute();
+        draft.currentIndex = Math.max(0, Math.min(Number(draft.currentIndex) || 0, draft.currentOrder.length - 1));
+        fixes.push('顺位队列已重算');
+      }
+
+      const currentCaptainId = draft.currentOrder[draft.currentIndex];
+      const currentCaptain = Hexcore2.state.captains.find(captain => captain.id === currentCaptainId);
+      if (draft.currentOrder.length && (!currentCaptain || Hexcore2.selectors.teamSize(currentCaptain.id) >= Hexcore2.selectors.teamMemberCapacity(currentCaptain.id))) {
+        Hexcore2.turnOrderEngine.recompute();
+        const nextIndex = draft.currentOrder.findIndex(captainId =>
+          Hexcore2.selectors.teamSize(captainId) < Hexcore2.selectors.teamMemberCapacity(captainId)
+        );
+        draft.currentIndex = Math.max(0, nextIndex);
+        draft.currentDraw = null;
+        draft.pickedThisTurn = false;
+        fixes.push('当前队长已满员，已切换到下一名可抽队长');
+      }
+
+      if (!draft.currentOrder.length && draft.phase !== 'completed') {
+        draft.phase = 'completed';
+        draft.currentDraw = null;
+        draft.pickedThisTurn = false;
+        if (Hexcore2.assignmentEngine) Hexcore2.assignmentEngine.fillIncompleteRosters();
+        fixes.push('无可抽队长，流程已收束为完成状态');
+      } else if (draft.phase !== 'completed' && draft.phase !== 'captain_action') {
+        draft.phase = 'captain_action';
+        fixes.push('流程阶段已恢复为队长操作');
+      }
+
+      const activeCaptainId = draft.currentOrder[draft.currentIndex];
+      if (draft.currentDraw && draft.currentDraw.captainId !== activeCaptainId) {
+        draft.currentDraw = null;
+        draft.pickedThisTurn = false;
+        draft.selectedSlot = 0;
+        fixes.push('旧商店归属与当前队长不一致，已清空');
+      }
+
+      if (!fixes.length) {
+        Hexcore2.eventStore.append('异常恢复检查', '当前轮次、顺位和队长状态未发现可自动修正项', 'info');
+        Hexcore2.ui.render();
+        return;
+      }
+      snapshot('修正抽选异常前');
+      Hexcore2.eventStore.append('异常恢复', fixes.join('；'), 'warn');
       renderAndPersist();
     },
 
@@ -1358,28 +1489,29 @@
     },
 
     removePlayerFromTeam(captainId, playerId) {
-      if (goldShopMode()) {
-        Hexcore2.eventStore.append('移除队员失败', '金币模式下已入队队员不能手动移回卡池，请使用撤销或重置流程处理', 'warn');
-        Hexcore2.ui.render();
-        return;
-      }
       const captain = Hexcore2.state.captains.find(item => item.id === captainId);
       const player = Hexcore2.state.players.find(item => item.id === playerId);
       if (!captain || !player) return;
+      if (!captain.team.includes(playerId)) {
+        Hexcore2.eventStore.append('移除队员失败', `${player.name} 不在 ${captain.name} 队伍中`, 'warn');
+        Hexcore2.ui.render();
+        return;
+      }
 
       snapshot(`移除队员前：${captain.name}`);
       captain.team = captain.team.filter(id => id !== playerId);
       markPlayerAvailable(player);
-      Hexcore2.eventStore.append('队伍管理', `裁判将 ${player.name} 从 ${captain.name} 移回可选池`, 'warn');
+      if (Hexcore2.normalizeState) Hexcore2.normalizeState(Hexcore2.state);
+      Hexcore2.turnOrderEngine.recompute();
+      Hexcore2.eventStore.append(
+        goldShopMode() ? '队伍纠错' : '队伍管理',
+        `裁判将 ${player.name} 从 ${captain.name} 移回可选池`,
+        'warn'
+      );
       renderAndPersist();
     },
 
     assignPlayerToTeam(captainId, playerId) {
-      if (goldShopMode()) {
-        Hexcore2.eventStore.append('补录队员失败', '金币模式下队员只能通过商店购买或四轮结束后的随机补位进入阵容', 'warn');
-        Hexcore2.ui.render();
-        return;
-      }
       const captain = Hexcore2.state.captains.find(item => item.id === captainId);
       const selectedPlayerId = playerId || (document.getElementById(`team-add-player-${captainId}`) || {}).value;
       const player = Hexcore2.state.players.find(item => item.id === selectedPlayerId);
@@ -1401,8 +1533,17 @@
       }
 
       snapshot(`补录队员前：${captain.name}`);
-      Hexcore2.assignmentEngine.assign(captain.id, player.id, 'manual_backfill');
-      Hexcore2.eventStore.append('队伍管理', `裁判为 ${captain.name} 补录队员 ${player.name}`, 'success');
+      const assigned = Hexcore2.assignmentEngine.assign(captain.id, player.id, 'manual_backfill');
+      if (!assigned) {
+        Hexcore2.eventStore.append('补录队员失败', `${player.name} 不满足补录条件，请确认阵营、队长锁定和队伍容量`, 'warn');
+        Hexcore2.ui.render();
+        return;
+      }
+      Hexcore2.eventStore.append(
+        goldShopMode() ? '队伍纠错' : '队伍管理',
+        `裁判为 ${captain.name} 补录队员 ${player.name}`,
+        'success'
+      );
       renderAndPersist();
     },
 
@@ -1425,18 +1566,21 @@
       });
       const kept = [];
       const removed = [];
+      const captainCamp = Hexcore2.selectors.captainCamp(captain.id);
+      const legalCrossCampSources = new Set(['stuck_together']);
       (captain.team || []).forEach(playerId => {
         const player = Hexcore2.state.players.find(item => item.id === playerId);
         const duplicatedElsewhere = firstOwner.get(playerId) !== captain.id;
         const duplicatedInCurrentTeam = kept.includes(playerId);
-        if (!player || player.status === 'disabled' || duplicatedElsewhere || duplicatedInCurrentTeam || kept.length >= capacity) {
+        const illegalCrossCamp = Boolean(player && captainCamp && player.camp !== captainCamp && !legalCrossCampSources.has(player.teamBypassReason));
+        if (!player || player.status === 'disabled' || duplicatedElsewhere || duplicatedInCurrentTeam || illegalCrossCamp || kept.length >= capacity) {
           removed.push(playerId);
           if (player && player.teamId === captain.id && player.status !== 'disabled' && !duplicatedInCurrentTeam) markPlayerAvailable(player);
           return;
         }
         kept.push(playerId);
         player.teamId = captain.id;
-        player.status = 'picked';
+        player.status = 'drafted';
       });
       if (!removed.length && !invalidCaptainBinding) {
         Hexcore2.eventStore.append('队伍异常检查', `${captain.name} 暂无可自动修复项；未设置队长等问题需裁判手动处理`, 'info');
@@ -1449,6 +1593,25 @@
       captain.team = kept;
       normalizeAfterConfigChange();
       Hexcore2.eventStore.append('队伍异常修复', `${captain.name} 已清理 ${removed.length} 个无效、重复或超员成员`, removed.length ? 'warn' : 'info');
+      renderAndPersist();
+    },
+
+    repairSystemIntegrityIssues() {
+      const confirmed = typeof confirm === 'function'
+        ? confirm('确认自动修复可处理的完整性异常？非法跨阵营、重复、缺失、禁用或超员成员会被移出队伍并回到可选池。')
+        : true;
+      if (!confirmed) return;
+
+      snapshot('修复完整性异常前');
+      const result = Hexcore2.integrityService.repairState();
+      if (Hexcore2.normalizeState) Hexcore2.normalizeState(Hexcore2.state);
+      Hexcore2.turnOrderEngine.recompute();
+      Hexcore2.eventStore.append(
+        '完整性修复',
+        `已移出 ${result.removedCount} 个非法成员，同步 ${result.syncedCount} 个归属字段`,
+        result.removedCount ? 'warn' : 'success'
+      );
+      this.runSystemCheck();
       renderAndPersist();
     },
 
@@ -1771,6 +1934,59 @@
       });
       Hexcore2.state.settings.ruleTemplates = Hexcore2.state.settings.ruleTemplates.slice(0, 8);
       Hexcore2.eventStore.append('规则设置', `保存规则模板「${name.trim()}」`, 'success');
+      renderAndPersist();
+    },
+
+    loadRuleTemplate(index) {
+      if (rejectGoldLockedMutation('加载规则模板失败')) return;
+      const templates = Hexcore2.state.settings.ruleTemplates || [];
+      const template = templates[Number(index)];
+      if (!template) {
+        Hexcore2.eventStore.append('加载规则模板失败', '模板不存在或已被删除', 'warn');
+        Hexcore2.ui.render();
+        return;
+      }
+      const confirmed = typeof confirm === 'function'
+        ? confirm(`确认加载规则模板「${template.name}」？这会覆盖当前规则参数、重算流程并清空当前商店结果。`)
+        : true;
+      if (!confirmed) return;
+
+      snapshot(`加载规则模板前：${template.name}`);
+      const minTeams = Hexcore2.state.settings.minTeams;
+      const maxTeams = Hexcore2.state.settings.maxTeams;
+      const teamCount = Math.max(minTeams, Math.min(maxTeams, Number(template.teamCount) || Hexcore2.selectors.teamCount()));
+      while (Hexcore2.state.captains.length < teamCount) {
+        const number = nextCaptainNumber();
+        const captain = { id: `c${number}`, name: `海斗${number}队`, record: '', team: [] };
+        Hexcore2.state.captains.push(captain);
+        Hexcore2.state.hexcoreAssignments[captain.id] = [];
+        Hexcore2.state.draft.baseOrder.push(captain.id);
+      }
+      while (Hexcore2.state.captains.length > teamCount) {
+        const captain = Hexcore2.state.captains[Hexcore2.state.captains.length - 1];
+        captain.team.forEach(playerId => markPlayerAvailable(Hexcore2.state.players.find(player => player.id === playerId)));
+        markPlayerAvailable(Hexcore2.selectors.captainPlayer(captain.id));
+        Hexcore2.state.captains.pop();
+        delete Hexcore2.state.hexcoreAssignments[captain.id];
+        Hexcore2.state.draft.baseOrder = Hexcore2.state.draft.baseOrder.filter(id => id !== captain.id);
+      }
+      Hexcore2.state.settings.teamCountCustomized = true;
+      Hexcore2.state.settings.playersPerTeam = Math.max(2, Math.min(8, Number(template.playersPerTeam) || Hexcore2.state.settings.playersPerTeam));
+      Hexcore2.state.settings.teamSizeIncludesCaptain = true;
+      Hexcore2.state.settings.drawCount = 5;
+      Hexcore2.state.settings.shopSize = 5;
+      Hexcore2.state.settings.roundTiers = Array.isArray(template.roundTiers)
+        ? template.roundTiers.slice(0, 4).map(tier => Math.max(1, Math.min(5, Number(tier) || 1)))
+        : Hexcore2.state.settings.roundTiers;
+      Hexcore2.state.settings.tierNames = template.tierNames ? { ...Hexcore2.state.settings.tierNames, ...template.tierNames } : Hexcore2.state.settings.tierNames;
+      Hexcore2.state.settings.disabledHexcores = Array.isArray(template.disabledHexcores) ? [...template.disabledHexcores] : [];
+      Hexcore2.state.draft.round = 1;
+      Hexcore2.state.draft.maxRounds = 4;
+      Hexcore2.state.draft.currentDraw = null;
+      Hexcore2.state.draft.pickedThisTurn = false;
+      Hexcore2.state.draft.runtimeEffects = [];
+      normalizeAfterConfigChange();
+      Hexcore2.eventStore.append('规则设置', `已加载规则模板「${template.name}」并重算流程`, 'warn');
       renderAndPersist();
     },
 
@@ -2345,75 +2561,14 @@
     },
 
     runSystemCheck() {
-      const issues = [];
-      const addIssue = (type, message, level = 'warn') => {
-        issues.push({ type, message, level });
-      };
-      const captainIds = new Set(Hexcore2.state.captains.map(captain => captain.id));
-      const assignedPlayers = new Set();
-      const captainPlayerIds = new Set();
-
-      Hexcore2.state.captains.forEach(captain => {
-        const captainPlayer = Hexcore2.selectors.captainPlayer(captain.id);
-        const captainCamp = Hexcore2.selectors.captainCamp(captain.id);
-        if (captain.playerId) {
-          if (captainPlayerIds.has(captain.playerId)) addIssue('队长冲突', `${captain.name} 的队长选手重复绑定`);
-          captainPlayerIds.add(captain.playerId);
-          if (!captainPlayer) addIssue('队长冲突', `${captain.name} 队长不在选手库`);
-        }
-        if (captain.team.length > Hexcore2.selectors.teamMemberCapacity(captain.id)) {
-          addIssue('超员', `${captain.name} 队伍人数超过上限`);
-        }
-        captain.team.forEach(playerId => {
-          if (assignedPlayers.has(playerId)) addIssue('重复归属', `选手 ${playerId} 被多个队伍占用`);
-          assignedPlayers.add(playerId);
-          const player = Hexcore2.state.players.find(item => item.id === playerId);
-          if (!player) addIssue('缺失选手', `${captain.name} 包含不存在的选手 ${playerId}`);
-          if (player && player.teamId !== captain.id) addIssue('重复归属', `${player.name} 的归属字段与队伍列表不一致`);
-          if (player && captainCamp && player.camp !== captainCamp) addIssue('跨阵营', `${captain.name} 包含${Hexcore2.selectors.campLabel(player.camp)}选手 ${player.name}`);
-        });
-      });
-
-      const seenOrder = new Set();
-      Hexcore2.state.draft.baseOrder.forEach(captainId => {
-        if (!captainIds.has(captainId)) addIssue('顺位异常', `基础顺位包含不存在队长 ${captainId}`);
-        if (seenOrder.has(captainId)) addIssue('顺位异常', `基础顺位重复包含 ${captainId}`);
-        seenOrder.add(captainId);
-      });
-
-      Hexcore2.state.players.forEach(player => {
-        if (player.status === 'drafted' && !player.teamId) addIssue('重复归属', `${player.name} 已入队但缺少队伍归属`);
-        if (player.teamId && !captainIds.has(player.teamId)) addIssue('重复归属', `${player.name} 指向不存在的队伍`);
-      });
-
-      ['local', 'outsider'].forEach(camp => {
-        const ranked = Hexcore2.state.players
-          .filter(player => player.camp === camp)
-          .filter(player => player.status !== 'disabled')
-          .filter(player => !Hexcore2.selectors.isCaptainPlayer(player.id))
-          .slice()
-          .sort((a, b) => (Number(b.score) || 0) - (Number(a.score) || 0) || String(a.name || '').localeCompare(String(b.name || ''), 'zh-CN'));
-        const bucketSize = Math.max(1, Math.ceil(ranked.length / 5));
-        ranked.forEach((player, index) => {
-          const expectedTier = Math.max(1, Math.min(5, 5 - Math.floor(index / bucketSize)));
-          if (Number(player.tier) !== expectedTier) {
-            addIssue('卡池异常', `${player.name} 当前 ${player.tier} 费，应为 ${expectedTier} 费`);
-          }
-        });
-      });
-
+      const result = Hexcore2.integrityService.checkState();
       Hexcore2.state.ui = Hexcore2.state.ui || {};
-      Hexcore2.state.ui.systemCheckResult = {
-        ok: issues.length === 0,
-        totalIssues: issues.length,
-        checkedAt: new Date().toLocaleString('zh-CN', { hour12: false }),
-        issues: issues.slice(0, 50),
-      };
+      Hexcore2.state.ui.systemCheckResult = result;
 
       Hexcore2.eventStore.append(
-        issues.length ? '系统检查发现问题' : '系统检查通过',
-        issues.length ? issues.slice(0, 5).map(issue => issue.message).join('；') : '队伍、选手归属、顺位和卡池数据当前一致',
-        issues.length ? 'warn' : 'success'
+        result.totalIssues ? '系统检查发现问题' : '系统检查通过',
+        result.totalIssues ? result.issues.slice(0, 5).map(issue => issue.message).join('；') : '队伍、选手归属、顺位和卡池数据当前一致',
+        result.totalIssues ? 'warn' : 'success'
       );
       Hexcore2.ui.render();
     },
@@ -2424,14 +2579,24 @@
 
     clearBrowserData() {
       const confirmed = typeof confirm === 'function'
-        ? confirm('确认清理浏览器本地保存数据？当前页面内存状态会保留到刷新前，刷新后回到默认示例状态。')
+        ? confirm('确认清理浏览器本地保存数据？当前页面会立即恢复默认空状态。')
         : true;
       if (!confirmed) return;
       const ok = Hexcore2.storageService ? Hexcore2.storageService.clear() : false;
+      if (ok) {
+        Hexcore2.state = Hexcore2.createDefaultState
+          ? Hexcore2.createDefaultState()
+          : Hexcore2.normalizeState({});
+        if (Hexcore2.economyEngine) {
+          Hexcore2.economyEngine.ensureAll();
+          Hexcore2.economyEngine.applyRoundIncome(Hexcore2.state.draft.round);
+        }
+        Hexcore2.turnOrderEngine.recompute();
+      }
       Hexcore2.state.ui = Hexcore2.state.ui || {};
       Hexcore2.state.ui.feedback = {
         title: ok ? '本地数据已清理' : '本地数据清理失败',
-        body: ok ? '刷新页面后将加载默认示例状态' : '当前环境不支持 localStorage 或清理失败',
+        body: ok ? '页面已恢复默认空状态，请重新导入或添加选手' : '当前环境不支持 localStorage 或清理失败',
         level: ok ? 'success' : 'warn',
         time: new Date().toLocaleTimeString('zh-CN', { hour12: false }),
         createdAt: Date.now(),

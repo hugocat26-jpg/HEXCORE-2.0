@@ -175,6 +175,10 @@
         return { type: 'next_turn' };
       }
 
+      if (Hexcore2.hexcoreEngine && typeof Hexcore2.hexcoreEngine.resolveHungryWaveRoundEnd === 'function') {
+        Hexcore2.hexcoreEngine.resolveHungryWaveRoundEnd(state.draft.round);
+      }
+
       if (state.draft.round >= state.draft.maxRounds) {
         state.draft.phase = 'completed';
         resetTurnState();

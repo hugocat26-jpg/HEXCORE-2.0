@@ -8,10 +8,69 @@
 </head>
 <body>
   <div id="app"></div>
+  <script>
+    (function installBootRecovery() {
+      var STORAGE_KEY = 'hexcore2_referee_state_v1';
+      var RECOVERY_KEY = 'hexcore2_boot_recovered_v1';
+
+      function storageGet(store, key) {
+        try { return store && store.getItem ? store.getItem(key) : null; } catch (error) { return null; }
+      }
+
+      function storageSet(store, key, value) {
+        try { if (store && store.setItem) store.setItem(key, value); } catch (error) {}
+      }
+
+      function storageRemove(store, key) {
+        try { if (store && store.removeItem) store.removeItem(key); } catch (error) {}
+      }
+
+      function showBootError(message) {
+        var app = document.getElementById('app');
+        if (!app) return;
+        app.innerHTML = ''
+          + '<main class="launch-warning" style="min-height:100vh;display:grid;place-items:center;padding:32px;color:#e8f3ff;background:#020b10;">'
+          + '<section style="max-width:720px;border:1px solid rgba(25,212,240,.3);border-radius:14px;padding:28px;background:rgba(9,20,28,.96);box-shadow:0 20px 60px rgba(0,0,0,.35);">'
+          + '<h1 style="margin:0 0 12px;color:#19d4f0;font-size:24px;">页面启动失败</h1>'
+          + '<p style="margin:0 0 16px;line-height:1.7;color:#b9c7d6;">Edge 本地保存状态可能与当前版本不兼容。系统已尝试自动恢复；如果仍看到此提示，请清理本地状态后重试。</p>'
+          + '<pre style="white-space:pre-wrap;max-height:180px;overflow:auto;color:#ffcf66;background:rgba(0,0,0,.22);border-radius:10px;padding:12px;">' + String(message || '未知错误').replace(/[<>&]/g, function (ch) { return ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' })[ch]; }) + '</pre>'
+          + '<button onclick="localStorage.removeItem(\'' + STORAGE_KEY + '\');sessionStorage.removeItem(\'' + RECOVERY_KEY + '\');location.reload();" style="margin-top:16px;border:1px solid rgba(25,212,240,.4);border-radius:10px;padding:10px 16px;background:#0a6cff;color:#fff;font-weight:700;cursor:pointer;">清理本地状态并重试</button>'
+          + '</section>'
+          + '</main>';
+      }
+
+      function recoverOnce(reason) {
+        if (!storageGet(window.sessionStorage, RECOVERY_KEY)) {
+          storageSet(window.sessionStorage, RECOVERY_KEY, '1');
+          storageRemove(window.localStorage, STORAGE_KEY);
+          window.location.replace(window.location.pathname + '?recovered=' + Date.now());
+          return;
+        }
+        showBootError(reason);
+      }
+
+      window.addEventListener('error', function (event) {
+        recoverOnce(event && event.message ? event.message : '脚本执行错误');
+      });
+      window.addEventListener('unhandledrejection', function (event) {
+        var reason = event && event.reason;
+        recoverOnce(reason && reason.stack ? reason.stack : String(reason || '异步初始化错误'));
+      });
+      window.addEventListener('load', function () {
+        window.setTimeout(function () {
+          var app = document.getElementById('app');
+          if (app && !String(app.innerHTML || '').trim()) {
+            recoverOnce('页面脚本未完成渲染');
+          }
+        }, 800);
+      });
+    })();
+  </script>
   <script src="src/core/sample-data.js"></script>
   <script src="src/services/storage-service.js"></script>
   <script src="src/services/history-service.js"></script>
   <script src="src/services/export-service.js"></script>
+  <script src="src/services/integrity-service.js"></script>
   <script src="src/core/app-state.js"></script>
   <script src="src/core/event-store.js"></script>
   <script src="src/engines/turn-order-engine.js"></script>

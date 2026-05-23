@@ -1,6 +1,6 @@
 (function initAssignmentEngine(global) {
   const Hexcore2 = global.Hexcore2 || (global.Hexcore2 = {});
-  const goldAllowedSources = new Set(['gold_shop_purchase', 'final_random_fill', 'steady_reinforce', 'decompose_knowledge', 'stuck_together', 'mystery_box', 'transmute_gold', 'transmute_prismatic']);
+  const goldAllowedSources = new Set(['gold_shop_purchase', 'final_random_fill', 'manual_backfill', 'steady_reinforce', 'decompose_knowledge', 'stuck_together', 'mystery_box', 'transmute_gold', 'transmute_prismatic', 'hungry_wave']);
   const crossCampAllowedSources = new Set(['stuck_together']);
 
   function captainCamp(captainId) {

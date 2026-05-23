@@ -90,6 +90,26 @@
     return labels[hexcore.type] || '海克斯';
   }
 
+  const hexcoreCategoryMeta = {
+    shop_control: { label: '商店操控', short: '商店', desc: '影响开店、刷新、商店卡展示或购买窗口。' },
+    economy: { label: '金币运营', short: '金币', desc: '影响金币、返还、折扣或刷新资源。' },
+    disruption: { label: '对手干扰', short: '干扰', desc: '对其他队长的商店、费用或信息造成限制。' },
+    roster_replace: { label: '入队替代', short: '入队', desc: '绕过普通购买或替换队伍成员。' },
+    order_response: { label: '顺位响应', short: '顺位', desc: '影响行动顺位、响应窗口或购买后判定。' },
+  };
+
+  function hexcoreCategory(hexcore) {
+    return hexcore && hexcore.category && hexcoreCategoryMeta[hexcore.category] ? hexcore.category : 'shop_control';
+  }
+
+  function hexcoreCategoryLabel(hexcore) {
+    return hexcoreCategoryMeta[hexcoreCategory(hexcore)].label;
+  }
+
+  function hexcoreCategoryShort(hexcore) {
+    return hexcoreCategoryMeta[hexcoreCategory(hexcore)].short;
+  }
+
   function hexcoreGlyph(hexcore) {
     const glyphs = {
       'transmute-bronze': '&#10024;',
@@ -140,6 +160,17 @@
     return '裁判手动';
   }
 
+  function hexcoreTimingLabel(hexcore) {
+    if (!hexcore) return '裁判判定';
+    if (hexcore.mode === 'passive') return '自动触发';
+    if (hexcore.needsTarget === 'captain') return '选队长';
+    if (hexcore.needsTarget === 'shopCard') return '选商店卡';
+    if (hexcore.needsTarget === 'player') return '选选手';
+    if (hexcore.maxUsesPerRound) return '每轮一次';
+    if (hexcore.uses === 1) return '一次性';
+    return '裁判手动';
+  }
+
   function hexcoreExecutionQueue(captainId) {
     const queue = Hexcore2.hexcoreEngine.executionQueue(captainId);
     const targetableIds = new Set(['reserved-seat', 'urgent-restock', 'camp-blockade', 'price-interference', 'decompose-knowledge', 'stuck-together', 'storm-fog', 'snow-cat', 'charged-cannon']);
@@ -158,6 +189,10 @@
               </div>
               <div class="hex-queue-body">
                 <strong>${escapeHtml(item.name)} <em>${escapeHtml(item.actionLabel)}</em></strong>
+                <div class="hex-queue-meta">
+                  <span class="hex-category-chip ${escapeHtml(hexcoreCategory(item))}">${escapeHtml(hexcoreCategoryShort(item))}</span>
+                  <span>${escapeHtml(item.timingLabel || hexcoreTimingLabel(item))}</span>
+                </div>
                 <p>${escapeHtml(item.reason)}</p>
               </div>
               ${item.executable ? `
@@ -183,10 +218,18 @@
     };
 
     let body = '';
+    let canSubmit = true;
+    let decisionNote = '';
+    const markNoTargets = (items, reason) => {
+      if (items.length) return;
+      canSubmit = false;
+      decisionNote = reason;
+    };
     if (hex.id === 'reserved-seat' || hex.id === 'urgent-restock') {
-      const cards = (Hexcore2.state.draft.currentDraw && Hexcore2.state.draft.currentDraw.captainId === captain.id)
+      const cards = ((Hexcore2.state.draft.currentDraw && Hexcore2.state.draft.currentDraw.captainId === captain.id)
         ? Hexcore2.state.draft.currentDraw.cards
-        : [];
+        : []).filter(card => card && !card.purchased);
+      markNoTargets(cards, '当前商店没有可处理卡牌；可能已购买、已跳过或商店未打开。');
       body = `
         <label>
           <small>${hex.id === 'reserved-seat' ? '保留卡牌' : '替换卡牌'}</small>
@@ -199,12 +242,13 @@
         </label>
       `;
     } else if (hex.id === 'camp-blockade' || hex.id === 'price-interference') {
-      const order = Hexcore2.state.draft.currentOrder || [];
-      const targets = Hexcore2.state.captains.filter(item =>
-        item.id !== captain.id
-        && Hexcore2.selectors.teamSize(item.id) < Hexcore2.selectors.teamMemberCapacity(item.id)
-        && (order.indexOf(item.id) >= Hexcore2.state.draft.currentIndex || Hexcore2.state.draft.round < Hexcore2.state.draft.maxRounds)
-      );
+      const targets = Hexcore2.hexcoreEngine.targetableCaptains
+        ? Hexcore2.hexcoreEngine.targetableCaptains(captain.id)
+        : [];
+      const conflicts = Hexcore2.hexcoreEngine.targetConflictReasons
+        ? Hexcore2.hexcoreEngine.targetConflictReasons(captain.id)
+        : [];
+      markNoTargets(targets, '没有满足条件的目标队长；可能已满员、被海浪免疫，或行动窗口已过。');
       body = `
         <label>
           <small>目标队长</small>
@@ -212,9 +256,16 @@
             ${selectOptions(targets, '没有可用目标')}
           </select>
         </label>
+        ${conflicts.length ? `
+          <div class="hex-target-decision">
+            <strong>冲突/裁决说明</strong>
+            ${conflicts.slice(0, 4).map(item => `<span>${escapeHtml(item.name)}：${escapeHtml(item.reason)}</span>`).join('')}
+          </div>
+        ` : ''}
       `;
     } else if (hex.id === 'storm-fog') {
       const targets = Hexcore2.hexcoreEngine.weatherFogTargets ? Hexcore2.hexcoreEngine.weatherFogTargets(captain.id) : [];
+      markNoTargets(targets, '当前顺位之后没有可影响的非使用者队长；已满员或海浪免疫的队长会被跳过。');
       body = `
         <label>
           <small>起始目标队长</small>
@@ -225,6 +276,7 @@
       `;
     } else if (hex.id === 'snow-cat') {
       const targets = Hexcore2.hexcoreEngine.openCaptainTargets ? Hexcore2.hexcoreEngine.openCaptainTargets(captain.id, true) : [];
+      markNoTargets(targets, '当前没有未满员队长可被信息扰乱；海浪免疫或满员队伍不能作为目标。');
       body = `
         <label>
           <small>目标队长</small>
@@ -236,6 +288,10 @@
     } else if (hex.id === 'charged-cannon') {
       const targets = Hexcore2.hexcoreEngine.cannonTargets ? Hexcore2.hexcoreEngine.cannonTargets(captain.id) : [];
       const canBoost = Hexcore2.state.draft.currentIndex > 0;
+      if (!targets.length && !canBoost) {
+        canSubmit = false;
+        decisionNote = '当前没有可延后的未行动队长，且当前队长已经无法继续前移。';
+      }
       body = `
         <label>
           <small>转换技</small>
@@ -278,6 +334,7 @@
     } else if (hex.id === 'decompose-knowledge') {
       const targets = Hexcore2.hexcoreEngine.decomposeTargets ? Hexcore2.hexcoreEngine.decomposeTargets(captain.id) : [];
       const sacrifices = Hexcore2.hexcoreEngine.decomposableTeamPlayers ? Hexcore2.hexcoreEngine.decomposableTeamPlayers(captain) : [];
+      markNoTargets(targets, '解构层数、金币或同阵营可选目标不足，当前无法执行。');
       body = `
         <label>
           <small>自选目标</small>
@@ -295,6 +352,7 @@
       `;
     } else if (hex.id === 'stuck-together') {
       const targets = Hexcore2.hexcoreEngine.stuckTogetherTargets ? Hexcore2.hexcoreEngine.stuckTogetherTargets(captain.id) : [];
+      markNoTargets(targets, '当前没有未被选走且可锁定的选手，或已经没有后续轮次可结算。');
       body = `
         <label>
           <small>锁定选手</small>
@@ -333,8 +391,9 @@
         <div class="hex-target-picker-options">
           ${body}
         </div>
+        ${decisionNote ? `<div class="hex-target-warning">${escapeHtml(decisionNote)}</div>` : ''}
         <div class="hex-target-picker-actions">
-          <button class="primary-btn" onclick='window.hexcoreUI.useSelectedHexTarget(${safeJsonString(hex.id)})'>确认执行</button>
+          <button class="primary-btn" ${canSubmit ? '' : 'disabled'} onclick='window.hexcoreUI.useSelectedHexTarget(${safeJsonString(hex.id)})'>确认执行</button>
           <button class="ghost-btn" onclick="window.hexcoreUI.closeHexTargetPicker()">取消</button>
         </div>
       </div>
@@ -533,7 +592,7 @@
     const refreshLabel = roundState && !roundState.freeShopUsed
       ? '首次免费'
       : (nextRefreshCost === 0
-        ? (nextRefreshReason === 'round_one_tier_one' ? '缺1费免费' : (nextRefreshReason === 'wise_benevolence' ? '博爱免费' : '海克斯免费'))
+        ? (nextRefreshReason === 'round_one_tier_one' ? '缺1费免费' : (nextRefreshReason === 'wise_benevolence' ? '博爱免费' : (nextRefreshReason === 'hungry_wave_refund' ? '海浪补偿' : '海克斯免费')))
         : `${nextRefreshCost}金币`);
     const workflow = Hexcore2.selectors.workflowStatus();
     const statusText = !workflow.playersDraftReady
@@ -672,6 +731,7 @@
         <div class="workflow-actions">
           <button class="subtle-btn" onclick="window.hexcoreUI.setActiveView('teams')">检查队伍</button>
           <button class="subtle-btn" onclick="window.hexcoreUI.setActiveView('players')">检查选手</button>
+          <button class="subtle-btn" onclick="window.hexcoreUI.recoverDraftState()">修正抽选异常</button>
           <button class="primary-btn" onclick="window.hexcoreUI.setActiveView('hexcores')">进入海克斯抽取</button>
         </div>
       </section>
@@ -695,7 +755,7 @@
     const nextRefreshLabel = roundState
       ? (roundState.freeShopUsed
         ? (nextRefreshCost === 0
-          ? (nextRefreshReason === 'round_one_tier_one' ? '免费（第一轮补1费）' : (nextRefreshReason === 'wise_benevolence' ? '免费（贤者的博爱）' : '免费'))
+          ? (nextRefreshReason === 'round_one_tier_one' ? '免费（第一轮补1费）' : (nextRefreshReason === 'wise_benevolence' ? '免费（贤者的博爱）' : (nextRefreshReason === 'hungry_wave_refund' ? '免费（海浪补偿）' : '免费')))
           : `${nextRefreshCost} 金币`)
         : '免费')
       : '等待进入操作';
@@ -786,10 +846,10 @@
       ? Hexcore2.economyEngine.nextRefreshReason(captain.id)
       : '';
     const refreshButtonText = roundState && roundState.freeShopUsed && nextRefreshCost === 0
-      ? (nextRefreshReason === 'round_one_tier_one' ? '免费补1费' : (nextRefreshReason === 'wise_benevolence' ? '博爱刷新' : '免费刷新'))
+      ? (nextRefreshReason === 'round_one_tier_one' ? '免费补1费' : (nextRefreshReason === 'wise_benevolence' ? '博爱刷新' : (nextRefreshReason === 'hungry_wave_refund' ? '海浪补偿' : '免费刷新')))
       : '付费刷新';
     const refreshButtonHint = roundState && roundState.freeShopUsed && nextRefreshCost === 0
-      ? (nextRefreshReason === 'round_one_tier_one' ? '第一轮未见1费卡' : (nextRefreshReason === 'wise_benevolence' ? '消耗累计刷新次数' : '海克斯免费'))
+      ? (nextRefreshReason === 'round_one_tier_one' ? '第一轮未见1费卡' : (nextRefreshReason === 'wise_benevolence' ? '消耗累计刷新次数' : (nextRefreshReason === 'hungry_wave_refund' ? '被海浪夺取后的补偿' : '海克斯免费')))
       : '费用 1/2/3/4 封顶';
     const canPurchase = Boolean(draw && draw.cards && draw.cards.length && !Hexcore2.state.draft.pickedThisTurn && roundState && !roundState.purchaseUsed && !roundState.skipped);
     return `
@@ -811,6 +871,7 @@
             <span class="control-group-label">系统</span>
             <button class="action-btn muted" onclick="window.hexcoreUI.pause()">${icon('pause')}<strong>${Hexcore2.state.draft.paused ? '继续' : '暂停'}</strong><span>${Hexcore2.state.draft.paused ? '继续选人流程' : '暂停选人流程'}</span></button>
             <button class="action-btn muted ${(Hexcore2.state.undoStack || []).length === 0 ? 'disabled' : ''}" onclick="window.hexcoreUI.undo()">${icon('undo')}<strong>撤销上一步</strong><span>可撤销 ${(Hexcore2.state.undoStack || []).length} 步</span></button>
+            <button class="action-btn muted" onclick="window.hexcoreUI.recoverDraftState()">${icon('refresh')}<strong>修正异常</strong><span>轮次/顺位/满员</span></button>
           </div>
         </div>
       </section>
@@ -877,6 +938,7 @@
     const captainFilter = ui.eventCaptainFilter || 'all';
     const eventSearch = ui.eventSearch || '';
     const filteredEvents = Hexcore2.exportService.filteredEvents();
+    const eventIndex = event => Hexcore2.state.events.indexOf(event);
 
     return `
       <aside class="event-rail">
@@ -903,14 +965,14 @@
         <p class="event-count">当前筛选 ${filteredEvents.length}/${Hexcore2.state.events.length} 条</p>
         <div class="event-list">
           ${filteredEvents.map(event => `
-            <div class="event-item ${eventLevelClass(event.level)}">
+            <button class="event-item ${eventLevelClass(event.level)} ${ui.highlightEventIndex === eventIndex(event) ? 'located-card' : ''}" onclick="window.hexcoreUI.locateEvent(${eventIndex(event)})" title="定位到相关对象">
               <time>${escapeHtml(event.time)}</time>
               <div class="event-dot"></div>
               <div>
                 <strong>${escapeHtml(event.title)}</strong>
                 <p>${escapeHtml(event.body)}</p>
               </div>
-            </div>
+            </button>
           `).join('') || '<div class="empty-log">当前筛选下没有事件</div>'}
         </div>
         <button class="export-btn" onclick="window.hexcoreUI.exportEvents()">导出日志</button>
@@ -972,6 +1034,31 @@
     function teamCapacity(captain) {
       return Hexcore2.selectors.teamMemberCapacity(captain.id);
     }
+    function teamName(captainId) {
+      const owner = Hexcore2.state.captains.find(item => item.id === captainId);
+      return owner ? owner.name : '其他队伍';
+    }
+    function memberIssues(captain, playerId, currentSlotIds = []) {
+      const issues = [];
+      const player = playerById(playerId);
+      const captainCamp = Hexcore2.selectors.captainCamp(captain.id);
+      const legalCrossCampSources = new Set(['stuck_together']);
+      if (!player) {
+        issues.push({ label: `缺失选手 ${playerId}`, kind: 'danger', fixable: true });
+        return issues;
+      }
+      if (player.status === 'disabled') issues.push({ label: '选手已禁用', kind: 'warn', fixable: true });
+      if (playerOwnerCounts[playerId] > 1 || currentSlotIds.filter(id => id === playerId).length > 1) {
+        issues.push({ label: '重复归属', kind: 'danger', fixable: true });
+      }
+      if (player.teamId && player.teamId !== captain.id) {
+        issues.push({ label: `归属指向${teamName(player.teamId)}`, kind: 'danger', fixable: true });
+      }
+      if (player && captainCamp && player.camp !== captainCamp && !legalCrossCampSources.has(player.teamBypassReason)) {
+        issues.push({ label: `跨阵营：${Hexcore2.selectors.campLabel(player.camp)}`, kind: 'danger', fixable: true });
+      }
+      return issues;
+    }
     function teamIssues(captain) {
       const issues = [];
       const capacity = teamCapacity(captain);
@@ -984,13 +1071,13 @@
       if (captain.playerId && !captainPlayer) issues.push({ label: '队长选手已失效，需要重新指定队长', kind: 'danger', fixable: true });
       captain.team.forEach(playerId => {
         const player = playerById(playerId);
-        if (!player) {
-          issues.push({ label: `缺失选手 ${playerId}`, kind: 'danger', fixable: true });
-          return;
-        }
-        if (player.status === 'disabled') issues.push({ label: `${player.name} 已禁用`, kind: 'warn', fixable: true });
-        if (playerOwnerCounts[playerId] > 1) issues.push({ label: `${player.name} 重复归属`, kind: 'danger', fixable: true });
-        if (player.teamId && player.teamId !== captain.id) issues.push({ label: `${player.name} 归属指向其他队伍`, kind: 'danger', fixable: true });
+        memberIssues(captain, playerId, captain.team).forEach(issue => {
+          issues.push({
+            label: `${player ? player.name : playerId} ${issue.label}`,
+            kind: issue.kind,
+            fixable: issue.fixable,
+          });
+        });
       });
       return issues;
     }
@@ -1034,8 +1121,13 @@
             const capacity = teamCapacity(captain);
             const issues = teamIssues(captain);
             const repairableIssues = issues.filter(issue => issue.fixable);
+            const backfillPlayers = availablePlayers.filter(player =>
+              !Hexcore2.selectors.isCaptainPlayer(player.id)
+              && (!goldShopMode || player.camp === Hexcore2.selectors.captainCamp(captain.id))
+            );
+            const canBackfill = captain.team.length < capacity && backfillPlayers.length > 0;
             return `
-            <article class="data-card ${currentCaptain && currentCaptain.id === captain.id ? 'active-card' : ''}">
+            <article class="data-card ${currentCaptain && currentCaptain.id === captain.id ? 'active-card' : ''} ${Hexcore2.state.ui.highlightCaptainId === captain.id ? 'located-card' : ''}">
               <div class="data-card-head">
                 <span>${index + 1}</span>
                 <label class="captain-name-field">
@@ -1081,12 +1173,22 @@
                 ${Array.from({ length: capacity }, (_, slotIndex) => {
                   const playerId = captain.team[slotIndex];
                   const player = playerById(playerId);
+                  const slotIssues = playerId ? memberIssues(captain, playerId, captain.team) : [];
+                  const hasDangerIssue = slotIssues.some(issue => issue.kind === 'danger');
                   return player ? `
-                    <article class="team-member">
+                    <article class="team-member ${slotIssues.length ? 'abnormal-member' : ''} ${hasDangerIssue ? 'danger-member' : 'warn-member'}">
                       <div>
-                        <strong>${escapeHtml(player.name)}</strong>
+                        <div class="team-member-title">
+                          <strong>${escapeHtml(player.name)}</strong>
+                          ${slotIssues.length ? `<span class="abnormal-badge">${hasDangerIssue ? '异常' : '警告'}</span>` : ''}
+                        </div>
                         <span>${escapeHtml(Hexcore2.selectors.campLabel(player.camp))} · ${escapeHtml(player.lane || '未知')} · ${escapeHtml(Hexcore2.state.settings.tierNames[player.tier] || '未知卡池')} · 评分 ${player.score}</span>
                         <small>ID：${escapeHtml(player.gameId || player.id)}</small>
+                        ${slotIssues.length ? `
+                          <div class="member-warning-list">
+                            ${slotIssues.map(issue => `<span class="${escapeHtml(issue.kind)}">${escapeHtml(issue.label)}</span>`).join('')}
+                          </div>
+                        ` : ''}
                       </div>
                       <div class="team-member-actions">
                         <button onclick='window.hexcoreUI.promotePlayerToCaptain(${safeJsonString(player.id)})'>设为队长</button>
@@ -1106,7 +1208,12 @@
               </div>
               <div class="backfill-tools">
                 ${goldShopMode ? `
-                  <p class="hint">金币模式已禁用手动补录，队员来源限定为商店购买和四轮结束后的随机补位。</p>
+                  <p class="hint">裁判纠错补录：仅可从同阵营可选选手中补入，不扣金币、不消耗本轮购买权。</p>
+                  <select id="team-add-player-${escapeHtml(captain.id)}" aria-label="${escapeHtml(captain.name)} 纠错补录选手" ${canBackfill ? '' : 'disabled'}>
+                    <option value="">${captain.team.length >= capacity ? '队伍已满员' : (backfillPlayers.length ? '选择同阵营可选选手' : '暂无同阵营可选选手')}</option>
+                    ${backfillPlayers.map(player => `<option value="${player.id}">${escapeHtml(player.name)} · ${escapeHtml(player.lane || '未知')} · ${escapeHtml(Hexcore2.state.settings.tierNames[player.tier])} · ${player.score}</option>`).join('')}
+                  </select>
+                  <button ${canBackfill ? '' : 'disabled'} onclick='window.hexcoreUI.assignPlayerToTeam(${safeJsonString(captain.id)})'>补录队员</button>
                 ` : `
                   <select id="team-add-player-${escapeHtml(captain.id)}" aria-label="${escapeHtml(captain.name)} 补录选手">
                     <option value="">选择可补录选手</option>
@@ -1185,7 +1292,7 @@
       const editingName = Hexcore2.state.ui && Hexcore2.state.ui.editingNamePlayerId === player.id;
       const explanation = poolExplanation(player);
       return `
-        <article class="player-row ${player.status === 'disabled' ? 'disabled-player' : ''} ${isCaptain ? 'captain-player-row' : ''}">
+        <article class="player-row ${player.status === 'disabled' ? 'disabled-player' : ''} ${isCaptain ? 'captain-player-row' : ''} ${Hexcore2.state.ui.highlightPlayerId === player.id ? 'located-card' : ''}">
           <div class="player-card-head">
             <div>
               <span class="player-name-line">
@@ -1237,7 +1344,7 @@
           <div class="toolbar-actions">
             <button class="primary-btn" ${Hexcore2.state.players.length >= 50 ? 'disabled' : ''} onclick="window.hexcoreUI.addPlayer()">新增选手</button>
             <button class="subtle-btn" ${Hexcore2.state.players.length >= 50 ? 'disabled' : ''} onclick="document.getElementById('player-import-input').click()">导入 JSON/CSV</button>
-            <button class="danger-inline" onclick="window.hexcoreUI.clearAllPlayers()">清空所有选手</button>
+            <button class="danger-btn" onclick="window.hexcoreUI.clearAllPlayers()">清空所有选手</button>
             <input id="player-import-input" type="file" accept=".json,.csv,application/json,text/csv" hidden onchange="window.hexcoreUI.importPlayers(this.files[0]); this.value = ''">
           </div>
         </div>
@@ -1299,10 +1406,16 @@
       });
     });
     const hexFilter = (Hexcore2.state.ui && Hexcore2.state.ui.hexFilter) || 'all';
+    const categoryEntries = Object.entries(hexcoreCategoryMeta).map(([id, meta]) => ({
+      id,
+      ...meta,
+      count: Hexcore2.sampleData.hexcores.filter(hex => hexcoreCategory(hex) === id).length,
+    }));
     const visibleHexcores = Hexcore2.sampleData.hexcores.filter(hex => {
       if (hexFilter === 'all') return true;
       if (hexFilter === 'manual') return hex.mode !== 'passive';
       if (hexFilter === 'passive') return hex.mode === 'passive';
+      if (hexcoreCategoryMeta[hexFilter]) return hexcoreCategory(hex) === hexFilter;
       return hex.type === hexFilter;
     });
     return `
@@ -1319,17 +1432,26 @@
             </select>
             <select aria-label="海克斯筛选" onchange="window.hexcoreUI.setHexFilter(this.value)">
               <option value="all" ${hexFilter === 'all' ? 'selected' : ''}>全部海克斯</option>
+              ${categoryEntries.map(category => `<option value="${escapeHtml(category.id)}" ${hexFilter === category.id ? 'selected' : ''}>${escapeHtml(category.label)}</option>`).join('')}
               <option value="manual" ${hexFilter === 'manual' ? 'selected' : ''}>手动效果</option>
               <option value="passive" ${hexFilter === 'passive' ? 'selected' : ''}>被动效果</option>
-              <option value="cyan" ${hexFilter === 'cyan' ? 'selected' : ''}>青铜/功能</option>
-              <option value="amber" ${hexFilter === 'amber' ? 'selected' : ''}>黄金/干扰</option>
-              <option value="violet" ${hexFilter === 'violet' ? 'selected' : ''}>棱彩/强力</option>
             </select>
             <button class="primary-btn" onclick='window.hexcoreUI.drawHexcoreForCaptain(${safeJsonString(selectedCaptain ? selectedCaptain.id : '')})'>${Hexcore2.icon('hex')}抽取最多 5 个候选</button>
             <button class="primary-btn" onclick="window.hexcoreUI.nextHexcoreCaptain()">下一位</button>
             <button class="primary-btn" onclick="window.hexcoreUI.randomizeHexcoreDrawOrder()">${Hexcore2.icon('refresh')}制定抽取顺序</button>
             <button class="primary-btn" onclick="window.hexcoreUI.resetAllHexcores()">${Hexcore2.icon('undo')}重置所有海克斯</button>
           </div>
+        </div>
+        <div class="hex-category-tabs" aria-label="海克斯业务分类">
+          <button class="${hexFilter === 'all' ? 'active' : ''}" onclick="window.hexcoreUI.setHexFilter('all')">
+            <strong>全部</strong><span>${Hexcore2.sampleData.hexcores.length} 项</span>
+          </button>
+          ${categoryEntries.map(category => `
+            <button class="${hexFilter === category.id ? 'active' : ''}" onclick='window.hexcoreUI.setHexFilter(${safeJsonString(category.id)})'>
+              <strong>${escapeHtml(category.label)}</strong>
+              <span>${category.count} 项 · ${escapeHtml(category.desc)}</span>
+            </button>
+          `).join('')}
         </div>
         ${drawOrder.length ? `
           <div class="hex-draw-order">
@@ -1360,9 +1482,10 @@
                 return `
                   <article class="hex-draw-card ${escapeHtml(hex.type)}">
                     <div class="hex-draw-badges">
-                      <span class="hex-kind-badge">${hexcoreKindLabel(hex)}</span>
-                      <span class="hex-tier-pill">${hexcoreTierLabel(hex)}</span>
-                    </div>
+                  <span class="hex-kind-badge">${hexcoreKindLabel(hex)}</span>
+                  <span class="hex-tier-pill">${hexcoreTierLabel(hex)}</span>
+                  <span class="hex-category-pill">${hexcoreCategoryLabel(hex)}</span>
+                </div>
                     <div class="hex-card-figure" aria-hidden="true">${hexcoreGlyph(hex)}</div>
                     <h3>${escapeHtml(hex.name)}</h3>
                     <p>${escapeHtml(hex.desc)}</p>
@@ -1395,6 +1518,7 @@
                 </div>
                 <div class="owned-hex-meta">
                   <span>${hexcoreTierLabel(hex)}</span>
+                  <span>${hexcoreCategoryLabel(hex)}</span>
                   <span>${hexcoreKindLabel(hex)}</span>
                   <span>${hexcoreUseLabel(hex)}</span>
                 </div>
@@ -1409,10 +1533,15 @@
             const occupiedByOther = owner && (!selectedCaptain || owner.id !== selectedCaptain.id);
             const occupiedBySelected = owner && selectedCaptain && owner.id === selectedCaptain.id;
             return `
-              <article class="hex-library-card ${escapeHtml(hex.type)}">
+              <article class="hex-library-card ${escapeHtml(hex.type)} ${Hexcore2.state.ui.highlightHexcoreId === hex.id ? 'located-card' : ''}">
                 <div>
                   <strong>${escapeHtml(hex.name)}</strong>
                   <span>${occupiedByOther ? `已被 ${escapeHtml(owner.name)} 选择` : (occupiedBySelected ? '当前队长已持有' : (hex.mode === 'passive' ? '被动自动' : '裁判手动'))}</span>
+                </div>
+                <div class="hex-library-meta">
+                  <span class="hex-category-chip ${escapeHtml(hexcoreCategory(hex))}">${escapeHtml(hexcoreCategoryLabel(hex))}</span>
+                  <span>${escapeHtml(hexcoreTimingLabel(hex))}</span>
+                  <span>${escapeHtml(hexcoreTierLabel(hex))}</span>
                 </div>
                 <p>${escapeHtml(hex.desc)}</p>
                 <button ${owner ? 'disabled' : ''} onclick='window.hexcoreUI.assignHexcoreToCaptain(${safeJsonString(selectedCaptain ? selectedCaptain.id : '')}, ${safeJsonString(hex.id)})'>${owner ? '已占用' : '裁判兜底分配'}</button>
@@ -1557,7 +1686,7 @@
             ${Hexcore2.state.captains.map(captain => teamDragCard(captain, assignedCaptainIds.has(captain.id))).join('')}
           </div>
         </section>
-        <section class="tournament-board">
+        <section class="tournament-board ${Hexcore2.state.ui.highlightTournament ? 'located-card' : ''}">
           <div class="section-title-row tournament-table-title">
             <h2>赛程表</h2>
             <span>录入比分、保存结果，系统自动判定胜者并推进后续轮次。</span>
@@ -1707,10 +1836,11 @@
         </div>
         <div class="rule-template-panel">
           <h2>已保存模板</h2>
-          ${(Hexcore2.state.settings.ruleTemplates || []).map(template => `
+          ${(Hexcore2.state.settings.ruleTemplates || []).map((template, index) => `
             <div class="template-row">
               <strong>${escapeHtml(template.name)}</strong>
               <span>${escapeHtml(template.savedAt)} / ${escapeHtml(template.teamCount)} 队 / 每队 ${escapeHtml(template.playersPerTeam)} 人（含队长） / ${escapeHtml(template.maxRounds)} 轮</span>
+              <button class="subtle-btn" onclick="window.hexcoreUI.loadRuleTemplate(${index})">加载模板</button>
             </div>
           `).join('') || '<div class="empty-log">暂无模板</div>'}
         </div>
@@ -1773,6 +1903,7 @@
       </section>
       <section class="data-panel settings-actions">
         <button class="primary-btn" onclick="window.hexcoreUI.runSystemCheck()">运行状态检查</button>
+        <button class="subtle-btn" onclick="window.hexcoreUI.repairSystemIntegrityIssues()">修复完整性异常</button>
         <button class="subtle-btn" onclick="window.hexcoreUI.restoreLatestSnapshot()">恢复最近快照</button>
         <button class="primary-btn" onclick="window.hexcoreUI.exportState()">导出状态备份</button>
         <button class="subtle-btn" onclick="document.getElementById('state-import-input').click()">导入状态备份</button>

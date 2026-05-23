@@ -68,6 +68,10 @@
       0,
       Math.min(3, Math.round(Number(captain.hexcoreEconomy.decomposeKnowledgeStacks) || 0))
     );
+    captain.hexcoreEconomy.hungryWaveRefreshCredits = Math.max(
+      0,
+      Math.round(Number(captain.hexcoreEconomy.hungryWaveRefreshCredits) || 0)
+    );
     return captain.hexcoreEconomy;
   }
 
@@ -90,6 +94,7 @@
     const tierOneReason = roundOneTierOneRefreshReason(captainId, round);
     if (tierOneReason) return tierOneReason;
     const hexcoreEconomy = captain ? ensureHexcoreEconomy(captain) : {};
+    if (hexcoreEconomy.hungryWaveRefreshCredits > 0) return 'hungry_wave_refund';
     return hexcoreEconomy.wiseBenevolenceRefreshCredits > 0 ? 'wise_benevolence' : '';
   }
 
@@ -214,6 +219,10 @@
           const hexcoreEconomy = ensureHexcoreEconomy(captain);
           hexcoreEconomy.wiseBenevolenceRefreshCredits = Math.max(0, hexcoreEconomy.wiseBenevolenceRefreshCredits - 1);
         }
+        if (reason === 'hungry_wave_refund') {
+          const hexcoreEconomy = ensureHexcoreEconomy(captain);
+          hexcoreEconomy.hungryWaveRefreshCredits = Math.max(0, hexcoreEconomy.hungryWaveRefreshCredits - 1);
+        }
         return { ok: true, cost, gold: economy.gold, freeReason: reason || 'free' };
       }
       if (economy.gold < cost) {
@@ -244,6 +253,20 @@
       if (state.purchaseUsed) return { ok: false, reason: '本轮已购买，不能再跳过' };
       state.skipped = true;
       return { ok: true };
+    },
+
+    compensateHungryWaveVictim(captainId, refundedGold, round = Hexcore2.state.draft.round) {
+      const captain = captainById(captainId);
+      if (!captain) return { ok: false, reason: '目标队长不存在' };
+      const economy = ensureEconomy(captain);
+      const state = roundState(captainId, round);
+      const hexcoreEconomy = ensureHexcoreEconomy(captain);
+      economy.gold += Math.max(0, Math.round(Number(refundedGold) || 0));
+      state.purchaseUsed = false;
+      state.skipped = false;
+      state.freeShopUsed = true;
+      hexcoreEconomy.hungryWaveRefreshCredits += 1;
+      return { ok: true, gold: economy.gold, freeRefreshCredits: hexcoreEconomy.hungryWaveRefreshCredits };
     },
   };
 })(window);

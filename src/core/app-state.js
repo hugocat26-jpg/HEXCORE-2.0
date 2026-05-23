@@ -173,7 +173,7 @@
     CAMPS.forEach(camp => {
       const sorted = players
         .filter(player => player.camp === camp)
-        .filter(player => !captainPlayerIds.has(player.id) && !isCaptainPoolPlayer(player, captains))
+        .filter(player => player.status !== 'disabled')
         .sort(compareByOfficialTier);
       const bucketSize = Math.max(1, Math.ceil(sorted.length / 5));
       sorted.forEach((player, index) => {
@@ -756,8 +756,12 @@
     return state;
   };
 
+  Hexcore2.createDefaultState = function createDefaultState() {
+    return Hexcore2.normalizeState(clone(defaultState));
+  };
+
   const savedState = Hexcore2.storageService ? Hexcore2.storageService.load() : null;
-  Hexcore2.state = Hexcore2.normalizeState(savedState || clone(defaultState));
+  Hexcore2.state = savedState ? Hexcore2.normalizeState(savedState) : Hexcore2.createDefaultState();
 
   Hexcore2.selectors = {
     currentCaptain() {
@@ -877,7 +881,7 @@
           const player = state.players.find(item => item.id === playerId);
           if (!player) rosterIssues.push(`${captain.name} 包含缺失选手`);
           if (player && player.teamId !== captain.id) rosterIssues.push(`${player.name} 归属不一致`);
-          if (player && captainCamp && player.camp !== captainCamp && player.teamBypassReason !== 'stuck_together') {
+          if (player && captainCamp && player.camp !== captainCamp && !['stuck_together'].includes(player.teamBypassReason)) {
             rosterIssues.push(`${captain.name} 含异阵营队员 ${player.name}`);
           }
         });

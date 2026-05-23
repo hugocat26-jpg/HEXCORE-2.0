@@ -72,6 +72,105 @@
     return Hexcore2.selectors.teamSize(captainId) < Hexcore2.selectors.teamMemberCapacity(captainId);
   }
 
+  function hungryWaveForRound(round = Hexcore2.state.draft.round) {
+    return (Hexcore2.state.draft.runtimeEffects || []).find(effect =>
+      effect.type === 'hungry_wave_round'
+      && Number(effect.round) === Number(round)
+    );
+  }
+
+  function activeHungryWave(round = Hexcore2.state.draft.round) {
+    const effect = hungryWaveForRound(round);
+    return effect && !effect.consumed ? effect : null;
+  }
+
+  function isHungryWaveImmune(captainId, round = Hexcore2.state.draft.round) {
+    const effect = hungryWaveForRound(round);
+    return Boolean(effect && effect.captainId === captainId && effect.immune);
+  }
+
+  function hungryWaveAlreadyCreated(round = Hexcore2.state.draft.round) {
+    return (Hexcore2.state.draft.runtimeEffects || []).find(effect =>
+      effect.type === 'hungry_wave_round'
+      && Number(effect.round) === Number(round)
+    );
+  }
+
+  function hungryWaveEligibleCaptains(round = Hexcore2.state.draft.round) {
+    return Hexcore2.state.captains.filter(captain =>
+      hasHexcore(captain.id, 'hungry-wave')
+      && hasOpenSlot(captain.id)
+      && !currentRoundState(captain.id).purchaseUsed
+      && !currentRoundState(captain.id).skipped
+      && Number(round) === Number(Hexcore2.state.draft.round)
+    );
+  }
+
+  function remainingHungryWaveCandidates(effect, buyerId) {
+    const checked = new Set(effect.checkedCaptainIds || []);
+    const order = Hexcore2.state.draft.currentOrder && Hexcore2.state.draft.currentOrder.length
+      ? Hexcore2.state.draft.currentOrder
+      : Hexcore2.state.draft.baseOrder;
+    const currentIndex = Math.max(0, Number(Hexcore2.state.draft.currentIndex) || 0);
+    const pending = order.slice(currentIndex)
+      .filter(captainId => captainId !== effect.captainId && !checked.has(captainId));
+    if (buyerId && !pending.includes(buyerId) && buyerId !== effect.captainId && !checked.has(buyerId)) {
+      pending.unshift(buyerId);
+    }
+    return [...new Set(pending)];
+  }
+
+  function restoreCurrentShopCard(playerId) {
+    const draw = Hexcore2.state.draft.currentDraw;
+    if (!draw || !Array.isArray(draw.cards)) return;
+    const card = draw.cards.find(item => item && item.playerId === playerId);
+    if (!card) return;
+    card.purchased = false;
+    delete card.purchasedAt;
+  }
+
+  function returnPurchasedPlayerToPool(buyer, player) {
+    buyer.team = (buyer.team || []).filter(id => id !== player.id);
+    player.status = 'available';
+    delete player.teamId;
+    delete player.teamBypassReason;
+    restoreCurrentShopCard(player.id);
+  }
+
+  function hungryWaveRewardPlayer(captainId, round) {
+    const candidatesByTier = new Map();
+    for (let tier = 1; tier <= 5; tier += 1) {
+      candidatesByTier.set(tier, Hexcore2.selectors.availablePlayers(tier, captainCamp(captainId)));
+    }
+    const weights = Hexcore2.shopEngine && Hexcore2.shopEngine.probabilityForRound
+      ? Hexcore2.shopEngine.probabilityForRound(round)
+      : { 1: 100 };
+    let entries = [1, 2, 3, 4, 5]
+      .map(tier => ({
+        tier,
+        weight: Math.max(0, Number(weights[tier]) || 0),
+        candidates: candidatesByTier.get(tier) || [],
+      }))
+      .filter(item => item.weight > 0 && item.candidates.length > 0);
+    if (!entries.length) {
+      entries = [1, 2, 3, 4, 5]
+        .map(tier => ({ tier, weight: 1, candidates: candidatesByTier.get(tier) || [] }))
+        .filter(item => item.candidates.length > 0);
+    }
+    if (!entries.length) return null;
+    const total = entries.reduce((sum, item) => sum + item.weight, 0);
+    let roll = Math.random() * total;
+    let selected = entries[entries.length - 1];
+    for (const entry of entries) {
+      roll -= entry.weight;
+      if (roll <= 0) {
+        selected = entry;
+        break;
+      }
+    }
+    return selected.candidates[Math.floor(Math.random() * selected.candidates.length)] || null;
+  }
+
   function unusedSameCampCaptains(sourceCaptainId) {
     const order = Hexcore2.state.draft.currentOrder || [];
     const currentIndex = Hexcore2.state.draft.currentIndex;
@@ -85,6 +184,7 @@
     const currentIndex = state.draft.currentIndex;
     return state.captains.filter(captain => {
       if (captain.id === sourceCaptainId) return false;
+      if (isHungryWaveImmune(captain.id)) return false;
       if (Hexcore2.selectors.teamSize(captain.id) >= Hexcore2.selectors.teamMemberCapacity(captain.id)) return false;
       const index = order.indexOf(captain.id);
       if (index >= currentIndex) return true;
@@ -115,7 +215,7 @@
       price_interference: `${sourceName} 的【抬价干扰】：下一次购买费用 +1 金币`,
       weather_fog: `${sourceName} 的【骤雨 血雾 清风】：本次商店卡牌信息被天气迷雾隐藏`,
       snow_cat_shuffle: `${sourceName} 的【雪定饿的喵】：本次商店显示信息被打乱`,
-      hungry_wave_claim: `${sourceName} 的【海浪，我没吃饭】：等待夺取下一名其他队长购买的选手`,
+      hungry_wave_round: `${sourceName} 的【海浪，我没吃饭】：本轮跳过并等待判定其他队长购买结果`,
       skip_round: `${sourceName} 的【跳过效果】：本轮行动被跳过`,
       move_first: `${sourceName} 的【顺位效果】：本轮顺位前移`,
       fixed_position: `${sourceName} 的【顺位效果】：本轮固定到指定顺位`,
@@ -242,6 +342,7 @@
       const captainId = order[index];
       const captain = state.captains.find(item => item.id === captainId);
       if (!captain || captain.id === sourceCaptainId) continue;
+      if (isHungryWaveImmune(captain.id)) continue;
       if (Hexcore2.selectors.teamSize(captain.id) >= Hexcore2.selectors.teamMemberCapacity(captain.id)) continue;
       result.push(captain);
     }
@@ -259,6 +360,7 @@
       .filter(captain =>
         captain
         && captain.id !== sourceCaptainId
+        && !isHungryWaveImmune(captain.id)
         && Hexcore2.selectors.teamSize(captain.id) < Hexcore2.selectors.teamMemberCapacity(captain.id)
       );
   }
@@ -266,6 +368,7 @@
   function openCaptainTargets(sourceCaptainId, includeSelf = false) {
     return Hexcore2.state.captains.filter(captain =>
       (includeSelf || captain.id !== sourceCaptainId)
+      && !isHungryWaveImmune(captain.id)
       && Hexcore2.selectors.teamSize(captain.id) < Hexcore2.selectors.teamMemberCapacity(captain.id)
     );
   }
@@ -281,6 +384,7 @@
       .filter(captain =>
         captain
         && captain.id !== sourceCaptainId
+        && !isHungryWaveImmune(captain.id)
         && Hexcore2.selectors.teamSize(captain.id) < Hexcore2.selectors.teamMemberCapacity(captain.id)
       );
   }
@@ -357,10 +461,13 @@
           captainName: captain.name,
           priority: index + 1,
           mode: hex.mode,
+          category: hex.category || 'shop_control',
+          tags: Array.isArray(hex.tags) ? [...hex.tags] : [],
           needsTarget: false,
           executable: false,
           actionLabel: labels[hex.id] || '裁判执行',
           actionType: labels[hex.id] || '裁判执行',
+          timingLabel: hex.mode === 'passive' ? '自动触发' : (hex.needsTarget ? '目标选择' : (hex.maxUsesPerRound ? '每轮一次' : '裁判手动')),
         };
         if (!Hexcore2.selectors.isHexcoreEnabled(hex.id)) return blocked(base, '已禁用', '规则设置已禁用该海克斯。');
         if (!CAMP_HEXCORE_IDS.has(hex.id)) return blocked(base, '旧海克斯禁用', '阵营锁定模式不执行旧海克斯。');
@@ -786,12 +893,45 @@
     weatherFogTargets,
     openCaptainTargets,
     cannonTargets,
+    targetableCaptains,
+    targetConflictReasons(sourceCaptainId) {
+      const state = Hexcore2.state;
+      const order = state.draft.currentOrder || [];
+      const currentIndex = Number(state.draft.currentIndex) || 0;
+      return state.captains
+        .filter(captain => captain.id !== sourceCaptainId)
+        .map(captain => {
+          let reason = '';
+          const index = order.indexOf(captain.id);
+          if (isHungryWaveImmune(captain.id)) {
+            reason = '本轮触发海浪，我没吃饭，免疫其他目标型海克斯';
+          } else if (Hexcore2.selectors.teamSize(captain.id) >= Hexcore2.selectors.teamMemberCapacity(captain.id)) {
+            reason = '队伍已满员，目标效果无法落地';
+          } else if (index >= 0 && index < currentIndex && state.draft.round >= state.draft.maxRounds) {
+            reason = '行动窗口已过，且没有下一轮可延后生效';
+          }
+          return reason ? { id: captain.id, name: captain.name, reason } : null;
+        })
+        .filter(Boolean);
+    },
+    isHungryWaveImmune,
 
     effectStatusForCaptain(captainId) {
       const effects = Hexcore2.state.draft.runtimeEffects || [];
+      const wave = activeHungryWave();
       const pending = effects
         .filter(effect => effect.captainId === captainId && !effect.consumed)
         .map(effect => effectStatus(effect, '待生效'));
+      if (wave && wave.captainId !== captainId && !wave.checkedCaptainIds?.includes(captainId)) {
+        pending.push({
+          type: 'hungry_wave_watch',
+          status: '待判定',
+          sourceCaptainId: wave.captainId,
+          sourceCaptainName: captainName(wave.captainId),
+          label: `${captainName(wave.captainId)} 的【海浪，我没吃饭】：本轮购买后可能被海浪命中`,
+          reason: '购买成功后进行海浪判定；命中同阵营会夺取，命中异阵营会退回购买并登记轮末奖励',
+        });
+      }
       const draw = Hexcore2.state.draft.currentDraw;
       const appliedFromShop = draw && draw.captainId === captainId && Array.isArray(draw.appliedEffects)
         ? draw.appliedEffects.map(effect => effectStatus(effect, '已生效'))
@@ -821,31 +961,72 @@
     advanceHellhound() { return { handled: false }; },
     extraDrawCount() { return 0; },
     drawReasons() { return []; },
+    ensureHungryWaveForRound(round = Hexcore2.state.draft.round) {
+      const state = Hexcore2.state;
+      if (state.settings && state.settings.economyMode !== 'gold_shop') return { ok: false, reason: '非金币模式' };
+      const workflow = Hexcore2.selectors.workflowStatus ? Hexcore2.selectors.workflowStatus() : {};
+      if (!workflow.playersDraftReady) return { ok: false, reason: '前置流程未完成' };
+      const existing = hungryWaveAlreadyCreated(round);
+      if (existing) return { ok: true, existing: true, effect: existing };
+      const candidates = hungryWaveEligibleCaptains(round);
+      if (!candidates.length) return { ok: false, reason: '没有可触发海浪的队长' };
+      const captain = candidates[Math.floor(Math.random() * candidates.length)];
+      const roundState = Hexcore2.economyEngine.roundState(captain.id, round);
+      const goldBefore = captain.economy ? Math.max(0, Number(captain.economy.gold) || 0) : 0;
+      if (Hexcore2.historyService && typeof Hexcore2.historyService.push === 'function') {
+        Hexcore2.historyService.push(`海浪触发前：第 ${round} 轮`);
+      }
+      if (!captain.economy) Hexcore2.economyEngine.ensureAll();
+      captain.economy.gold = 0;
+      roundState.skipped = true;
+      roundState.purchaseUsed = false;
+      roundState.freeShopUsed = true;
+      const effect = {
+        type: 'hungry_wave_round',
+        round,
+        captainId: captain.id,
+        sourceCaptainId: captain.id,
+        consumed: false,
+        triggered: false,
+        immune: true,
+        skipped: true,
+        mandatory: true,
+        goldBefore,
+        checkedCaptainIds: [],
+        failedRolls: [],
+        reason: `${captain.name} 饿坏了，失去全部金币并跳过本轮，等待判定其他队长购买结果`,
+        createdAt: new Date().toISOString(),
+      };
+      state.draft.runtimeEffects.push(effect);
+      state.draft.runtimeEffects.push({
+        type: 'skip_round',
+        round,
+        captainId: captain.id,
+        sourceCaptainId: captain.id,
+        consumed: false,
+        reason: `${captain.name} 触发海浪，我没吃饭，本轮自动跳过并免疫其他海克斯`,
+      });
+      if (Hexcore2.turnOrderEngine) {
+        const beforeCurrent = Hexcore2.selectors.currentCaptain();
+        Hexcore2.turnOrderEngine.recompute();
+        if (beforeCurrent && beforeCurrent.id === captain.id) {
+          state.draft.currentIndex = Math.max(0, Math.min(state.draft.currentIndex, Math.max(0, state.draft.currentOrder.length - 1)));
+        }
+      }
+      Hexcore2.eventStore.append('海浪触发', `${captain.name} 触发【海浪，我没吃饭】：金币清零，跳过本轮并免疫其他海克斯，本轮会随机命中一次其他队长购买；同阵营夺取，异阵营退回购买并在轮末补偿同阵营选手`, 'warn', { captainId: captain.id, goldBefore });
+      return { ok: true, created: true, effect };
+    },
+
     autoAssignBeforeDraw(captainId = currentCaptain() && currentCaptain().id) {
       const captain = Hexcore2.state.captains.find(item => item.id === captainId);
-      if (captain && hasHexcore(captain.id, 'hungry-wave')) {
-        const round = Hexcore2.state.draft.round;
-        const roundState = Hexcore2.economyEngine.roundState(captain.id, round);
-        const alreadyWaiting = (Hexcore2.state.draft.runtimeEffects || []).some(effect =>
-          effect.type === 'hungry_wave_claim'
-          && effect.captainId === captain.id
-          && effect.round === round
-          && !effect.consumed
-        );
-        if (!roundState.purchaseUsed && !roundState.skipped && !alreadyWaiting) {
-          Hexcore2.state.draft.runtimeEffects.push({
-            type: 'hungry_wave_claim',
-            round,
-            captainId: captain.id,
-            sourceCaptainId: captain.id,
-            reason: `${captain.name} 饿坏了，放弃主动购买，等待夺取本轮下一名其他队长购买的选手`,
-          });
-          roundState.skipped = true;
-          Hexcore2.state.draft.currentDraw = null;
-          Hexcore2.state.draft.pickedThisTurn = true;
-          Hexcore2.eventStore.append('海浪，我没吃饭', `${captain.name} 本轮无法主动购买，等待夺取下一名其他队长购买的选手`, 'warn');
-          return { handled: true, advance: true };
-        }
+      const wave = activeHungryWave();
+      if (captain && wave && wave.captainId === captain.id && !wave.consumed) {
+        const roundState = Hexcore2.economyEngine.roundState(captain.id, wave.round);
+        roundState.skipped = true;
+        Hexcore2.state.draft.currentDraw = null;
+        Hexcore2.state.draft.pickedThisTurn = true;
+        Hexcore2.eventStore.append('海浪免疫', `${captain.name} 本轮已触发【海浪，我没吃饭】，自动跳过自己的商店`, 'warn');
+        return { handled: true, advance: true };
       }
       const effect = captain ? pendingStuckTogether(captain.id) : null;
       if (!captain || !effect) return { handled: false };
@@ -873,37 +1054,134 @@
       const buyer = state.captains.find(captain => captain.id === buyerId);
       const player = state.players.find(item => item.id === playerId);
       if (!buyer || !player) return { handled: false };
-      const effect = (state.draft.runtimeEffects || []).find(item =>
-        item.type === 'hungry_wave_claim'
-        && item.round === state.draft.round
-        && item.captainId !== buyerId
-        && !item.consumed
-      );
+      const effect = activeHungryWave();
       const hungryCaptain = effect && state.captains.find(captain => captain.id === effect.captainId);
-      if (!effect || !hungryCaptain) return { handled: false };
+      if (!effect || !hungryCaptain || effect.captainId === buyerId || effect.triggered) return { handled: false };
+      effect.checkedCaptainIds = Array.isArray(effect.checkedCaptainIds) ? effect.checkedCaptainIds : [];
+      effect.failedRolls = Array.isArray(effect.failedRolls) ? effect.failedRolls : [];
+      if (!buyer.team.includes(player.id) || player.teamId !== buyer.id) return { handled: false };
+      const candidates = remainingHungryWaveCandidates(effect, buyerId);
+      const remaining = Math.max(1, candidates.length || 1);
+      const roll = Math.random();
+      const success = remaining <= 1 || roll < (1 / remaining);
+      if (!success) {
+        effect.checkedCaptainIds.push(buyer.id);
+        effect.failedRolls.push({
+          buyerId: buyer.id,
+          playerId: player.id,
+          remaining,
+          probability: 1 / remaining,
+          roll,
+          checkedAt: new Date().toISOString(),
+        });
+        Hexcore2.eventStore.append('海浪判定失败', `${hungryCaptain.name} 的【海浪，我没吃饭】未夺取 ${buyer.name} 刚购买的「${player.name}」（本次概率 ${Math.round((1 / remaining) * 100)}%）`, 'info', { sourceCaptainId: hungryCaptain.id, buyerId: buyer.id, playerId: player.id, remaining, roll });
+        return { handled: false, rolled: true, success: false };
+      }
+      const hungryCamp = captainCamp(hungryCaptain.id);
+      const sameCamp = hungryCamp && player.camp === hungryCamp;
+      const appliedPrice = Math.max(0, Number(paidPrice) || 0);
+      if (!sameCamp) {
+        returnPurchasedPlayerToPool(buyer, player);
+        const compensation = Hexcore2.economyEngine.compensateHungryWaveVictim
+          ? Hexcore2.economyEngine.compensateHungryWaveVictim(buyer.id, paidPrice, state.draft.round)
+          : { ok: false };
+        effect.consumed = true;
+        effect.triggered = true;
+        effect.outcome = 'opposite_camp_returned';
+        effect.checkedCaptainIds.push(buyer.id);
+        effect.returnedPlayerId = player.id;
+        effect.appliedBuyerId = buyer.id;
+        effect.appliedPrice = appliedPrice;
+        effect.pendingRoundReward = true;
+        effect.rewardRound = state.draft.round;
+        effect.rewardProbabilityRound = state.draft.round;
+        effect.appliedAt = new Date().toISOString();
+        Hexcore2.eventStore.append(
+          '海浪异阵营命中',
+          `${hungryCaptain.name} 的【海浪，我没吃饭】命中 ${buyer.name} 刚购买的异阵营选手「${player.name}」：不夺取，已退回卡池，返还 ${buyer.name} ${appliedPrice} 金币、1 次免费刷新和购买权；${hungryCaptain.name} 将在本轮结束后按第 ${state.draft.round} 轮概率从同阵营卡池随机获得 1 名选手`,
+          'warn',
+          { sourceCaptainId: hungryCaptain.id, buyerId: buyer.id, playerId: player.id, price: appliedPrice, compensation }
+        );
+        return { handled: true, returned: true, captainId: hungryCaptain.id, buyerId: buyer.id, playerId: player.id, price: appliedPrice };
+      }
       if (Hexcore2.selectors.teamSize(hungryCaptain.id) >= Hexcore2.selectors.teamMemberCapacity(hungryCaptain.id)) {
         effect.consumed = true;
         effect.failedReason = '队伍已满';
-        Hexcore2.eventStore.append('海浪，我没吃饭', `${hungryCaptain.name} 队伍已满，无法夺取「${player.name}」`, 'warn');
+        Hexcore2.eventStore.append('海浪失效', `${hungryCaptain.name} 队伍已满，无法夺取「${player.name}」`, 'warn');
         return { handled: false };
       }
-      if (!buyer.team.includes(player.id) || player.teamId !== buyer.id) return { handled: false };
       buyer.team = buyer.team.filter(id => id !== player.id);
       hungryCaptain.team.push(player.id);
       player.teamId = hungryCaptain.id;
-      buyer.economy.gold += Math.max(0, Number(paidPrice) || 0);
+      player.status = 'drafted';
+      delete player.teamBypassReason;
+      const compensation = Hexcore2.economyEngine.compensateHungryWaveVictim
+        ? Hexcore2.economyEngine.compensateHungryWaveVictim(buyer.id, paidPrice, state.draft.round)
+        : { ok: false };
       effect.consumed = true;
+      effect.triggered = true;
+      effect.outcome = 'same_camp_stolen';
+      effect.checkedCaptainIds.push(buyer.id);
       effect.appliedPlayerId = player.id;
       effect.appliedBuyerId = buyer.id;
-      effect.appliedPrice = Math.max(0, Number(paidPrice) || 0);
+      effect.appliedPrice = appliedPrice;
       effect.appliedAt = new Date().toISOString();
       Hexcore2.eventStore.append(
-        '海浪，我没吃饭',
-        `${hungryCaptain.name} 夺取 ${buyer.name} 刚购买的「${player.name}」，并返还 ${buyer.name} ${effect.appliedPrice} 金币`,
+        '海浪夺取成功',
+        `${hungryCaptain.name} 的【海浪，我没吃饭】夺取了 ${buyer.name} 刚购买的「${player.name}」，返还 ${buyer.name} ${effect.appliedPrice} 金币，并补偿 1 次免费刷新与购买权`,
         'warn',
-        { sourceCaptainId: hungryCaptain.id, buyerId: buyer.id, playerId: player.id, price: effect.appliedPrice }
+        { sourceCaptainId: hungryCaptain.id, buyerId: buyer.id, playerId: player.id, price: effect.appliedPrice, compensation }
       );
       return { handled: true, captainId: hungryCaptain.id, buyerId: buyer.id, playerId: player.id, price: effect.appliedPrice };
+    },
+    resolveHungryWaveRoundEnd(round = Hexcore2.state.draft.round) {
+      const effects = (Hexcore2.state.draft.runtimeEffects || []).filter(effect =>
+        effect.type === 'hungry_wave_round'
+        && Number(effect.rewardRound) === Number(round)
+        && effect.pendingRoundReward
+        && !effect.roundRewardResolved
+      );
+      const resolved = [];
+      effects.forEach(effect => {
+        const captain = Hexcore2.state.captains.find(item => item.id === effect.captainId);
+        effect.pendingRoundReward = false;
+        effect.roundRewardResolved = true;
+        effect.roundRewardAt = new Date().toISOString();
+        if (!captain) {
+          effect.roundRewardFailedReason = '队长不存在';
+          return;
+        }
+        if (Hexcore2.selectors.teamSize(captain.id) >= Hexcore2.selectors.teamMemberCapacity(captain.id)) {
+          effect.roundRewardFailedReason = '队伍已满';
+          Hexcore2.eventStore.append('海浪轮末奖励失败', `${captain.name} 队伍已满，无法获得异阵营命中的轮末补偿`, 'warn', { sourceCaptainId: captain.id });
+          resolved.push({ effect, assigned: false });
+          return;
+        }
+        const rewardRound = Number(effect.rewardProbabilityRound) || round;
+        const player = hungryWaveRewardPlayer(captain.id, rewardRound);
+        if (!player) {
+          effect.roundRewardFailedReason = '同阵营可用卡池为空';
+          Hexcore2.eventStore.append('海浪轮末奖励失败', `${captain.name} 同阵营没有可用选手，无法获得异阵营命中的轮末补偿`, 'warn', { sourceCaptainId: captain.id });
+          resolved.push({ effect, assigned: false });
+          return;
+        }
+        const assigned = Hexcore2.assignmentEngine.assign(captain.id, player.id, 'hungry_wave');
+        if (!assigned) {
+          effect.roundRewardFailedReason = '入队校验失败';
+          Hexcore2.eventStore.append('海浪轮末奖励失败', `${captain.name} 抽中「${player.name}」但入队失败，可能队伍已满或阵营状态变化`, 'warn', { sourceCaptainId: captain.id, playerId: player.id });
+          resolved.push({ effect, assigned: false, playerId: player.id });
+          return;
+        }
+        effect.roundRewardPlayerId = player.id;
+        Hexcore2.eventStore.append(
+          '海浪轮末奖励',
+          `${captain.name} 因本轮【海浪，我没吃饭】命中异阵营购买，按第 ${rewardRound} 轮概率从同阵营卡池随机获得「${player.name}」`,
+          'success',
+          { sourceCaptainId: captain.id, playerId: player.id, rewardRound }
+        );
+        resolved.push({ effect, assigned: true, playerId: player.id });
+      });
+      return { handled: effects.length > 0, resolved };
     },
     drawOverrideBeforeDraw() { return { handled: false }; },
     nextCaptain(captainId) {

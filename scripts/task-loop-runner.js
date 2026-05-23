@@ -161,6 +161,82 @@ function collectCheckboxes(lines) {
   }).filter(Boolean);
 }
 
+function stripMarkdown(text) {
+  return String(text || '')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .replace(/<[^>]+>/g, '')
+    .trim();
+}
+
+function markdownTableCells(line) {
+  const text = line.trim();
+  if (!text.startsWith('|') || !text.endsWith('|')) return null;
+  return text.slice(1, -1).split('|').map(cell => stripMarkdown(cell));
+}
+
+function isMarkdownTableSeparator(cells) {
+  return Boolean(cells && cells.length && cells.every(cell => /^:?-{3,}:?$/.test(cell.trim())));
+}
+
+function nearestHeading(lines, index) {
+  for (let cursor = index; cursor >= 0; cursor -= 1) {
+    const match = lines[cursor].match(/^(#{1,6})\s+(.*)$/);
+    if (match) return stripMarkdown(match[2]);
+  }
+  return '';
+}
+
+function normalizeStatus(status) {
+  return stripMarkdown(status).replace(/\s+/g, '');
+}
+
+function isDoneLikeStatus(status) {
+  const value = normalizeStatus(status);
+  if (!value) return false;
+  if (/未完成|待完成|尚未完成|待处理|待验证|待修复|失败|阻断|进行中|TODO|FIXME/i.test(value)) return false;
+  return /^(已完成|完成|已验证|通过|已通过|当前固定|固定|无需处理|不适用|已删除|不进入默认池)$/.test(value);
+}
+
+function isOpenLikeStatus(status) {
+  const value = normalizeStatus(status);
+  if (!value) return true;
+  if (isDoneLikeStatus(value)) return false;
+  return true;
+}
+
+function collectOpenTableRows(lines) {
+  const rows = [];
+  for (let index = 0; index < lines.length - 1; index += 1) {
+    const header = markdownTableCells(lines[index]);
+    const separator = markdownTableCells(lines[index + 1]);
+    if (!header || !isMarkdownTableSeparator(separator)) continue;
+
+    const statusIndex = header.findIndex(cell => /^(状态|完成状态|进度|优先级)$/.test(cell));
+    if (statusIndex < 0) continue;
+
+    const section = nearestHeading(lines, index);
+    for (let cursor = index + 2; cursor < lines.length; cursor += 1) {
+      const cells = markdownTableCells(lines[cursor]);
+      if (!cells) break;
+      const status = cells[statusIndex] || '';
+      if (!isOpenLikeStatus(status)) continue;
+      const primary = cells.find((cell, cellIndex) => cellIndex !== statusIndex && cell) || cells[0] || '(未命名项)';
+      rows.push({
+        line: cursor + 1,
+        section,
+        primary,
+        status,
+        header,
+        cells,
+      });
+    }
+    index += 1;
+  }
+  return rows.slice(0, 24);
+}
+
 function collectAfterLabel(lines, labelPattern, limit = 16) {
   const items = [];
   for (let index = 0; index < lines.length; index += 1) {
@@ -208,6 +284,68 @@ function collectOpenPlanSignals(lines) {
   return signals.slice(0, 24);
 }
 
+function summarizeOpenTableRow(row) {
+  const section = row.section ? `${row.section} / ` : '';
+  return `L${row.line}: ${section}${row.primary}（状态：${row.status || '空'}）`;
+}
+
+function collectNextActions(analysis, limit = 8) {
+  const actions = [];
+  analysis.unchecked.slice(0, 4).forEach(item => {
+    actions.push(`完成未勾选清单 L${item.line}：${item.text}`);
+  });
+  analysis.openTableRows.slice(0, 6).forEach(row => {
+    actions.push(`推进表格计划项：${summarizeOpenTableRow(row)}`);
+  });
+  analysis.blockers.slice(0, 4).forEach(item => {
+    actions.push(`处理阻断/待处理线索：${item}`);
+  });
+  analysis.openPlanSignals.slice(0, 4).forEach(item => {
+    actions.push(`核对严格计划线索 L${item.line}：${item.text}`);
+  });
+  if (!actions.length) {
+    actions.push('任务文档未发现机械阻断项；若本轮必要验证已闭环，可申请 complete，并按改动风险决定是否追加安全或浏览器审查。');
+  }
+  return actions.slice(0, limit);
+}
+
+function parseGitChangedFiles(statusOutput) {
+  return String(statusOutput || '').split(/\r?\n/)
+    .map(line => line.trim())
+    .filter(Boolean)
+    .map(line => line.replace(/^.{1,3}\s+/, '').replace(/^"|"$/g, ''))
+    .filter(Boolean);
+}
+
+function inferSkillHints({ analysis, changedFiles }) {
+  const joined = [
+    ...analysis.nextActions,
+    ...analysis.openPlanSignals.map(item => item.text),
+    ...changedFiles,
+  ].join('\n');
+  const hints = [];
+  const hasFrontendFiles = changedFiles.some(file => /^(index\.html|src[\\/](ui|styles)|src[\\/]main\.js)|\.css$/.test(file));
+  const hasCodeFiles = changedFiles.some(file => /\.(js|html|css)$/.test(file));
+  const hasSecuritySensitiveFiles = changedFiles.some(file =>
+    /^package(-lock)?\.json$/.test(file)
+    || /^scripts[\\/]serve\.js$/.test(file)
+    || /^src[\\/](services|core|engines)[\\/]/.test(file)
+  );
+  const hasSecurityKeywords = /安全|导入|导出|状态|本地存储|路径|XSS|权限|删除|重置|覆盖|命令|依赖|token|鉴权/.test(joined);
+  if (hasFrontendFiles || /UI|界面|浏览器|交互|布局|视觉|按钮|样式|响应式/.test(joined)) {
+    hints.push('前端/交互相关：只有实际改动渲染、布局或关键交互时，使用 build-web-apps:frontend-testing-debugging 和内置 Browser 验证。');
+  }
+  if (hasSecuritySensitiveFiles || hasSecurityKeywords) {
+    hints.push('安全敏感改动：涉及导入/导出、本地存储、静态服务、状态归一化、删除重置、依赖或命令执行时，再使用 Codex Security 做差异范围审查。');
+  } else if (hasCodeFiles) {
+    hints.push('普通代码改动：优先本地门禁和针对性自查；不需要默认追加 Codex Security 全量审查。');
+  }
+  if (!hints.length) {
+    hints.push('当前更像文档/流程整理：跑必要门禁即可；若准备推送，确认未包含无关未跟踪文件。');
+  }
+  return hints;
+}
+
 function printItems(title, items) {
   console.log('');
   console.log(title);
@@ -229,7 +367,7 @@ function analyzeTaskDoc(docRelativePath) {
   const checkboxes = collectCheckboxes(lines);
   const sectionGoals = collectListItems(extractSection(lines, /目标|实施目标/), 12);
   const sectionAcceptance = collectListItems(extractSection(lines, /验收标准|验收|完成定义/), 18);
-  return {
+  const analysis = {
     docPath,
     docRelativePath: path.relative(root, docPath),
     goals: sectionGoals.length ? sectionGoals : collectAfterLabel(lines, /^\s*目标[:：]\s*(.*)$/).slice(0, 12),
@@ -239,9 +377,12 @@ function analyzeTaskDoc(docRelativePath) {
     statusItems: collectListItems(extractSection(lines, /当前实施状态|已完成|已验证/), 18),
     checkboxes,
     unchecked: checkboxes.filter(item => !item.checked),
+    openTableRows: collectOpenTableRows(lines),
     blockers: collectBlockers(lines),
     openPlanSignals: collectOpenPlanSignals(lines),
   };
+  analysis.nextActions = collectNextActions(analysis);
+  return analysis;
 }
 
 function runLocalGates(skipGates) {
@@ -275,6 +416,8 @@ function runTaskLoop(options = {}) {
   const analysis = analyzeTaskDoc(taskDoc);
   const gitStatus = run('git', ['status', '--short']);
   const branch = run('git', ['branch', '--show-current']);
+  const changedFiles = parseGitChangedFiles(gitStatus.stdout);
+  const skillHints = inferSkillHints({ analysis, changedFiles });
   const gateResults = runLocalGates(skipGates);
   const gateFailed = gateResults.some(result => !result.ok);
 
@@ -293,6 +436,8 @@ function runTaskLoop(options = {}) {
   printItems('验收/完成标准', analysis.acceptance);
   printItems('推荐执行顺序', analysis.order);
   printItems('当前状态线索', analysis.statusItems);
+  printItems('下一步建议', analysis.nextActions);
+  printItems('技能/验证提示', skillHints);
 
   console.log('');
   console.log('本地门禁');
@@ -308,6 +453,12 @@ function runTaskLoop(options = {}) {
     analysis.unchecked.slice(0, 16).forEach(item => console.log(`- L${item.line}: ${item.text}`));
   }
 
+  if (analysis.openTableRows.length) {
+    console.log('');
+    console.log('未完成表格项');
+    analysis.openTableRows.slice(0, 16).forEach(item => console.log(`- ${summarizeOpenTableRow(item)}`));
+  }
+
   if (analysis.blockers.length) {
     console.log('');
     console.log('阻断/待处理线索');
@@ -320,14 +471,14 @@ function runTaskLoop(options = {}) {
     analysis.openPlanSignals.forEach(item => console.log(`- L${item.line}: ${item.text}`));
   }
 
-  const hasOpenPlanWork = analysis.unchecked.length || analysis.blockers.length || analysis.openPlanSignals.length;
+  const hasOpenPlanWork = analysis.unchecked.length || analysis.openTableRows.length || analysis.blockers.length || analysis.openPlanSignals.length;
   const completeBlocked = status === 'complete' && hasOpenPlanWork;
   const retryState = updateLoopRetryState({
     analysis,
     status,
     maxAttempts,
     stateFile,
-    shouldTrack: !gateFailed && !completeBlocked,
+    shouldTrack: status === 'incomplete' || (!gateFailed && !completeBlocked),
   });
   const retryLimitExceeded = status === 'incomplete' && retryState.exceeded;
   console.log('');
@@ -351,7 +502,7 @@ function runTaskLoop(options = {}) {
     console.log(`结论：已超过 incomplete 循环上限 ${retryState.maxAttempts} 次。请停止自动重试，先汇总剩余问题并等待用户确认后再继续。`);
     process.exitCode = 1;
   } else if (status === 'complete') {
-    console.log('结论：机械门禁允许进入最终质量审查。下一步执行 Codex Security 全量审查、Build Web Apps 前端验证，修复问题后再提交/推送。');
+    console.log('结论：机械门禁通过。下一步按改动风险决定是否追加审查；低风险文档、样式或钩子整理不需要冗余全量安全扫描。');
   } else {
     console.log(`结论：计划未完成，必须继续按任务文档推进下一项；当前仍在允许重试次数内。完成一个阶段后再次运行本循环，最多连续 ${retryState.maxAttempts} 次 incomplete。`);
   }
