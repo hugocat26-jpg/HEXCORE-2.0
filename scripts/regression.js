@@ -1434,6 +1434,16 @@ function testHexcoreCategoryClassification() {
   assert(app.innerHTML.includes('捐赠') && app.innerHTML.includes('金币运营'), '金币运营分类应显示经济类海克斯');
   assert(!app.innerHTML.includes('阵营封锁'), '金币运营分类不应混入对手干扰类海克斯');
 
+  H.actions.drawHexcoreForCaptain(H.state.captains[0].id);
+  const cardCategoryClasses = [...app.innerHTML.matchAll(/class="[^"]*(?:hex-draw-card|hex-library-card|owned-hex-card)\s+([^"]*)"/g)]
+    .map(match => match[1].split(/\s+/).find(className => expectedCategories.has(className)))
+    .filter(Boolean);
+  assert(cardCategoryClasses.length > 0, '海克斯卡片应使用业务分类类名驱动配色');
+  const legacyBadgeLabels = new Set(['策略', '特殊', '白银', '黄金', '棱彩', '海克斯']);
+  const renderedBadgeLabels = [...app.innerHTML.matchAll(/<(?:span)[^>]*>([^<]+)<\/span>/g)]
+    .map(match => match[1].trim());
+  assert(!renderedBadgeLabels.some(label => legacyBadgeLabels.has(label)), '海克斯卡片不应继续展示旧品质/类型标签');
+
   setOnlyHexcore(H, H.state.captains[0].id, 'price-interference');
   H.actions.setActiveView('draft');
   assert(app.innerHTML.includes('hex-category-chip') && app.innerHTML.includes('干扰'), '执行队列应展示海克斯业务分类标签');

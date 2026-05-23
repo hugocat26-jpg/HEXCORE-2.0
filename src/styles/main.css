@@ -29,8 +29,8 @@
   --rail: 280px;
   --top: 64px;
   --bottom: 128px;
-  --workspace-min: 1120px;
-  --app-min: 1280px;
+  --workspace-min: 1400px;
+  --app-min: calc(var(--side) + var(--workspace-min));
 }
 
 :root[data-theme="neon"] {
@@ -125,7 +125,8 @@ body {
   margin: 0;
   height: 100%;
   min-height: 100%;
-  overflow: hidden;
+  min-width: var(--app-min);
+  overflow: auto;
   background: var(--bg-deep);
   color: var(--text);
   font-family: "Microsoft YaHei", "PingFang SC", "Segoe UI", Arial, sans-serif;
@@ -169,7 +170,8 @@ select:focus-visible {
   height: 100vh;
   min-height: 0;
   display: grid;
-  grid-template-columns: var(--side) minmax(0, 1fr);
+  grid-template-columns: var(--side) minmax(var(--workspace-min), 1fr);
+  min-width: var(--app-min);
   overflow: hidden;
   background:
     linear-gradient(180deg, rgba(20, 56, 70, 0.28), transparent 280px),
@@ -356,7 +358,7 @@ select:focus-visible {
 }
 
 .app-main {
-  min-width: 0;
+  min-width: var(--workspace-min);
   min-height: 0;
   height: 100vh;
   display: grid;
@@ -499,7 +501,8 @@ select:focus-visible {
 }
 
 .page-workspace {
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .panel-title-row {
@@ -1097,25 +1100,36 @@ h2 span {
   white-space: nowrap;
 }
 
-.hex-category-chip.economy {
+.hex-category-chip.shop_control,
+.hex-category-pill.shop_control {
+  border-color: rgba(25, 212, 240, 0.34);
+  background: rgba(25, 212, 240, 0.12);
+  color: var(--cyan);
+}
+
+.hex-category-chip.economy,
+.hex-category-pill.economy {
   border-color: rgba(244, 182, 42, 0.38);
   background: rgba(244, 182, 42, 0.12);
   color: var(--amber);
 }
 
-.hex-category-chip.disruption {
+.hex-category-chip.disruption,
+.hex-category-pill.disruption {
   border-color: rgba(255, 108, 122, 0.42);
   background: rgba(255, 108, 122, 0.12);
   color: #ff8795;
 }
 
-.hex-category-chip.roster_replace {
+.hex-category-chip.roster_replace,
+.hex-category-pill.roster_replace {
   border-color: rgba(85, 200, 121, 0.34);
   background: rgba(85, 200, 121, 0.12);
   color: var(--green);
 }
 
-.hex-category-chip.order_response {
+.hex-category-chip.order_response,
+.hex-category-pill.order_response {
   border-color: rgba(190, 115, 255, 0.4);
   background: rgba(190, 115, 255, 0.12);
   color: var(--violet);
@@ -3481,11 +3495,61 @@ h2 span {
     0 16px 30px rgba(0, 0, 0, 0.32);
 }
 
+.hex-draw-card.shop_control {
+  color: var(--cyan);
+  background:
+    radial-gradient(circle at 50% -18%, rgba(25, 212, 240, 0.24), transparent 42%),
+    linear-gradient(180deg, rgba(15, 58, 70, 0.9), rgba(9, 29, 38, 0.96));
+  box-shadow:
+    0 0 0 1px rgba(25, 212, 240, 0.34),
+    0 0 24px rgba(25, 212, 240, 0.28);
+}
+
+.hex-draw-card.economy {
+  color: var(--amber);
+  background:
+    radial-gradient(circle at 50% -18%, rgba(244, 182, 42, 0.24), transparent 42%),
+    linear-gradient(180deg, rgba(72, 52, 16, 0.9), rgba(37, 29, 12, 0.96));
+  box-shadow:
+    0 0 0 1px rgba(244, 182, 42, 0.34),
+    0 0 24px rgba(244, 182, 42, 0.22);
+}
+
+.hex-draw-card.disruption {
+  color: #ff8795;
+  background:
+    radial-gradient(circle at 50% -18%, rgba(255, 108, 122, 0.25), transparent 42%),
+    linear-gradient(180deg, rgba(82, 25, 34, 0.92), rgba(41, 13, 20, 0.97));
+  box-shadow:
+    0 0 0 1px rgba(255, 108, 122, 0.34),
+    0 0 26px rgba(255, 108, 122, 0.22);
+}
+
+.hex-draw-card.roster_replace {
+  color: var(--green);
+  background:
+    radial-gradient(circle at 50% -18%, rgba(85, 200, 121, 0.22), transparent 42%),
+    linear-gradient(180deg, rgba(21, 61, 42, 0.92), rgba(10, 32, 24, 0.97));
+  box-shadow:
+    0 0 0 1px rgba(85, 200, 121, 0.32),
+    0 0 24px rgba(85, 200, 121, 0.2);
+}
+
+.hex-draw-card.order_response {
+  color: var(--violet);
+  background:
+    radial-gradient(circle at 50% -18%, rgba(185, 148, 255, 0.26), transparent 42%),
+    linear-gradient(180deg, rgba(51, 35, 92, 0.92), rgba(28, 20, 58, 0.97));
+  box-shadow:
+    0 0 0 1px rgba(185, 148, 255, 0.38),
+    0 0 26px rgba(185, 148, 255, 0.24);
+}
+
 .hex-draw-badges {
   width: 100%;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: center;
   gap: 12px;
 }
 
@@ -3543,7 +3607,7 @@ h2 span {
 
 .hex-draw-card h3 {
   margin: 8px 0 8px;
-  color: var(--cyan);
+  color: currentColor;
   font-size: 18px;
   line-height: 1.25;
   overflow-wrap: anywhere;
@@ -3671,6 +3735,31 @@ h2 span {
 }
 
 .owned-hex-card.violet {
+  color: var(--violet);
+}
+
+.owned-hex-card.shop_control,
+.hex-library-card.shop_control {
+  color: var(--cyan);
+}
+
+.owned-hex-card.economy,
+.hex-library-card.economy {
+  color: var(--amber);
+}
+
+.owned-hex-card.disruption,
+.hex-library-card.disruption {
+  color: #ff8795;
+}
+
+.owned-hex-card.roster_replace,
+.hex-library-card.roster_replace {
+  color: var(--green);
+}
+
+.owned-hex-card.order_response,
+.hex-library-card.order_response {
   color: var(--violet);
 }
 
@@ -5590,7 +5679,7 @@ h2 span {
   }
 }
 
-@media (max-width: 1280px) {
+@media (max-width: 1px) {
   html,
   body {
     overflow: auto;
@@ -5730,7 +5819,7 @@ h2 span {
   }
 }
 
-@media (max-width: 640px) {
+@media (max-width: 1px) {
   .team-grid {
     grid-template-columns: minmax(320px, 1fr);
     min-width: 320px;

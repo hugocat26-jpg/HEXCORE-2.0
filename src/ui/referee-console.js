@@ -80,16 +80,6 @@
     document.documentElement.dataset.theme = currentTheme();
   }
 
-  function hexcoreKindLabel(hexcore) {
-    if (hexcore.mode === 'passive') return '策略';
-    return '特殊';
-  }
-
-  function hexcoreTierLabel(hexcore) {
-    const labels = { cyan: '白银', amber: '黄金', violet: '棱彩' };
-    return labels[hexcore.type] || '海克斯';
-  }
-
   const hexcoreCategoryMeta = {
     shop_control: { label: '商店操控', short: '商店', desc: '影响开店、刷新、商店卡展示或购买窗口。' },
     economy: { label: '金币运营', short: '金币', desc: '影响金币、返还、折扣或刷新资源。' },
@@ -1480,11 +1470,9 @@
                 const hex = Hexcore2.sampleData.hexcores.find(item => item.id === hexcoreId);
                 if (!hex) return '';
                 return `
-                  <article class="hex-draw-card ${escapeHtml(hex.type)}">
+                  <article class="hex-draw-card ${escapeHtml(hexcoreCategory(hex))}">
                     <div class="hex-draw-badges">
-                  <span class="hex-kind-badge">${hexcoreKindLabel(hex)}</span>
-                  <span class="hex-tier-pill">${hexcoreTierLabel(hex)}</span>
-                  <span class="hex-category-pill">${hexcoreCategoryLabel(hex)}</span>
+                  <span class="hex-category-pill ${escapeHtml(hexcoreCategory(hex))}">${hexcoreCategoryLabel(hex)}</span>
                 </div>
                     <div class="hex-card-figure" aria-hidden="true">${hexcoreGlyph(hex)}</div>
                     <h3>${escapeHtml(hex.name)}</h3>
@@ -1508,7 +1496,7 @@
           <h2>已持有海克斯</h2>
           <div class="owned-hex-list">
             ${ownedHexcores.map(hex => `
-              <article class="owned-hex-card ${escapeHtml(hex.type)}">
+              <article class="owned-hex-card ${escapeHtml(hexcoreCategory(hex))}">
                 <div class="owned-hex-main">
                   <div class="owned-hex-icon" aria-hidden="true">${hexcoreGlyph(hex)}</div>
                   <div>
@@ -1517,9 +1505,8 @@
                   </div>
                 </div>
                 <div class="owned-hex-meta">
-                  <span>${hexcoreTierLabel(hex)}</span>
-                  <span>${hexcoreCategoryLabel(hex)}</span>
-                  <span>${hexcoreKindLabel(hex)}</span>
+                  <span class="hex-category-chip ${escapeHtml(hexcoreCategory(hex))}">${hexcoreCategoryLabel(hex)}</span>
+                  <span>${hexcoreTimingLabel(hex)}</span>
                   <span>${hexcoreUseLabel(hex)}</span>
                 </div>
                 <button onclick='window.hexcoreUI.removeHexcore(${safeJsonString(selectedCaptain.id)}, ${safeJsonString(hex.id)})'>移除</button>
@@ -1533,7 +1520,7 @@
             const occupiedByOther = owner && (!selectedCaptain || owner.id !== selectedCaptain.id);
             const occupiedBySelected = owner && selectedCaptain && owner.id === selectedCaptain.id;
             return `
-              <article class="hex-library-card ${escapeHtml(hex.type)} ${Hexcore2.state.ui.highlightHexcoreId === hex.id ? 'located-card' : ''}">
+              <article class="hex-library-card ${escapeHtml(hexcoreCategory(hex))} ${Hexcore2.state.ui.highlightHexcoreId === hex.id ? 'located-card' : ''}">
                 <div>
                   <strong>${escapeHtml(hex.name)}</strong>
                   <span>${occupiedByOther ? `已被 ${escapeHtml(owner.name)} 选择` : (occupiedBySelected ? '当前队长已持有' : (hex.mode === 'passive' ? '被动自动' : '裁判手动'))}</span>
@@ -1541,7 +1528,6 @@
                 <div class="hex-library-meta">
                   <span class="hex-category-chip ${escapeHtml(hexcoreCategory(hex))}">${escapeHtml(hexcoreCategoryLabel(hex))}</span>
                   <span>${escapeHtml(hexcoreTimingLabel(hex))}</span>
-                  <span>${escapeHtml(hexcoreTierLabel(hex))}</span>
                 </div>
                 <p>${escapeHtml(hex.desc)}</p>
                 <button ${owner ? 'disabled' : ''} onclick='window.hexcoreUI.assignHexcoreToCaptain(${safeJsonString(selectedCaptain ? selectedCaptain.id : '')}, ${safeJsonString(hex.id)})'>${owner ? '已占用' : '裁判兜底分配'}</button>
