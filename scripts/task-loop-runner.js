@@ -1,9 +1,11 @@
 const { spawnSync } = require('child_process');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 
 const root = path.resolve(__dirname, '..');
 const validStatus = new Set(['complete', 'incomplete']);
+const defaultMaxIncompleteAttempts = 5;
 
 function parseArgs(argv) {
   return new Map(argv.map(arg => {
@@ -17,11 +19,39 @@ function boolArg(args, key, fallback = false) {
   return ['1', 'true', 'yes', 'y'].includes(String(args.get(key)).toLowerCase());
 }
 
+function positiveIntegerArg(args, keys, fallback) {
+  const keyList = Array.isArray(keys) ? keys : [keys];
+  const key = keyList.find(item => args.has(item));
+  const rawValue = key ? args.get(key) : process.env.POST_TASK_MAX_ATTEMPTS;
+  if (rawValue === undefined || rawValue === '') return fallback;
+  const value = Number(rawValue);
+  if (!Number.isInteger(value) || value < 1) {
+    throw new Error(`${key || 'POST_TASK_MAX_ATTEMPTS'} 必须是大于0的整数`);
+  }
+  return value;
+}
+
 function resolveInsideRoot(relativePath) {
   const target = path.resolve(root, relativePath || '');
   const relative = path.relative(root, target);
   if (relative.startsWith('..') || path.isAbsolute(relative)) {
     throw new Error(`任务文档必须位于项目目录内：${relativePath}`);
+  }
+  return target;
+}
+
+function resolveStateFile(filePath) {
+  if (!filePath) {
+    return path.join(os.tmpdir(), 'hexcore2-post-task-loop-state.json');
+  }
+  const target = path.isAbsolute(filePath) ? filePath : path.resolve(root, filePath);
+  const allowedRoots = [root, os.tmpdir()].map(item => path.resolve(item));
+  const insideAllowedRoot = allowedRoots.some(allowedRoot => {
+    const relative = path.relative(allowedRoot, target);
+    return relative && !relative.startsWith('..') && !path.isAbsolute(relative);
+  });
+  if (!insideAllowedRoot) {
+    throw new Error(`循环状态文件必须位于项目目录或系统临时目录内：${filePath}`);
   }
   return target;
 }
@@ -52,6 +82,46 @@ function printCommandResult(result) {
 
 function readJson(relativePath) {
   return JSON.parse(fs.readFileSync(path.join(root, relativePath), 'utf8'));
+}
+
+function readLoopState(stateFile) {
+  if (!fs.existsSync(stateFile)) return {};
+  try {
+    return JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+  } catch (error) {
+    return {};
+  }
+}
+
+function writeLoopState(stateFile, state) {
+  fs.mkdirSync(path.dirname(stateFile), { recursive: true });
+  fs.writeFileSync(stateFile, `${JSON.stringify(state, null, 2)}\n`, 'utf8');
+}
+
+function updateLoopRetryState({ analysis, status, maxAttempts, stateFile, shouldTrack }) {
+  const state = readLoopState(stateFile);
+  const key = `${root}|${analysis.docRelativePath}`;
+  const current = state[key] || { incompleteAttempts: 0 };
+
+  if (!shouldTrack) {
+    return { attempts: current.incompleteAttempts || 0, maxAttempts, exceeded: false, tracked: false };
+  }
+
+  if (status === 'complete') {
+    delete state[key];
+    writeLoopState(stateFile, state);
+    return { attempts: 0, maxAttempts, exceeded: false, tracked: true, reset: true };
+  }
+
+  const attempts = (current.incompleteAttempts || 0) + 1;
+  state[key] = {
+    incompleteAttempts: attempts,
+    maxAttempts,
+    taskDoc: analysis.docRelativePath,
+    updatedAt: new Date().toISOString(),
+  };
+  writeLoopState(stateFile, state);
+  return { attempts, maxAttempts, exceeded: attempts > maxAttempts, tracked: true };
 }
 
 function headingLevel(line) {
@@ -116,6 +186,28 @@ function collectBlockers(lines) {
   return blockers.slice(0, 16);
 }
 
+function collectOpenPlanSignals(lines) {
+  const signals = [];
+  const patterns = [
+    /TODO|FIXME|待处理|待完成|尚未完成|未完成|未实现|待验证|待修复|未通过|失败|阻断|等待用户/i,
+    /下一步[:：]|后续[:：]|剩余[:：]|风险[:：]/,
+  ];
+  let inCodeBlock = false;
+  lines.forEach((line, index) => {
+    if (/^\s*```/.test(line)) {
+      inCodeBlock = !inCodeBlock;
+      return;
+    }
+    if (inCodeBlock) return;
+    const text = line.trim();
+    if (!text || /^#{1,6}\s+/.test(text)) return;
+    if (patterns.some(pattern => pattern.test(text))) {
+      signals.push({ line: index + 1, text: text.slice(0, 180) });
+    }
+  });
+  return signals.slice(0, 24);
+}
+
 function printItems(title, items) {
   console.log('');
   console.log(title);
@@ -148,6 +240,7 @@ function analyzeTaskDoc(docRelativePath) {
     checkboxes,
     unchecked: checkboxes.filter(item => !item.checked),
     blockers: collectBlockers(lines),
+    openPlanSignals: collectOpenPlanSignals(lines),
   };
 }
 
@@ -174,6 +267,8 @@ function runTaskLoop(options = {}) {
   const taskDoc = args.get('doc') || args.get('task') || options.defaultDoc || 'docs/06_开发计划.md';
   const title = args.get('title') || options.title || 'HEXCORE2.0 任务执行循环钩子';
   const skipGates = boolArg(args, 'skip-gates', false);
+  const maxAttempts = positiveIntegerArg(args, ['max-attempts', 'max-incomplete-runs'], defaultMaxIncompleteAttempts);
+  const stateFile = resolveStateFile(args.get('state-file'));
   if (status === 'complete' && skipGates) {
     throw new Error('status=complete 时不允许使用 --skip-gates=true，完成判定必须经过本地门禁');
   }
@@ -219,21 +314,49 @@ function runTaskLoop(options = {}) {
     analysis.blockers.forEach(item => console.log(`- ${item}`));
   }
 
-  const completeBlocked = status === 'complete' && (analysis.unchecked.length || analysis.blockers.length);
+  if (analysis.openPlanSignals.length) {
+    console.log('');
+    console.log('严格计划线索');
+    analysis.openPlanSignals.forEach(item => console.log(`- L${item.line}: ${item.text}`));
+  }
+
+  const hasOpenPlanWork = analysis.unchecked.length || analysis.blockers.length || analysis.openPlanSignals.length;
+  const completeBlocked = status === 'complete' && hasOpenPlanWork;
+  const retryState = updateLoopRetryState({
+    analysis,
+    status,
+    maxAttempts,
+    stateFile,
+    shouldTrack: !gateFailed && !completeBlocked,
+  });
+  const retryLimitExceeded = status === 'incomplete' && retryState.exceeded;
+  console.log('');
+  console.log('循环重试上限');
+  if (retryState.tracked && status === 'incomplete') {
+    console.log(`- 当前连续 incomplete 次数：${retryState.attempts}/${retryState.maxAttempts}`);
+  } else if (retryState.reset) {
+    console.log('- complete 门禁通过后已清零当前任务文档的 incomplete 计数');
+  } else {
+    console.log(`- 当前计数未更新，允许上限：${retryState.maxAttempts} 次`);
+  }
+
   console.log('');
   if (gateFailed) {
     console.log('结论：本地门禁未通过。请先修复测试或空白错误，再继续执行任务文档。');
     process.exitCode = 1;
   } else if (completeBlocked) {
-    console.log('结论：当前不允许标记 complete。请先处理失败门禁、未勾选清单或阻断线索，再重新运行。');
+    console.log('结论：当前不允许标记 complete。请先处理失败门禁、未勾选清单、阻断线索或严格计划线索，再重新运行。');
+    process.exitCode = 1;
+  } else if (retryLimitExceeded) {
+    console.log(`结论：已超过 incomplete 循环上限 ${retryState.maxAttempts} 次。请停止自动重试，先汇总剩余问题并等待用户确认后再继续。`);
     process.exitCode = 1;
   } else if (status === 'complete') {
     console.log('结论：机械门禁允许进入最终质量审查。下一步执行 Codex Security 全量审查、Build Web Apps 前端验证，修复问题后再提交/推送。');
   } else {
-    console.log('结论：继续按任务文档推进下一项。完成一个阶段后再次运行本循环。');
+    console.log(`结论：计划未完成，必须继续按任务文档推进下一项；当前仍在允许重试次数内。完成一个阶段后再次运行本循环，最多连续 ${retryState.maxAttempts} 次 incomplete。`);
   }
 
-  return { analysis, gateResults, completeBlocked };
+  return { analysis, gateResults, completeBlocked, retryState, retryLimitExceeded };
 }
 
 if (require.main === module) {

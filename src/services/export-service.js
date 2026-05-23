@@ -251,6 +251,7 @@
     const skipped = [];
     const stats = {
       missingField: 0,
+      missingCamp: 0,
       invalidScore: 0,
       duplicateGameId: 0,
       overflow: 0,
@@ -277,6 +278,8 @@
         const reason = error && error.message ? error.message : '数据格式错误';
         if (reason.includes('评分')) {
           stats.invalidScore += 1;
+        } else if (reason.includes('阵营')) {
+          stats.missingCamp += 1;
         } else {
           stats.missingField += 1;
         }

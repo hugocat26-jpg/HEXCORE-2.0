@@ -1,6 +1,7 @@
 (function initAssignmentEngine(global) {
   const Hexcore2 = global.Hexcore2 || (global.Hexcore2 = {});
-  const goldAllowedSources = new Set(['gold_shop_purchase', 'final_random_fill', 'steady_reinforce', 'decompose_knowledge', 'stuck_together', 'mystery_box']);
+  const goldAllowedSources = new Set(['gold_shop_purchase', 'final_random_fill', 'steady_reinforce', 'decompose_knowledge', 'stuck_together', 'mystery_box', 'transmute_gold', 'transmute_prismatic']);
+  const crossCampAllowedSources = new Set(['stuck_together']);
 
   function captainCamp(captainId) {
     return Hexcore2.selectors.captainCamp ? Hexcore2.selectors.captainCamp(captainId) : '';
@@ -18,8 +19,8 @@
     );
   }
 
-  function purchasePrice(captainId, player) {
-    const basePrice = Math.max(1, Number(player.tier) || 1);
+  function purchasePrice(captainId, player, options = {}) {
+    const basePrice = Math.max(1, Number(options.basePriceOverride) || Number(player.tier) || 1);
     let price = basePrice;
     const appliedEffects = [];
     const discount = activeEffect(captainId, 'discount_coupon');
@@ -92,7 +93,7 @@
       const player = state.players.find(item => item.id === playerId);
       if (!captain || !player || player.status !== 'available') return false;
       const camp = captainCamp(captainId);
-      if (!camp || player.camp !== camp) {
+      if ((!camp || player.camp !== camp) && !crossCampAllowedSources.has(source)) {
         Hexcore2.eventStore.append('入队失败', `${captain ? captain.name : '目标队伍'} 不能接收异阵营选手「${player ? player.name : playerId}」`, 'warn', { source, playerId });
         return false;
       }
@@ -106,6 +107,11 @@
       captain.team.push(player.id);
       player.status = 'drafted';
       player.teamId = captainId;
+      if (crossCampAllowedSources.has(source) && camp && player.camp !== camp) {
+        player.teamBypassReason = source;
+      } else {
+        delete player.teamBypassReason;
+      }
       Hexcore2.eventStore.append('选手入队', `${captain.name} 选择了选手「${player.name}」加入队伍（${captain.team.length}/${capacity}）`, 'success', { source });
       if (Hexcore2.hexcoreEngine && source !== 'lock_contract_pair') {
         Hexcore2.hexcoreEngine.resolveLockContracts(captainId, player.id);
@@ -113,7 +119,7 @@
       return true;
     },
 
-    purchase(captainId, playerId, source = 'shop_purchase') {
+    purchase(captainId, playerId, source = 'shop_purchase', options = {}) {
       const state = Hexcore2.state;
       const captain = state.captains.find(item => item.id === captainId);
       const player = state.players.find(item => item.id === playerId);
@@ -124,7 +130,7 @@
         return { ok: false, reason: '不能购买异阵营选手' };
       }
       if (isCaptainPlayer(player.id)) return { ok: false, reason: '队长锁定选手不可购买' };
-      const pricing = purchasePrice(captainId, player);
+      const pricing = purchasePrice(captainId, player, options);
       const price = pricing.price;
       const economy = Hexcore2.economyEngine.spendForPurchase(captainId, price);
       if (!economy.ok) return economy;
@@ -145,7 +151,7 @@
         '金币购买',
         `${captain.name} 花费 ${price} 金币购买「${player.name}」，剩余 ${captain.economy.gold} 金币`,
         'success',
-        { source, price, playerId }
+        { source, price, playerId, basePrice: pricing.basePrice, displayPlayerId: options.displayPlayerId || '' }
       );
       pricing.appliedEffects.forEach(effect => {
         Hexcore2.eventStore.append(
@@ -156,7 +162,7 @@
         );
       });
       applySponsorFlow(captain, player, price);
-      return { ok: true, price, gold: captain.economy.gold, appliedEffects: pricing.appliedEffects.map(effect => ({ ...effect })) };
+      return { ok: true, price, basePrice: pricing.basePrice, gold: captain.economy.gold, appliedEffects: pricing.appliedEffects.map(effect => ({ ...effect })) };
     },
 
     purchaseWithOffset(captainId, playerId, offset = 0, source = 'decompose_knowledge') {

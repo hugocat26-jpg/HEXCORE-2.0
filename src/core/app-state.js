@@ -173,9 +173,11 @@
     CAMPS.forEach(camp => {
       const sorted = players
         .filter(player => player.camp === camp)
+        .filter(player => !captainPlayerIds.has(player.id) && !isCaptainPoolPlayer(player, captains))
         .sort(compareByOfficialTier);
+      const bucketSize = Math.max(1, Math.ceil(sorted.length / 5));
       sorted.forEach((player, index) => {
-        player.tier = Math.max(1, Math.min(5, 5 - Math.floor(index / 5)));
+        player.tier = Math.max(1, Math.min(5, 5 - Math.floor(index / bucketSize)));
       });
     });
   }
@@ -390,7 +392,7 @@
         })
         .filter(Boolean)
         .filter((hexcore, index, all) => all.findIndex(item => item.id === hexcore.id) === index)
-        .slice(0, 8)
+        .slice(0, 1)
         .map(hexcore => ({ ...hexcore }));
       return result;
     }, {});
@@ -852,7 +854,8 @@
       const teamCountOk = state.captains.length === 10;
       const namedCaptains = state.captains.filter(captain => String(captain.name || '').trim()).length;
       const assignedCaptainCount = state.captains.filter(captain => Boolean(Hexcore2.selectors.captainPlayer(captain.id))).length;
-      const missingHexcoreCaptains = state.captains.filter(captain => (state.hexcoreAssignments[captain.id] || []).length < 3);
+      const missingHexcoreCaptains = state.captains.filter(captain => (state.hexcoreAssignments[captain.id] || []).length < 1);
+      const overflowHexcoreCaptains = state.captains.filter(captain => (state.hexcoreAssignments[captain.id] || []).length > 1);
       const campCounts = CAMPS.reduce((result, camp) => {
         result[camp] = state.players.filter(player => player.camp === camp).length;
         return result;
@@ -874,7 +877,9 @@
           const player = state.players.find(item => item.id === playerId);
           if (!player) rosterIssues.push(`${captain.name} 包含缺失选手`);
           if (player && player.teamId !== captain.id) rosterIssues.push(`${player.name} 归属不一致`);
-          if (player && captainCamp && player.camp !== captainCamp) rosterIssues.push(`${captain.name} 含异阵营队员 ${player.name}`);
+          if (player && captainCamp && player.camp !== captainCamp && player.teamBypassReason !== 'stuck_together') {
+            rosterIssues.push(`${captain.name} 含异阵营队员 ${player.name}`);
+          }
         });
         if (captain.playerId && !Hexcore2.selectors.captainPlayer(captain.id)) {
           rosterIssues.push(`${captain.name} 队长不在选手库`);
@@ -938,8 +943,10 @@
         {
           id: 'hexcore-draw',
           label: '海克斯抽取',
-          status: missingHexcoreCaptains.length ? 'block' : 'pass',
-          detail: missingHexcoreCaptains.length ? `${missingHexcoreCaptains.length} 队未抽满 3 个海克斯` : '全部队长已抽满 3 个',
+          status: missingHexcoreCaptains.length || overflowHexcoreCaptains.length ? 'block' : 'pass',
+          detail: missingHexcoreCaptains.length
+            ? `${missingHexcoreCaptains.length} 队未完成海克斯选择`
+            : (overflowHexcoreCaptains.length ? `${overflowHexcoreCaptains.length} 队超过 1 个海克斯，请先移除多余海克斯` : '全部队长已完成 1/1 海克斯选择'),
           view: 'hexcores',
         },
         {

@@ -1277,6 +1277,28 @@ h2 span {
   font-weight: 800;
 }
 
+.player-card.snow-cat-card {
+  border-color: rgba(190, 150, 255, 0.62);
+  background:
+    linear-gradient(145deg, rgba(190, 150, 255, 0.18), rgba(92, 224, 255, 0.08)),
+    linear-gradient(180deg, rgba(14, 30, 43, 0.97), rgba(8, 18, 27, 0.97));
+}
+
+.player-card.snow-cat-card::after {
+  content: "信息打乱";
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  z-index: 2;
+  border: 1px solid rgba(190, 150, 255, 0.62);
+  border-radius: 999px;
+  color: #decaff;
+  background: rgba(89, 54, 138, 0.32);
+  padding: 4px 9px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
 @keyframes weatherFogFlow {
   from {
     transform: translate3d(-5%, -2%, 0) rotate(-2deg) scale(1);
@@ -2034,7 +2056,7 @@ h2 span {
 
 .import-preview-stats {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
   gap: 10px;
   margin-bottom: 14px;
 }
@@ -2338,6 +2360,34 @@ h2 span {
 
 .team-member.empty-captain-member strong {
   color: var(--cyan);
+}
+
+.team-issue-box {
+  display: grid;
+  gap: 6px;
+  border: 1px solid rgba(244, 182, 42, 0.28);
+  border-radius: 6px;
+  background: rgba(244, 182, 42, 0.07);
+  padding: 8px;
+}
+
+.team-issue {
+  color: #f5d48a;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.team-issue.danger {
+  color: #ff9da5;
+}
+
+.team-issue.pending {
+  color: var(--muted);
+}
+
+.team-issue-box button {
+  width: 100%;
+  min-height: 26px;
 }
 
 .member-list button,
@@ -2679,6 +2729,8 @@ h2 span {
 
 .pool-reason {
   grid-column: 1 / -1;
+  display: grid;
+  gap: 3px;
   border: 1px solid rgba(25, 212, 240, 0.18);
   border-radius: 6px;
   background: rgba(25, 212, 240, 0.055);
@@ -2686,6 +2738,15 @@ h2 span {
   padding: 7px 9px;
   font-size: 12px;
   line-height: 1.4;
+}
+
+.pool-reason strong {
+  color: #d7f7ff;
+  font-size: 12px;
+}
+
+.pool-reason span {
+  color: #92b2bf;
 }
 
 .player-row textarea:hover {
@@ -2906,13 +2967,13 @@ h2 span {
 
 .hex-draw-slots {
   display: grid;
-  grid-template-columns: repeat(3, minmax(220px, 1fr));
-  gap: 24px;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
 }
 
 .hex-draw-card {
   position: relative;
-  min-height: 364px;
+  min-height: 270px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -2921,7 +2982,7 @@ h2 span {
   background:
     linear-gradient(180deg, rgba(69, 20, 82, 0.88), rgba(45, 12, 62, 0.95));
   color: var(--cyan);
-  padding: 13px 26px 24px;
+  padding: 10px 14px 14px;
   overflow: hidden;
   text-align: center;
   transition:
@@ -3033,19 +3094,19 @@ h2 span {
 }
 
 .hex-card-figure {
-  min-height: 92px;
+  min-height: 58px;
   display: grid;
   place-items: center;
-  margin-top: 26px;
-  font-size: 58px;
+  margin-top: 14px;
+  font-size: 40px;
   line-height: 1;
   filter: drop-shadow(0 10px 16px rgba(0, 0, 0, 0.35));
 }
 
 .hex-draw-card h3 {
-  margin: 12px 0 12px;
+  margin: 8px 0 8px;
   color: var(--cyan);
-  font-size: 23px;
+  font-size: 18px;
   line-height: 1.25;
   overflow-wrap: anywhere;
 }
@@ -3059,12 +3120,17 @@ h2 span {
 }
 
 .hex-draw-card p {
-  max-width: 250px;
-  margin: 0 auto 18px;
+  max-width: 100%;
+  min-height: 50px;
+  margin: 0 auto 10px;
   color: #d8d0ec;
-  font-size: 14px;
-  line-height: 1.65;
+  font-size: 12px;
+  line-height: 1.42;
+  display: -webkit-box;
+  overflow: hidden;
   overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
 }
 
 .hex-draw-card.amber p {
@@ -3077,8 +3143,8 @@ h2 span {
   border-radius: 6px;
   background: rgba(111, 62, 34, 0.72);
   color: #ffc454;
-  padding: 7px 10px;
-  font-size: 12px;
+  padding: 5px 8px;
+  font-size: 11px;
   font-weight: 900;
 }
 
@@ -3086,9 +3152,9 @@ h2 span {
   width: 100%;
   display: grid;
   grid-template-columns: minmax(0, 0.82fr) minmax(0, 1.18fr);
-  gap: 10px;
+  gap: 8px;
   margin-top: auto;
-  padding-top: 16px;
+  padding-top: 10px;
 }
 
 .hex-refresh-btn {
@@ -3117,17 +3183,18 @@ h2 span {
   border: 1px solid var(--line-soft);
   border-radius: 7px;
   background: rgba(255, 255, 255, 0.02);
-  padding: 12px;
+  padding: 10px;
 }
 
 .owned-hex-panel h2 {
-  margin-bottom: 10px;
+  margin-bottom: 8px;
 }
 
 .owned-hex-list {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 360px));
+  gap: 8px;
+  align-items: start;
 }
 
 .owned-hex-list em {
@@ -3151,11 +3218,14 @@ h2 span {
     linear-gradient(135deg, rgba(255, 255, 255, 0.045), transparent 48%),
     rgba(255, 255, 255, 0.025);
   color: var(--cyan);
-  padding: 12px;
+  padding: 9px;
   display: grid;
-  grid-template-rows: minmax(82px, 1fr) auto 30px;
-  gap: 10px;
-  min-height: 168px;
+  grid-template-columns: minmax(0, 1fr) 54px;
+  grid-template-areas:
+    "main action"
+    "meta action";
+  gap: 8px;
+  min-height: 78px;
 }
 
 .owned-hex-card.amber {
@@ -3167,20 +3237,22 @@ h2 span {
 }
 
 .owned-hex-main {
+  grid-area: main;
   display: grid;
-  grid-template-columns: 42px minmax(0, 1fr);
-  gap: 10px;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 8px;
+  min-width: 0;
 }
 
 .owned-hex-icon {
-  width: 42px;
-  height: 42px;
+  width: 34px;
+  height: 34px;
   border: 1px solid currentColor;
-  border-radius: 8px;
+  border-radius: 7px;
   display: grid;
   place-items: center;
   background: rgba(255, 255, 255, 0.04);
-  font-size: 22px;
+  font-size: 17px;
   box-shadow: inset 0 0 18px rgba(255, 255, 255, 0.04);
 }
 
@@ -3189,20 +3261,29 @@ h2 span {
   color: var(--text);
   font-size: 14px;
   line-height: 1.3;
-  margin-bottom: 5px;
+  margin-bottom: 3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .owned-hex-card p {
   margin: 0;
   color: var(--muted);
   font-size: 12px;
-  line-height: 1.45;
+  line-height: 1.35;
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .owned-hex-meta {
+  grid-area: meta;
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 5px;
+  padding-left: 42px;
 }
 
 .owned-hex-meta span {
@@ -3213,6 +3294,13 @@ h2 span {
   padding: 3px 8px;
   font-size: 11px;
   font-weight: 800;
+}
+
+.owned-hex-card > button {
+  grid-area: action;
+  align-self: stretch;
+  min-height: 0;
+  padding: 0 8px;
 }
 
 .hex-library-card {
@@ -3920,6 +4008,48 @@ h2 span {
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
+}
+
+.system-check-panel .toolbar-row h2 {
+  margin: 0 0 4px;
+  color: #e6f6fb;
+  font-size: 16px;
+}
+
+.system-check-panel .toolbar-row strong.done {
+  color: var(--green);
+}
+
+.system-check-panel .toolbar-row strong.warn {
+  color: var(--amber);
+}
+
+.system-check-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.system-check-item {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  border: 1px solid rgba(244, 182, 42, 0.28);
+  border-radius: 6px;
+  background: rgba(244, 182, 42, 0.07);
+  padding: 9px 10px;
+}
+
+.system-check-item strong {
+  color: var(--amber);
+  font-size: 12px;
+}
+
+.system-check-item span {
+  color: #d6e7ee;
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 .theme-settings {
@@ -4918,6 +5048,23 @@ h2 span {
 
   .control-grid {
     grid-template-columns: repeat(7, minmax(82px, 1fr));
+  }
+
+  .hex-draw-slots {
+    gap: 10px;
+  }
+
+  .hex-draw-card {
+    min-height: 250px;
+    padding: 9px 10px 12px;
+  }
+
+  .hex-draw-card h3 {
+    font-size: 16px;
+  }
+
+  .hex-draw-card p {
+    font-size: 11px;
   }
 }
 

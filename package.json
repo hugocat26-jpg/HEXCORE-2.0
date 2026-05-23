@@ -7,7 +7,6 @@
     "start": "node scripts/serve.js",
     "serve": "node scripts/serve.js",
     "test": "node scripts/regression.js",
-    "post-task": "node scripts/post-task-hook.js",
-    "camp-loop": "node scripts/camp-locked-loop-hook.js"
+    "post-task": "node scripts/post-task-hook.js"
   }
 }
