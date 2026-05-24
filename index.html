@@ -42,7 +42,6 @@
       function recoverOnce(reason) {
         if (!storageGet(window.sessionStorage, RECOVERY_KEY)) {
           storageSet(window.sessionStorage, RECOVERY_KEY, '1');
-          storageRemove(window.localStorage, STORAGE_KEY);
           window.location.replace(window.location.pathname + '?recovered=' + Date.now());
           return;
         }
@@ -50,7 +49,8 @@
       }
 
       window.addEventListener('error', function (event) {
-        recoverOnce(event && event.message ? event.message : '脚本执行错误');
+        if (!event || !('message' in event)) return;
+        recoverOnce(event.message || '脚本执行错误');
       });
       window.addEventListener('unhandledrejection', function (event) {
         var reason = event && event.reason;

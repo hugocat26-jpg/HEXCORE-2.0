@@ -1,6 +1,5 @@
 (function initExportService(global) {
   const Hexcore2 = global.Hexcore2 || (global.Hexcore2 = {});
-  const OFFICIAL_PLAYER_LIMIT = 50;
 
   function downloadText(filename, content, mimeType) {
     if (typeof document === 'undefined' || typeof Blob === 'undefined') {
@@ -90,8 +89,8 @@
     if (state.captains.length < 5 || state.captains.length > 20) {
       throw new Error('队伍数量必须在5-20之间');
     }
-    if (!Array.isArray(state.players) || state.players.length > OFFICIAL_PLAYER_LIMIT) {
-      throw new Error('参赛选手总数不能超过50人');
+    if (!Array.isArray(state.players)) {
+      throw new Error('备份文件缺少选手列表');
     }
 
     const captainIds = new Set();
@@ -256,7 +255,6 @@
       duplicateGameId: 0,
       overflow: 0,
     };
-    const remainingSlots = Math.max(0, OFFICIAL_PLAYER_LIMIT - (existingPlayers || []).length);
 
     rows.forEach((row, index) => {
       try {
@@ -265,11 +263,6 @@
         if (existingGameIds.has(gameIdKey) || seenGameIds.has(gameIdKey)) {
           stats.duplicateGameId += 1;
           skipped.push({ row: index + 1, name: player.name, gameId: player.gameId, reason: '游戏ID重复' });
-          return;
-        }
-        if (accepted.length >= remainingSlots) {
-          stats.overflow += 1;
-          skipped.push({ row: index + 1, name: player.name, gameId: player.gameId, reason: '超过50人参赛上限' });
           return;
         }
         seenGameIds.add(gameIdKey);

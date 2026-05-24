@@ -96,6 +96,14 @@
     );
   }
 
+  function originSageAlreadyCreated(round = Hexcore2.state.draft.round) {
+    return (Hexcore2.state.draft.runtimeEffects || []).some(effect =>
+      effect.type === 'move_first'
+      && effect.sourceHexcoreId === 'origin-sage'
+      && Number(effect.round) === Number(round)
+    );
+  }
+
   function hungryWaveEligibleCaptains(round = Hexcore2.state.draft.round) {
     return Hexcore2.state.captains.filter(captain =>
       hasHexcore(captain.id, 'hungry-wave')
@@ -127,6 +135,9 @@
     if (!card) return;
     card.purchased = false;
     delete card.purchasedAt;
+    delete card.revealUntil;
+    delete card.revealFlipUntil;
+    delete card.purchaseRevealReason;
   }
 
   function returnPurchasedPlayerToPool(buyer, player) {
@@ -236,6 +247,25 @@
     };
   }
 
+  function clearWeatherFogForCaptain(captainId, round = Hexcore2.state.draft.round, reason = '购买权结束') {
+    const cleared = [];
+    (Hexcore2.state.draft.runtimeEffects || []).forEach(effect => {
+      if (
+        effect.type === 'weather_fog'
+        && effect.captainId === captainId
+        && !effect.consumed
+        && (!effect.triggerRound || Number(effect.triggerRound) <= Number(round))
+      ) {
+        effect.consumed = true;
+        effect.consumedRound = round;
+        effect.consumedAt = new Date().toISOString();
+        effect.consumedReason = reason;
+        cleared.push(effect);
+      }
+    });
+    return cleared;
+  }
+
   function activeCardPlayer(card) {
     return card && Hexcore2.state.players.find(player => player.id === card.playerId);
   }
@@ -311,11 +341,13 @@
   }
 
   function stuckTogetherTargets(captainId) {
+    const camp = captainCamp(captainId);
     return Hexcore2.state.players
       .filter(player =>
         player.status === 'available'
         && player.tier >= 1
         && player.tier <= 5
+        && player.camp === camp
         && !Hexcore2.selectors.isCaptainPlayer(player.id)
       )
       .sort((a, b) => (Number(b.tier) || 0) - (Number(a.tier) || 0) || (Number(b.score) || 0) - (Number(a.score) || 0));
@@ -330,21 +362,58 @@
     );
   }
 
+  function canReceiveWeatherFog(captain, sourceCaptainId, round) {
+    if (!captain || captain.id === sourceCaptainId) return false;
+    if (hasHexcore(captain.id, 'hungry-wave')) return false;
+    if (Hexcore2.selectors.teamSize(captain.id) >= Hexcore2.selectors.teamMemberCapacity(captain.id)) return false;
+    const roundState = Hexcore2.economyEngine.roundState(captain.id, round);
+    if (roundState.purchaseUsed || roundState.skipped) return false;
+    if ((Hexcore2.state.draft.runtimeEffects || []).some(effect =>
+      effect.type === 'skip_round'
+      && effect.captainId === captain.id
+      && Number(effect.round) === Number(round)
+    )) return false;
+    if (Number(round) === Number(Hexcore2.state.draft.round) && isHungryWaveImmune(captain.id, round)) return false;
+    return true;
+  }
+
   function weatherFogTargetChain(sourceCaptainId, firstTargetId) {
     const state = Hexcore2.state;
-    const order = state.draft.currentOrder && state.draft.currentOrder.length
+    const currentOrder = state.draft.currentOrder && state.draft.currentOrder.length
       ? state.draft.currentOrder
       : state.draft.baseOrder;
-    const startIndex = order.indexOf(firstTargetId);
-    if (startIndex < 0 || firstTargetId === sourceCaptainId) return [];
+    const currentStartIndex = currentOrder.indexOf(firstTargetId);
+    if (currentStartIndex < 0 || firstTargetId === sourceCaptainId) return [];
     const result = [];
-    for (let index = startIndex; index < order.length && result.length < 3; index += 1) {
-      const captainId = order[index];
-      const captain = state.captains.find(item => item.id === captainId);
-      if (!captain || captain.id === sourceCaptainId) continue;
-      if (isHungryWaveImmune(captain.id)) continue;
-      if (Hexcore2.selectors.teamSize(captain.id) >= Hexcore2.selectors.teamMemberCapacity(captain.id)) continue;
-      result.push(captain);
+    const currentIndex = Math.max(0, Number(state.draft.currentIndex) || 0);
+    const used = new Set();
+    const firstRound = currentStartIndex < currentIndex ? state.draft.round + 1 : state.draft.round;
+    const firstCaptain = state.captains.find(item => item.id === firstTargetId);
+    if (!canReceiveWeatherFog(firstCaptain, sourceCaptainId, firstRound)) return [];
+    const orderForRound = round => {
+      if (Number(round) === Number(state.draft.round)) return currentOrder;
+      if (Hexcore2.turnOrderEngine && Hexcore2.turnOrderEngine.preview) {
+        return Hexcore2.turnOrderEngine.preview(round, { includeOriginSagePreview: true }).order || [];
+      }
+      return state.draft.baseOrder || currentOrder;
+    };
+    for (let targetRound = firstRound; targetRound <= state.draft.maxRounds && result.length < 3; targetRound += 1) {
+      const order = orderForRound(targetRound);
+      let startIndex = 0;
+      if (targetRound === firstRound) {
+        startIndex = Number(targetRound) === Number(state.draft.round)
+          ? currentStartIndex
+          : order.indexOf(firstTargetId);
+        if (startIndex < 0) return [];
+      }
+      for (let index = startIndex; index < order.length && result.length < 3; index += 1) {
+        const captainId = order[index];
+        if (used.has(captainId)) continue;
+        const captain = state.captains.find(item => item.id === captainId);
+        if (!canReceiveWeatherFog(captain, sourceCaptainId, targetRound)) continue;
+        used.add(captainId);
+        result.push({ captain, triggerRound: targetRound });
+      }
     }
     return result;
   }
@@ -355,13 +424,11 @@
       ? state.draft.currentOrder
       : state.draft.baseOrder;
     return order
-      .slice(state.draft.currentIndex)
       .map(captainId => state.captains.find(captain => captain.id === captainId))
       .filter(captain =>
         captain
         && captain.id !== sourceCaptainId
-        && !isHungryWaveImmune(captain.id)
-        && Hexcore2.selectors.teamSize(captain.id) < Hexcore2.selectors.teamMemberCapacity(captain.id)
+        && weatherFogTargetChain(sourceCaptainId, captain.id).length > 0
       );
   }
 
@@ -387,6 +454,185 @@
         && !isHungryWaveImmune(captain.id)
         && Hexcore2.selectors.teamSize(captain.id) < Hexcore2.selectors.teamMemberCapacity(captain.id)
       );
+  }
+
+  function chargedCannonHex(captainId) {
+    return (Hexcore2.state.hexcoreAssignments[captainId] || [])
+      .find(hexcore => hexcore.id === 'charged-cannon');
+  }
+
+  function originSageProtectedCaptainIds(round = Hexcore2.state.draft.round) {
+    return new Set((Hexcore2.state.draft.runtimeEffects || [])
+      .filter(effect =>
+        effect.type === 'move_first'
+        && effect.sourceHexcoreId === 'origin-sage'
+        && Number(effect.round) === Number(round)
+      )
+      .map(effect => effect.captainId));
+  }
+
+  function originSagePriorityCaptainIds(round = Hexcore2.state.draft.round) {
+    const ids = originSageProtectedCaptainIds(round);
+    Hexcore2.state.captains.forEach(captain => {
+      if (hasHexcore(captain.id, 'origin-sage')) ids.add(captain.id);
+    });
+    return ids;
+  }
+
+  function applyChargedCannonOrderMove(order, captainId, operation, position = 1) {
+    const index = order.indexOf(captainId);
+    if (index < 0) return order;
+    const nextOrder = [...order];
+    const [item] = nextOrder.splice(index, 1);
+    if (operation === 'fixed_position') {
+      nextOrder.splice(Math.max(0, Math.min(nextOrder.length, Number(position) - 1 || 0)), 0, item);
+    } else if (operation === 'move_down_one') {
+      nextOrder.splice(Math.max(0, Math.min(nextOrder.length, index + 1)), 0, item);
+    } else if (operation === 'move_up_one') {
+      nextOrder.splice(Math.max(0, index - 1), 0, item);
+    } else {
+      nextOrder.unshift(item);
+    }
+    return nextOrder;
+  }
+
+  function chargedCannonOrder(round = Hexcore2.state.draft.round) {
+    const state = Hexcore2.state;
+    const captainIds = new Set(state.captains.map(captain => captain.id));
+    const seen = new Set();
+    let order = (state.draft.baseOrder || [])
+      .filter(captainId => captainIds.has(captainId) && !seen.has(captainId) && seen.add(captainId));
+    state.captains.forEach(captain => {
+      if (!seen.has(captain.id)) {
+        seen.add(captain.id);
+        order.push(captain.id);
+      }
+    });
+    if (Number(round) % 2 === 0) order = [...order].reverse();
+
+    (state.draft.runtimeEffects || [])
+      .filter(effect => Number(effect.round) === Number(round))
+      .filter(effect => ['move_first', 'fixed_position', 'move_down_one', 'move_up_one'].includes(effect.type))
+      .sort((a, b) => (Number(a.priority) || 0) - (Number(b.priority) || 0))
+      .forEach(effect => {
+        order = applyChargedCannonOrderMove(order, effect.captainId, effect.type, effect.position);
+      });
+    return order;
+  }
+
+  function chargedCannonPendingOwners(round = Hexcore2.state.draft.round) {
+    const state = Hexcore2.state;
+    const order = state.draft.currentOrder && state.draft.currentOrder.length
+      ? state.draft.currentOrder
+      : state.draft.baseOrder;
+    return order
+      .map(captainId => state.captains.find(captain => captain.id === captainId))
+      .filter(captain => {
+        if (!captain || !hasHexcore(captain.id, 'charged-cannon') || !hasOpenSlot(captain.id)) return false;
+        if (!Hexcore2.selectors.isHexcoreEnabled('charged-cannon')) return false;
+        const hexcore = chargedCannonHex(captain.id);
+        return hexcore && !usedThisRound(hexcore) && Number(round) === Number(state.draft.round);
+      });
+  }
+
+  function chargedCannonBoostPreview(captainId) {
+    const order = chargedCannonOrder();
+    const index = order.indexOf(captainId);
+    const protectedIds = originSagePriorityCaptainIds();
+    const minIndex = protectedIds.has(order[0]) ? 1 : 0;
+    if (index < 0) return { canBoost: false, beforeOrder: order, afterOrder: order, reason: '当前顺位中找不到该队长' };
+    if (index <= minIndex) {
+      return {
+        canBoost: false,
+        beforeOrder: order,
+        afterOrder: order,
+        reason: minIndex === 1 ? '神秘贤者·启元占据第一顺位，当前已无法继续前移' : '当前已经是本轮最前顺位',
+      };
+    }
+    const afterOrder = [...order];
+    const [item] = afterOrder.splice(index, 1);
+    afterOrder.splice(Math.max(minIndex, index - 1), 0, item);
+    return { canBoost: true, beforeOrder: order, afterOrder, fromIndex: index, toIndex: Math.max(minIndex, index - 1), reason: '加速之门可让自己前移1位' };
+  }
+
+  function chargedCannonDelayTargets(sourceCaptainId) {
+    const state = Hexcore2.state;
+    const order = chargedCannonOrder();
+    const protectedIds = originSagePriorityCaptainIds();
+    return order
+      .map((captainId, index) => ({ captain: state.captains.find(item => item.id === captainId), index }))
+      .filter(({ captain, index }) =>
+        captain
+        && captain.id !== sourceCaptainId
+        && index < order.length - 1
+        && !protectedIds.has(captain.id)
+        && !isHungryWaveImmune(captain.id)
+      )
+      .map(item => item.captain);
+  }
+
+  function activateChargedCannonBoost(captainId) {
+    const state = Hexcore2.state;
+    const captain = state.captains.find(item => item.id === captainId);
+    const hexcore = captain && chargedCannonHex(captain.id);
+    if (!captain || !hexcore) return logFail('请选择持有大炮已充能的队长');
+    if (!Hexcore2.selectors.isHexcoreEnabled('charged-cannon')) return logFail('大炮已充能已被规则设置禁用');
+    if (usedThisRound(hexcore)) return logFail('大炮已充能本轮已经处理过');
+    if (state.draft.currentDraw) return logFail('大炮已充能只能在轮次开始、商店打开前使用');
+    const preview = chargedCannonBoostPreview(captain.id);
+    if (!preview.canBoost) return logFail(preview.reason || '当前无法使用加速之门');
+    pushEffect({
+      type: 'move_up_one',
+      captainId: captain.id,
+      sourceCaptainId: captain.id,
+      sourceHexcoreId: 'charged-cannon',
+      priority: 520,
+      reason: `${captain.name} 使用大炮已充能：加速之门，本轮顺位前移1位`,
+    });
+    markUsed(hexcore);
+    if (Hexcore2.turnOrderEngine) {
+      Hexcore2.turnOrderEngine.recompute();
+      state.draft.currentIndex = 0;
+    }
+    Hexcore2.eventStore.append('大炮已充能', `${captain.name} 使用加速之门，本轮顺位前移1位`, 'warn');
+    return { ok: true, beforeOrder: preview.beforeOrder, afterOrder: state.draft.currentOrder };
+  }
+
+  function activateChargedCannonDelay(captainId, targetCaptainId) {
+    const state = Hexcore2.state;
+    const captain = state.captains.find(item => item.id === captainId);
+    const hexcore = captain && chargedCannonHex(captain.id);
+    if (!captain || !hexcore) return logFail('请选择持有大炮已充能的队长');
+    if (!Hexcore2.selectors.isHexcoreEnabled('charged-cannon')) return logFail('大炮已充能已被规则设置禁用');
+    if (usedThisRound(hexcore)) return logFail('大炮已充能本轮已经处理过');
+    if (state.draft.currentDraw) return logFail('大炮已充能只能在轮次开始、商店打开前使用');
+    const target = chargedCannonDelayTargets(captain.id).find(item => item.id === targetCaptainId);
+    if (!target) return logFail('雷霆一击需要选择非自己、非启元保护且非最后顺位的队长');
+    pushEffect({
+      type: 'move_down_one',
+      captainId: target.id,
+      sourceCaptainId: captain.id,
+      sourceHexcoreId: 'charged-cannon',
+      priority: 520,
+      reason: `${captain.name} 使用大炮已充能：雷霆一击，${target.name} 本轮顺位延后一位`,
+    });
+    markUsed(hexcore);
+    if (Hexcore2.turnOrderEngine) {
+      Hexcore2.turnOrderEngine.recompute();
+      state.draft.currentIndex = 0;
+    }
+    Hexcore2.eventStore.append('大炮已充能', `${captain.name} 对 ${target.name} 使用雷霆一击，目标本轮顺位延后一位`, 'warn');
+    return { ok: true, targetCaptainId: target.id };
+  }
+
+  function skipChargedCannon(captainId) {
+    const captain = Hexcore2.state.captains.find(item => item.id === captainId);
+    const hexcore = captain && chargedCannonHex(captain.id);
+    if (!captain || !hexcore) return { ok: false, reason: '请选择持有大炮已充能的队长' };
+    if (usedThisRound(hexcore)) return { ok: false, reason: '本轮已经处理过' };
+    markUsed(hexcore);
+    Hexcore2.eventStore.append('大炮已充能', `${captain.name} 本轮不使用大炮已充能`, 'info');
+    return { ok: true };
   }
 
   function originSageOrderState(captainId) {
@@ -474,7 +720,7 @@
         if (hex.mode === 'passive') return passive(base, '被动待机', hex.desc || '被动效果自动生效。');
         if (usedThisRound(hex)) return blocked(base, '本轮已使用', '该海克斯每轮最多使用1次。');
         if (hex.status === 'used') return { ...base, type: 'used', status: '已使用', reason: '该海克斯次数已消耗。', executable: false };
-        if (remainingSlots <= 0 && !['camp-blockade', 'price-interference', 'vampiric-habit', 'charged-cannon', 'storm-fog', 'origin-sage'].includes(hex.id)) return blocked(base, '队伍已满', '队伍已满员，不能再执行选人相关海克斯。');
+        if (remainingSlots <= 0 && !['camp-blockade', 'price-interference', 'vampiric-habit', 'charged-cannon', 'storm-fog', 'origin-sage', 'last-stand'].includes(hex.id)) return blocked(base, '队伍已满', '队伍已满员，不能再执行选人相关海克斯。');
         if (hex.id === 'camp-scout') {
           if (shopOpen) return blocked(base, '商店已打开', '该海克斯必须在开店前使用。');
           return active(base, '可执行', '下一次商店额外展示1张同阵营可抽卡。');
@@ -510,13 +756,7 @@
             : blocked(base, '候选不足', `可置换非队长选手不足4人，当前 ${candidates.length} 人。`);
         }
         if (hex.id === 'origin-sage') {
-          const orderState = originSageOrderState(captain.id);
-          if (shopOpen) return blocked(base, '商店已打开', '启元必须在本轮商店打开前使用。');
-          if (roundState.purchaseUsed || roundState.skipped) return blocked(base, '本轮已行动', '该队长本轮购买权已处理，不能再调整到第一顺位。');
-          if (orderState.index < 0) return blocked(base, '不在顺位内', '该队长本轮不在可行动顺位内。');
-          if (!orderState.isCurrentOrPending) return blocked(base, '已过行动窗口', '该队长本轮行动窗口已过去。');
-          if (orderState.isFirst) return blocked(base, '已是第一顺位', '当前已处于本轮第一顺位，无需发动。');
-          return active(base, '可执行', '本轮提到第一顺位，原第一及后续队长顺延；优先级高于大炮顺位微调。');
+          return passive(base, '轮次开始自动', '每轮开始自动提到第一顺位；无需裁判手动执行。');
         }
         if (hex.id === 'mystery-box') {
           const targets = Hexcore2.selectors.availableCampPlayers(captain.id)
@@ -554,21 +794,17 @@
         if (hex.id === 'storm-fog') {
           const targets = weatherFogTargets(captain.id);
           return targets.length
-            ? target(base, '需选择队长', '选择1名队长开始，向后影响共3名非使用者队长的下一次商店。', { targetCount: targets.length })
-            : blocked(base, '无可用目标', '当前顺位之后没有可影响的非使用者队长。');
+            ? target(base, '需选择队长', '选择1名队长作为起点，按顺位环形向后影响最多3名仍有购买权且未满员的非使用者队长；刷新不会清除血雾。', { targetCount: targets.length })
+            : blocked(base, '无可用目标', '当前和下一轮没有可影响的非使用者队长。');
         }
         if (hex.id === 'snow-cat') {
-          const targets = openCaptainTargets(captain.id, true);
+          const targets = openCaptainTargets(captain.id, false);
           return targets.length
             ? target(base, '需选择队长', `可影响 ${targets.length} 名未满员队长的下一次商店，显示身份和费用会被打乱。`, { targetCount: targets.length })
             : blocked(base, '无可用目标', '当前没有未满员队长可被影响。');
         }
         if (hex.id === 'charged-cannon') {
-          const targets = cannonTargets(captain.id);
-          const canBoost = Hexcore2.state.draft.currentIndex > 0;
-          return targets.length || canBoost
-            ? target(base, '需选择转换技', `雷霆一击可影响 ${targets.length} 名未行动队长；加速之门可尝试让自己前移1位。`, { targetCount: targets.length + (canBoost ? 1 : 0) })
-            : blocked(base, '无可调整顺位', '当前顺位已无法继续调整。');
+          return passive(base, '轮初决策', '只在每轮开始前弹窗询问；加速之门和雷霆一击本轮二选一。');
         }
         if (hex.id === 'heavenly-descent') {
           return passive(base, '等待窗口', '任意队长确认购买后的10秒内，页面顶部会出现神兵天降发动入口。');
@@ -588,6 +824,7 @@
       if (usedThisRound(hexcore)) return logFail(`【${hexcore.name}】本轮已经使用过`);
       if (!Hexcore2.selectors.isHexcoreEnabled(hexcore.id)) return logFail(`【${hexcore.name}】已被规则设置禁用`);
       if (hexcore.id === 'heavenly-descent') return logFail('神兵天降需在购买成功后的顶部10秒发动窗口中使用');
+      if (hexcore.id === 'charged-cannon') return logFail('大炮已充能只能在轮次开始前的转换技弹窗中使用');
 
       if (hexcore.id === 'camp-scout') {
         if (isShopOpenFor(captain.id)) return logFail('阵营侦察必须在开店前使用');
@@ -647,6 +884,19 @@
         state.draft.pickedThisTurn = true;
         state.draft.currentDraw = null;
         Hexcore2.eventStore.append('稳健补强', `${captain.name} 从${floor}费及以上最低可用池获得「${player.name}」`, 'success');
+        markUsed(hexcore);
+        return {
+          ok: true,
+          advanceTurn: true,
+          reveal: {
+            title: '稳健补强入队揭示',
+            source: hexcore.name,
+            captainId: captain.id,
+            playerIds: [player.id],
+            summary: `${captain.name} 从${floor}费及以上最低可用池获得队员`,
+            detail: '该海克斯已消耗本轮购买权，确认后进入下一位队长。',
+          },
+        };
       }
 
       if (hexcore.id === 'vampiric-habit') {
@@ -655,11 +905,37 @@
           .sort((a, b) => Number(b.economy.gold) - Number(a.economy.gold))
           .slice(0, 3);
         if (!targets.length) return logFail('当前没有可吸取金币的队长');
+        const drained = targets.map(target => ({
+          captainId: target.id,
+          captainName: target.name,
+          beforeGold: Number(target.economy.gold) || 0,
+          amount: 1,
+        }));
         targets.forEach(target => {
           target.economy.gold -= 1;
           captain.economy.gold += 1;
         });
         Hexcore2.eventStore.append('吸血习性', `${captain.name} 从 ${targets.map(item => item.name).join('、')} 处共获得 ${targets.length} 金币`, 'warn');
+        markUsed(hexcore);
+        Hexcore2.eventStore.append('海克斯激活', `${captain.name} 使用【${hexcore.name}】`, 'info');
+        return {
+          ok: true,
+          economyReveal: {
+            title: '吸血习性结算',
+            source: hexcore.name,
+            captainId: captain.id,
+            total: drained.reduce((sum, item) => sum + item.amount, 0),
+            rows: drained.map(item => ({
+              captainId: item.captainId,
+              name: item.captainName,
+              amount: item.amount,
+              beforeGold: item.beforeGold,
+              afterGold: Math.max(0, item.beforeGold - item.amount),
+            })),
+            summary: `${captain.name} 从 ${targets.map(item => item.name).join('、')} 处获得金币`,
+            detail: `共获得 ${targets.length} 金币，已实时加入当前队长资金。`,
+          },
+        };
       }
 
       if (hexcore.id === 'last-stand') {
@@ -716,23 +992,7 @@
       }
 
       if (hexcore.id === 'origin-sage') {
-        const roundState = currentRoundState(captain.id);
-        const orderState = originSageOrderState(captain.id);
-        if (isShopOpenFor(captain.id)) return logFail('神秘贤者·启元必须在商店打开前使用');
-        if (roundState.purchaseUsed || roundState.skipped) return logFail('本轮购买权已处理，不能再使用神秘贤者·启元');
-        if (orderState.index < 0) return logFail('当前队长不在本轮可行动顺位内');
-        if (!orderState.isCurrentOrPending) return logFail('当前队长本轮行动窗口已过去，不能再提到第一顺位');
-        if (orderState.isFirst) return logFail('当前队长已经是本轮第一顺位，无需使用神秘贤者·启元');
-        pushEffect({
-          type: 'move_first',
-          captainId: captain.id,
-          sourceCaptainId: captain.id,
-          priority: 540,
-          reason: `${captain.name} 使用神秘贤者·启元，本轮提到第一顺位，原第一及后续顺延`,
-        });
-        Hexcore2.turnOrderEngine.recompute();
-        state.draft.currentIndex = Math.max(0, state.draft.currentOrder.indexOf(captain.id));
-        Hexcore2.eventStore.append('神秘贤者·启元', `${captain.name} 本轮提到第一顺位`, 'warn');
+        return logFail('神秘贤者·启元在轮次开始自动生效，无需手动执行');
       }
 
       if (hexcore.id === 'mystery-box') {
@@ -754,6 +1014,19 @@
         state.draft.pickedThisTurn = true;
         state.draft.currentDraw = null;
         Hexcore2.eventStore.append('神秘贤者·盲盒', `${captain.name} 支付3金币，盲抽获得「${player.name}」`, 'success');
+        markUsed(hexcore);
+        return {
+          ok: true,
+          advanceTurn: true,
+          reveal: {
+            title: '盲盒入队揭示',
+            source: hexcore.name,
+            captainId: captain.id,
+            playerIds: [player.id],
+            summary: `${captain.name} 支付3金币，盲抽获得队员`,
+            detail: '该海克斯已消耗本轮购买权，确认后进入下一位队长。',
+          },
+        };
       }
 
       if (hexcore.id === 'transmute-gold' || hexcore.id === 'transmute-prismatic') {
@@ -771,6 +1044,19 @@
         state.draft.pickedThisTurn = true;
         state.draft.currentDraw = null;
         Hexcore2.eventStore.append(hexcore.name, `${captain.name} 免费质变，从${tier}费池获得「${player.name}」`, 'success');
+        markUsed(hexcore);
+        return {
+          ok: true,
+          advanceTurn: true,
+          reveal: {
+            title: '质变入队揭示',
+            source: hexcore.name,
+            captainId: captain.id,
+            playerIds: [player.id],
+            summary: `${captain.name} 免费质变，从${tier}费池获得队员`,
+            detail: '该海克斯已消耗本轮购买权，确认后进入下一位队长。',
+          },
+        };
       }
 
       if (hexcore.id === 'decompose-knowledge') {
@@ -804,12 +1090,26 @@
         state.draft.pickedThisTurn = true;
         state.draft.currentDraw = null;
         Hexcore2.eventStore.append('知识来源于分解', `${captain.name} 消耗3层解构，自选「${targetPlayer.name}」入队`, 'success');
+        return {
+          ok: true,
+          advanceTurn: true,
+          reveal: {
+            title: '知识来源于分解入队揭示',
+            source: hexcore.name,
+            captainId: captain.id,
+            playerIds: [targetPlayer.id],
+            summary: `${captain.name} 消耗3层解构，自选队员入队`,
+            detail: sacrifice
+              ? `已分解「${sacrifice.name}」抵扣 ${offset} 金币；确认后进入下一位队长。`
+              : '该海克斯已消耗本轮购买权，确认后进入下一位队长。',
+          },
+        };
       }
 
       if (hexcore.id === 'stuck-together') {
         if (state.draft.round >= state.draft.maxRounds) return logFail('最后一轮无法使用【和我困在一起】');
         const targetPlayer = stuckTogetherTargets(captain.id).find(player => player.id === options.targetPlayerId || player.id === options.firstPlayerId);
-        if (!targetPlayer) return logFail('请选择一名未被选走的可选选手');
+        if (!targetPlayer) return logFail('请选择一名同阵营且未被选走的可选选手');
         pushEffect({
           type: 'stuck_together',
           captainId: captain.id,
@@ -823,21 +1123,22 @@
 
       if (hexcore.id === 'storm-fog') {
         const targets = weatherFogTargetChain(captain.id, options.targetCaptainId || options.firstCaptainId);
-        if (!targets.length) return logFail('请选择当前顺位之后可影响的非使用者队长');
-        targets.forEach(target => {
+        if (!targets.length) return logFail('请选择当前或下一轮仍有购买权且未满员的非使用者队长');
+        targets.forEach(({ captain: target, triggerRound }) => {
           pushEffect({
             type: 'weather_fog',
             captainId: target.id,
             sourceCaptainId: captain.id,
-            reason: `${captain.name} 使用骤雨 血雾 清风，${target.name} 下一次商店进入天气迷雾`,
+            triggerRound,
+            reason: `${captain.name} 使用骤雨 血雾 清风，${target.name} 第 ${triggerRound} 轮下一次商店进入天气迷雾`,
           });
         });
-        Hexcore2.eventStore.append('骤雨 血雾 清风', `${captain.name} 使 ${targets.map(item => item.name).join('、')} 的下一次商店进入天气迷雾`, 'warn');
+        Hexcore2.eventStore.append('骤雨 血雾 清风', `${captain.name} 使 ${targets.map(item => `${item.captain.name}（第${item.triggerRound}轮）`).join('、')} 的下一次商店进入天气迷雾；刷新不会清除血雾`, 'warn');
       }
 
       if (hexcore.id === 'snow-cat') {
-        const target = openCaptainTargets(captain.id, true).find(item => item.id === (options.targetCaptainId || options.firstCaptainId));
-        if (!target) return logFail('雪定饿的喵需要选择一名未满员队长');
+        const target = openCaptainTargets(captain.id, false).find(item => item.id === (options.targetCaptainId || options.firstCaptainId));
+        if (!target) return logFail('雪定饿的喵需要选择一名非自己的未满员队长');
         pushEffect({
           type: 'snow_cat_shuffle',
           captainId: target.id,
@@ -845,36 +1146,6 @@
           reason: `${captain.name} 对 ${target.name} 使用雪定饿的喵，目标下一次商店显示信息被打乱`,
         });
         Hexcore2.eventStore.append('雪定饿的喵', `${captain.name} 影响 ${target.name} 的下一次商店，购买后揭示真实选手`, 'warn');
-      }
-
-      if (hexcore.id === 'charged-cannon') {
-        const skill = options.firstCaptainId || options.mode || 'delay';
-        if (skill === 'boost') {
-          if (state.draft.currentIndex <= 0) return logFail('当前已经是本轮最前顺位，无法继续前移');
-          pushEffect({
-            type: 'move_up_one',
-            captainId: captain.id,
-            sourceCaptainId: captain.id,
-            priority: 520,
-            reason: `${captain.name} 使用大炮已充能：加速之门，本轮顺位前移`,
-          });
-          Hexcore2.turnOrderEngine.recompute();
-          state.draft.currentIndex = state.draft.currentOrder.indexOf(captain.id);
-          Hexcore2.eventStore.append('大炮已充能', `${captain.name} 使用加速之门，本轮顺位前移`, 'warn');
-        } else {
-          const target = cannonTargets(captain.id).find(item => item.id === (options.secondCaptainId || options.targetCaptainId));
-          if (!target) return logFail('雷霆一击需要选择一名本轮尚未行动且未满员的队长');
-          pushEffect({
-            type: 'move_down_one',
-            captainId: target.id,
-            sourceCaptainId: captain.id,
-            priority: 520,
-            reason: `${captain.name} 使用大炮已充能：雷霆一击，${target.name} 本轮顺位延后一位`,
-          });
-          Hexcore2.turnOrderEngine.recompute();
-          state.draft.currentIndex = state.draft.currentOrder.indexOf(captain.id);
-          Hexcore2.eventStore.append('大炮已充能', `${captain.name} 对 ${target.name} 使用雷霆一击，目标本轮顺位延后一位`, 'warn');
-        }
       }
 
       if (hexcore.id !== 'decompose-knowledge') markUsed(hexcore);
@@ -893,6 +1164,13 @@
     weatherFogTargets,
     openCaptainTargets,
     cannonTargets,
+    chargedCannonOrder,
+    chargedCannonPendingOwners,
+    chargedCannonBoostPreview,
+    chargedCannonDelayTargets,
+    activateChargedCannonBoost,
+    activateChargedCannonDelay,
+    skipChargedCannon,
     targetableCaptains,
     targetConflictReasons(sourceCaptainId) {
       const state = Hexcore2.state;
@@ -915,6 +1193,8 @@
         .filter(Boolean);
     },
     isHungryWaveImmune,
+    activeHungryWave,
+    clearWeatherFogForCaptain,
 
     effectStatusForCaptain(captainId) {
       const effects = Hexcore2.state.draft.runtimeEffects || [];
@@ -1017,6 +1297,57 @@
       return { ok: true, created: true, effect };
     },
 
+    ensureOriginSageForRound(round = Hexcore2.state.draft.round) {
+      const state = Hexcore2.state;
+      if (state.settings && state.settings.economyMode !== 'gold_shop') return { ok: false, reason: '非金币模式' };
+      const workflow = Hexcore2.selectors.workflowStatus ? Hexcore2.selectors.workflowStatus() : {};
+      if (!workflow.playersDraftReady) return { ok: false, reason: '前置流程未完成' };
+      if (Number(round) !== Number(state.draft.round)) return { ok: false, reason: '轮次不匹配' };
+      if (Number(state.draft.currentIndex) !== 0 || state.draft.currentDraw || state.draft.pickedThisTurn) {
+        return { ok: false, reason: '不是轮次开始窗口' };
+      }
+      if (originSageAlreadyCreated(round)) return { ok: true, existing: true };
+      const order = state.draft.currentOrder && state.draft.currentOrder.length
+        ? state.draft.currentOrder
+        : state.draft.baseOrder;
+      const candidates = order
+        .map(captainId => state.captains.find(captain => captain.id === captainId))
+        .filter(captain => {
+          if (!captain || !hasHexcore(captain.id, 'origin-sage') || !hasOpenSlot(captain.id)) return false;
+          const hexcore = (state.hexcoreAssignments[captain.id] || []).find(hex => hex.id === 'origin-sage');
+          const roundState = Hexcore2.economyEngine.roundState(captain.id, round);
+          return hexcore
+            && !usedThisRound(hexcore)
+            && !roundState.purchaseUsed
+            && !roundState.skipped
+            && order.indexOf(captain.id) > 0;
+        });
+      if (!candidates.length) return { ok: false, reason: '没有需要调整的启元持有者' };
+      candidates.slice().reverse().forEach((captain, index) => {
+        const hexcore = (state.hexcoreAssignments[captain.id] || []).find(hex => hex.id === 'origin-sage');
+        pushEffect({
+          type: 'move_first',
+          sourceHexcoreId: 'origin-sage',
+          captainId: captain.id,
+          sourceCaptainId: captain.id,
+          priority: 540 + index,
+          reason: `${captain.name} 的神秘贤者·启元在轮次开始时生效，本轮提到第一顺位，原第一及后续顺延`,
+        });
+        if (hexcore) markUsed(hexcore);
+      });
+      if (Hexcore2.turnOrderEngine) {
+        Hexcore2.turnOrderEngine.recompute();
+        state.draft.currentIndex = 0;
+      }
+      Hexcore2.eventStore.append(
+        '神秘贤者·启元',
+        `第 ${round} 轮开始自动生效：${candidates.map(captain => captain.name).join('、')} 提到第一顺位队列`,
+        'warn',
+        { captainIds: candidates.map(captain => captain.id), round }
+      );
+      return { ok: true, created: true, captainIds: candidates.map(captain => captain.id) };
+    },
+
     autoAssignBeforeDraw(captainId = currentCaptain() && currentCaptain().id) {
       const captain = Hexcore2.state.captains.find(item => item.id === captainId);
       const wave = activeHungryWave();
@@ -1047,7 +1378,19 @@
       Hexcore2.state.draft.pickedThisTurn = true;
       Hexcore2.state.draft.currentDraw = null;
       Hexcore2.eventStore.append('和我困在一起', `${captain.name} 的目标「${player.name}」仍在卡池，已直接加入队伍`, 'success');
-      return { handled: true, assigned: true, player };
+      return {
+        handled: true,
+        assigned: true,
+        player,
+        reveal: {
+          title: '延迟入队揭示',
+          source: '和我困在一起',
+          captainId: captain.id,
+          playerIds: [player.id],
+          summary: `${captain.name} 的锁定目标仍在卡池，已自动入队`,
+          detail: '该延迟效果已结算并消耗本轮购买权，确认后进入下一位队长。',
+        },
+      };
     },
     resolveHungryWaveAfterPurchase(buyerId, playerId, paidPrice) {
       const state = Hexcore2.state;
@@ -1074,7 +1417,7 @@
           roll,
           checkedAt: new Date().toISOString(),
         });
-        Hexcore2.eventStore.append('海浪判定失败', `${hungryCaptain.name} 的【海浪，我没吃饭】未夺取 ${buyer.name} 刚购买的「${player.name}」（本次概率 ${Math.round((1 / remaining) * 100)}%）`, 'info', { sourceCaptainId: hungryCaptain.id, buyerId: buyer.id, playerId: player.id, remaining, roll });
+        Hexcore2.eventStore.append('海浪判定未命中', `${hungryCaptain.name} 的【海浪，我没吃饭】已判定 ${buyer.name} 刚购买的「${player.name}」：本次未命中，触发概率 ${Math.round((1 / remaining) * 100)}%，后续购买继续判定`, 'warn', { sourceCaptainId: hungryCaptain.id, buyerId: buyer.id, playerId: player.id, remaining, roll });
         return { handled: false, rolled: true, success: false };
       }
       const hungryCamp = captainCamp(hungryCaptain.id);
@@ -1132,7 +1475,21 @@
         'warn',
         { sourceCaptainId: hungryCaptain.id, buyerId: buyer.id, playerId: player.id, price: effect.appliedPrice, compensation }
       );
-      return { handled: true, captainId: hungryCaptain.id, buyerId: buyer.id, playerId: player.id, price: effect.appliedPrice };
+      return {
+        handled: true,
+        captainId: hungryCaptain.id,
+        buyerId: buyer.id,
+        playerId: player.id,
+        price: effect.appliedPrice,
+        reveal: {
+          title: '海浪夺取入队揭示',
+          source: '海浪，我没吃饭',
+          captainId: hungryCaptain.id,
+          playerIds: [player.id],
+          summary: `${hungryCaptain.name} 夺取了 ${buyer.name} 刚购买的队员`,
+          detail: `${buyer.name} 已返还 ${effect.appliedPrice} 金币、1次免费刷新和购买权。`,
+        },
+      };
     },
     resolveHungryWaveRoundEnd(round = Hexcore2.state.draft.round) {
       const effects = (Hexcore2.state.draft.runtimeEffects || []).filter(effect =>
@@ -1179,7 +1536,19 @@
           'success',
           { sourceCaptainId: captain.id, playerId: player.id, rewardRound }
         );
-        resolved.push({ effect, assigned: true, playerId: player.id });
+        resolved.push({
+          effect,
+          assigned: true,
+          playerId: player.id,
+          reveal: {
+            title: '海浪轮末补偿揭示',
+            source: '海浪，我没吃饭',
+            captainId: captain.id,
+            playerIds: [player.id],
+            summary: `${captain.name} 获得海浪轮末补偿队员`,
+            detail: `按第 ${rewardRound} 轮金币商店概率，从同阵营可用卡池随机获得。`,
+          },
+        });
       });
       return { handled: effects.length > 0, resolved };
     },

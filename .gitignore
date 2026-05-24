@@ -1,0 +1,6 @@
+output/
+tmp/
+test-results/
+scripts/__pycache__/
+__pycache__/
+public/assets/11/

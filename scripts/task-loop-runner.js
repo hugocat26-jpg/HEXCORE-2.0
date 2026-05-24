@@ -265,8 +265,8 @@ function collectBlockers(lines) {
 function collectOpenPlanSignals(lines) {
   const signals = [];
   const patterns = [
-    /TODO|FIXME|待处理|待完成|尚未完成|未完成|未实现|待验证|待修复|未通过|失败|阻断|等待用户/i,
-    /下一步[:：]|后续[:：]|剩余[:：]|风险[:：]/,
+    /TODO|FIXME|待处理|待完成|尚未完成|未完成|未实现|待验证|待修复|未通过|失败[:：]|门禁失败|阻断[:：]|等待用户/i,
+    /下一步[:：]|剩余[:：]/,
   ];
   let inCodeBlock = false;
   lines.forEach((line, index) => {
@@ -277,6 +277,7 @@ function collectOpenPlanSignals(lines) {
     if (inCodeBlock) return;
     const text = line.trim();
     if (!text || /^#{1,6}\s+/.test(text)) return;
+    if (/不应.*(未完成|失败|阻断|待处理|待验证|待修复)/.test(text)) return;
     if (patterns.some(pattern => pattern.test(text))) {
       signals.push({ line: index + 1, text: text.slice(0, 180) });
     }

@@ -35,6 +35,37 @@ function Get-ContentType {
   }
 }
 
+function Resolve-StaticFile {
+  param([string]$RequestPath)
+
+  if ([string]::IsNullOrWhiteSpace($RequestPath)) {
+    $RequestPath = 'index.html'
+  }
+  $NormalizedRequestPath = $RequestPath.Replace('\', '/')
+  if ($NormalizedRequestPath.StartsWith('assets/')) {
+    $FullPath = [System.IO.Path]::GetFullPath((Join-Path (Join-Path $Root 'public') $NormalizedRequestPath))
+    $AssetRoot = [System.IO.Path]::GetFullPath((Join-Path $Root 'public\assets')).TrimEnd('\') + '\'
+    if (-not $FullPath.StartsWith($AssetRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+      return $null
+    }
+  } else {
+    $FullPath = [System.IO.Path]::GetFullPath((Join-Path $Root $NormalizedRequestPath))
+    $RootPath = [System.IO.Path]::GetFullPath($Root).TrimEnd('\') + '\'
+    if (-not $FullPath.StartsWith($RootPath, [System.StringComparison]::OrdinalIgnoreCase)) {
+      return $null
+    }
+    $RelativePath = $FullPath.Substring($RootPath.Length).Replace('\', '/')
+    if ($RelativePath -ne 'index.html' -and -not $RelativePath.StartsWith('src/')) {
+      return $null
+    }
+  }
+
+  if (-not (Test-Path -LiteralPath $FullPath -PathType Leaf)) {
+    return $null
+  }
+  return $FullPath
+}
+
 $Port = $PreferredPort
 while ($Port -lt ($PreferredPort + 40) -and -not (Test-PortFree -Port $Port)) {
   $Port += 1
@@ -64,13 +95,8 @@ try {
   while ($Listener.IsListening) {
     $Context = $Listener.GetContext()
     $RequestPath = [System.Uri]::UnescapeDataString($Context.Request.Url.AbsolutePath.TrimStart('/'))
-    if ([string]::IsNullOrWhiteSpace($RequestPath)) {
-      $RequestPath = 'index.html'
-    }
-
-    $FullPath = [System.IO.Path]::GetFullPath((Join-Path $Root $RequestPath))
-    $RootPath = [System.IO.Path]::GetFullPath($Root).TrimEnd('\') + '\'
-    if (-not $FullPath.StartsWith($RootPath, [System.StringComparison]::OrdinalIgnoreCase) -or -not (Test-Path -LiteralPath $FullPath -PathType Leaf)) {
+    $FullPath = Resolve-StaticFile -RequestPath $RequestPath
+    if (-not $FullPath) {
       $Context.Response.StatusCode = 404
       $Body = [System.Text.Encoding]::UTF8.GetBytes('Not Found')
       $Context.Response.OutputStream.Write($Body, 0, $Body.Length)

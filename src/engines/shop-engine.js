@@ -70,6 +70,7 @@
   function runtimeEffectsFor(captainId, type) {
     return Hexcore2.state.draft.runtimeEffects.filter(effect =>
       effect.type === type && effect.captainId === captainId && !effect.consumed
+      && (!effect.triggerRound || Number(effect.triggerRound) <= Number(Hexcore2.state.draft.round))
     );
   }
 
@@ -121,8 +122,11 @@
   }
 
   function applyWeatherFog(captainId, appliedEffects) {
-    const effect = consumeOneEffect(captainId, 'weather_fog');
-    if (effect) trackApplied(appliedEffects, effect, { appliedCaptainId: captainId });
+    const effect = runtimeEffectsFor(captainId, 'weather_fog')[0];
+    if (!effect) return;
+    effect.appliedRound = Hexcore2.state.draft.round;
+    effect.appliedAt = new Date().toISOString();
+    trackApplied(appliedEffects, effect, { appliedCaptainId: captainId });
   }
 
   function applySnowCatShuffle(captainId, cards, appliedEffects) {
@@ -134,7 +138,6 @@
       cards.forEach((card, index) => {
         const displayCard = displayed[index];
         card.displayPlayerId = displayCard.playerId;
-        card.price = Math.max(1, Number(displayCard.tier) || Number(displayCard.price) || 1);
         card.snowCatShuffled = true;
       });
       trackApplied(appliedEffects, effect, {

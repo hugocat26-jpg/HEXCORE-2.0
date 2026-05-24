@@ -1,7 +1,5 @@
 (function initIntegrityService(global) {
   const Hexcore2 = global.Hexcore2 || (global.Hexcore2 = {});
-  const LEGAL_CROSS_CAMP_SOURCES = new Set(['stuck_together']);
-
   function markPlayerAvailable(player) {
     if (!player) return;
     player.status = 'available';
@@ -36,7 +34,7 @@
         const player = Hexcore2.state.players.find(item => item.id === playerId);
         if (!player) addIssue('缺失选手', `${captain.name} 包含不存在的选手 ${playerId}`);
         if (player && player.teamId !== captain.id) addIssue('重复归属', `${player.name} 的归属字段与队伍列表不一致`);
-        if (player && captainCamp && player.camp !== captainCamp && !LEGAL_CROSS_CAMP_SOURCES.has(player.teamBypassReason)) {
+        if (player && captainCamp && player.camp !== captainCamp) {
           addIssue('跨阵营', `${captain.name} 包含${Hexcore2.selectors.campLabel(player.camp)}选手 ${player.name}`);
         }
       });
@@ -92,7 +90,7 @@
         const player = Hexcore2.state.players.find(item => item.id === playerId);
         const duplicatedElsewhere = firstOwner.get(playerId) !== captain.id;
         const duplicatedInCurrentTeam = kept.includes(playerId);
-        const illegalCrossCamp = Boolean(player && captainCamp && player.camp !== captainCamp && !LEGAL_CROSS_CAMP_SOURCES.has(player.teamBypassReason));
+        const illegalCrossCamp = Boolean(player && captainCamp && player.camp !== captainCamp);
         if (!player || player.status === 'disabled' || duplicatedElsewhere || duplicatedInCurrentTeam || illegalCrossCamp || kept.length >= capacity) {
           removedCount += 1;
           if (player && player.teamId === captain.id && player.status !== 'disabled' && !duplicatedInCurrentTeam) markPlayerAvailable(player);

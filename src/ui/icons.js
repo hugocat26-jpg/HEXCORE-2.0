@@ -14,6 +14,7 @@
     cube: '<path d="M21 16V8l-9-5-9 5v8l9 5z"/><path d="M3.3 7.7 12 13l8.7-5.3M12 22V13"/>',
     pick: '<path d="m9 12 2 2 4-5"/><circle cx="12" cy="12" r="10"/>',
     pause: '<path d="M8 5v14M16 5v14"/>',
+    play: '<path d="M8 5v14l11-7z"/>',
     undo: '<path d="M9 14 4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-2"/>',
     refresh: '<path d="M21 12a9 9 0 0 1-15.5 6.2"/><path d="M3 12A9 9 0 0 1 18.5 5.8"/><path d="M18 2v4h-4M6 22v-4h4"/>',
     edit: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>',

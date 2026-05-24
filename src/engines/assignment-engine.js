@@ -1,7 +1,6 @@
 (function initAssignmentEngine(global) {
   const Hexcore2 = global.Hexcore2 || (global.Hexcore2 = {});
-  const goldAllowedSources = new Set(['gold_shop_purchase', 'final_random_fill', 'manual_backfill', 'steady_reinforce', 'decompose_knowledge', 'stuck_together', 'mystery_box', 'transmute_gold', 'transmute_prismatic', 'hungry_wave']);
-  const crossCampAllowedSources = new Set(['stuck_together']);
+  const goldAllowedSources = new Set(['gold_shop_purchase', 'final_random_fill', 'manual_backfill', 'steady_reinforce', 'decompose_knowledge', 'stuck_together', 'mystery_box', 'transmute_gold', 'transmute_prismatic', 'hungry_wave', 'heavenly_descent']);
 
   function captainCamp(captainId) {
     return Hexcore2.selectors.captainCamp ? Hexcore2.selectors.captainCamp(captainId) : '';
@@ -93,7 +92,7 @@
       const player = state.players.find(item => item.id === playerId);
       if (!captain || !player || player.status !== 'available') return false;
       const camp = captainCamp(captainId);
-      if ((!camp || player.camp !== camp) && !crossCampAllowedSources.has(source)) {
+      if (!camp || player.camp !== camp) {
         Hexcore2.eventStore.append('入队失败', `${captain ? captain.name : '目标队伍'} 不能接收异阵营选手「${player ? player.name : playerId}」`, 'warn', { source, playerId });
         return false;
       }
@@ -107,11 +106,7 @@
       captain.team.push(player.id);
       player.status = 'drafted';
       player.teamId = captainId;
-      if (crossCampAllowedSources.has(source) && camp && player.camp !== camp) {
-        player.teamBypassReason = source;
-      } else {
-        delete player.teamBypassReason;
-      }
+      delete player.teamBypassReason;
       Hexcore2.eventStore.append('选手入队', `${captain.name} 选择了选手「${player.name}」加入队伍（${captain.team.length}/${capacity}）`, 'success', { source });
       if (Hexcore2.hexcoreEngine && source !== 'lock_contract_pair') {
         Hexcore2.hexcoreEngine.resolveLockContracts(captainId, player.id);

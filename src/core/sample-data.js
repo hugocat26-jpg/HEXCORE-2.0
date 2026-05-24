@@ -19,16 +19,16 @@
     { id: 'ballroom-queen', name: '舞会女王', type: 'violet', category: 'shop_control', tags: ['shop', 'high_tier'], mode: 'passive', uses: 0, desc: '本轮选人商店优先只抽3-5费卡；若同阵营3-5费不足以填满商店，则降级补足。' },
     { id: 'photographer', name: '摄影艺术家', type: 'violet', category: 'shop_control', tags: ['shop', 'refresh'], mode: 'passive', uses: 0, desc: '每轮拥有多一次免费刷新商店，刷新不累计。' },
     { id: 'wise-benevolence', name: '贤者的博爱', type: 'violet', category: 'economy', tags: ['gold', 'refresh'], mode: 'passive', uses: 0, desc: '每个你的选人阶段，获得+n金币和+1可累计刷新次数，n为当前轮数。' },
-    { id: 'origin-sage', name: '神秘贤者·启元', type: 'violet', category: 'order_response', tags: ['order', 'economy'], mode: 'manual', uses: 0, maxUsesPerRound: 1, desc: '获得时初始资金+2；每轮可选择是否提到第一顺位，原第一及后续顺延。' },
+    { id: 'origin-sage', name: '神秘贤者·启元', type: 'violet', category: 'order_response', tags: ['order', 'economy'], mode: 'manual', uses: 0, maxUsesPerRound: 1, desc: '获得时初始资金+2；每轮开始自动提到第一顺位，原第一及后续顺延。' },
     { id: 'mystery-box', name: '神秘贤者·盲盒', type: 'violet', category: 'roster_replace', tags: ['random', 'direct_roster'], mode: 'manual', uses: 1, desc: '支付3金币，从同阵营2-5费可选选手中随机盲抽1人，消耗本轮购买权。' },
     { id: 'transmute-gold', name: '质变：黄金阶', type: 'amber', category: 'roster_replace', tags: ['direct_roster', 'tier4'], mode: 'manual', uses: 1, desc: '商店打开前免费发动，从同阵营4费可选池随机获得1人，消耗本轮购买权。' },
     { id: 'transmute-prismatic', name: '质变：棱彩阶', type: 'violet', category: 'roster_replace', tags: ['direct_roster', 'tier5'], mode: 'manual', uses: 1, desc: '商店打开前免费发动，从同阵营5费可选池随机获得1人，消耗本轮购买权。' },
     { id: 'decompose-knowledge', name: '知识来源于分解', type: 'violet', category: 'roster_replace', tags: ['target', 'economy', 'direct_roster'], mode: 'manual', uses: 0, needsTarget: 'player', desc: '每个你的选人阶段获得1层解构，最多3层；满3层后可消耗全部层数自选高费选手，金币不足时可分解队内2/3费队员抵扣。' },
-    { id: 'stuck-together', name: '和我困在一起', type: 'violet', category: 'roster_replace', tags: ['target', 'delay', 'direct_roster'], mode: 'manual', uses: 1, needsTarget: 'player', desc: '指定一名未被选走的可选选手。若到你的下一轮选人开始时该选手仍在卡池，直接加入你的队伍并消耗本轮购买权。' },
-    { id: 'storm-fog', name: '骤雨 血雾 清风', type: 'violet', category: 'disruption', tags: ['target', 'shop', 'weather'], mode: 'manual', uses: 1, needsTarget: 'captain', desc: '选择一位队长，该队长以及接下来的两位队长商店进入天气迷雾状态；不影响使用者，自动跳过使用者顺延。' },
-    { id: 'snow-cat', name: '雪定饿的喵', type: 'violet', category: 'disruption', tags: ['target', 'shop', 'blind'], mode: 'manual', uses: 1, needsTarget: 'captain', desc: '对任意队长使用。目标下一次商店显示选手信息被打乱，购买后才揭示真实选手，费用按显示卡牌计算。' },
+    { id: 'stuck-together', name: '和我困在一起', type: 'violet', category: 'roster_replace', tags: ['target', 'delay', 'direct_roster'], mode: 'manual', uses: 1, needsTarget: 'player', desc: '指定一名同阵营且未被选走的可选选手。若到你的下一轮选人开始时该选手仍在卡池，直接加入你的队伍并消耗本轮购买权；跨阵营目标不可选择。' },
+    { id: 'storm-fog', name: '骤雨 血雾 清风', type: 'violet', category: 'disruption', tags: ['target', 'shop', 'weather'], mode: 'manual', uses: 1, needsTarget: 'captain', desc: '选择一位队长作为起点，按顺位环形向后影响最多3名仍有购买权且未满员的非使用者队长；不足3名时顺延到下一轮。刷新商店不会清除血雾。' },
+    { id: 'snow-cat', name: '雪定饿的喵', type: 'violet', category: 'disruption', tags: ['target', 'shop', 'blind'], mode: 'manual', uses: 1, needsTarget: 'captain', desc: '对非自己的任意队长使用。目标下一次商店显示选手信息被打乱，购买后才揭示真实选手，费用按显示卡牌计算。' },
     { id: 'charged-cannon', name: '大炮已充能', type: 'violet', category: 'order_response', tags: ['target', 'order'], mode: 'manual', uses: 0, maxUsesPerRound: 1, needsTarget: 'captain', desc: '转换技。雷霆一击：选择一名未行动队长，使其本轮顺位延后一位；加速之门：将自己本轮顺位提升一位。每轮最多使用1次。' },
-    { id: 'heavenly-descent', name: '神兵天降', type: 'violet', category: 'order_response', tags: ['response', 'refund'], mode: 'manual', uses: 1, desc: '每局1次。任意队长刚确认购买后的10秒内可发动，退回该选手并返还费用，该队长本轮末尾获得补偿回合。' },
+    { id: 'heavenly-descent', name: '神兵天降', type: 'violet', category: 'order_response', tags: ['response', 'steal', 'refund'], mode: 'manual', uses: 1, desc: '每局1次。其它队长刚确认购买后的10秒内可发动，但只能夺取同阵营选手；自己购买和跨阵营目标不可发动。成功时将该选手从原队伍移除，发动者未满员则入队并跳过下一轮选人，满员则回到卡池；原购买队长返还金币和购买权，不返还刷新次数。' },
   ];
 
   Hexcore2.sampleData = {

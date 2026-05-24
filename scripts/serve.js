@@ -32,9 +32,22 @@ function resolveRequestPath(url) {
     const parsed = new URL(url, `http://${host}:${port}`);
     const pathname = decodeURIComponent(parsed.pathname);
     const relativePath = pathname === '/' ? 'index.html' : pathname.slice(1);
-    const filePath = path.resolve(root, relativePath);
+    const normalizedRelativePath = relativePath.replace(/\\/g, '/');
+    const isAsset = normalizedRelativePath.startsWith('assets/');
+    const filePath = isAsset
+      ? path.resolve(root, 'public', normalizedRelativePath)
+      : path.resolve(root, relativePath);
     const relativeToRoot = path.relative(root, filePath);
     if (relativeToRoot.startsWith('..') || path.isAbsolute(relativeToRoot)) return null;
+    const relativeForPolicy = relativeToRoot.replace(/\\/g, '/');
+    const assetRoot = path.resolve(root, 'public', 'assets');
+    const relativeToAssetRoot = path.relative(assetRoot, filePath);
+    const insideAssetRoot = relativeToAssetRoot === ''
+      || (!relativeToAssetRoot.startsWith('..') && !path.isAbsolute(relativeToAssetRoot));
+    const allowed = relativeForPolicy === 'index.html'
+      || relativeForPolicy.startsWith('src/')
+      || (isAsset && insideAssetRoot);
+    if (!allowed) return null;
     return filePath;
   } catch (error) {
     return null;
