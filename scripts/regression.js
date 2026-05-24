@@ -1591,7 +1591,21 @@ function testNewHexcores() {
   snowRestock.actions.drawCards();
   const snowRestockDraw = snowRestock.state.draft.currentDraw;
   assert(snowRestockDraw.appliedEffects.some(effect => effect.type === 'snow_cat_shuffle'), '测试前提：加急调货前商店应受雪定饿的喵影响');
-  assert(snowRestock.hexcoreEngine.activate('urgent-restock', { shopCardIndex: 0 }).ok, '加急调货应可替换被雪定饿的喵扰乱的商店卡');
+  let snowRestockShown = new Set(snowRestockDraw.cards.map(card => card.playerId));
+  let snowRestockIndex = snowRestockDraw.cards.findIndex(card => {
+    const player = playerById(snowRestock, card.playerId);
+    return player && snowRestock.selectors.availableCampPlayers(snowRestockCaptain.id, snowRestockShown)
+      .some(candidate => candidate.tier === player.tier);
+  });
+  if (snowRestockIndex < 0) {
+    const firstCard = snowRestockDraw.cards[0];
+    const firstPlayer = playerById(snowRestock, firstCard.playerId);
+    const fallback = snowRestock.selectors.availableCampPlayers(snowRestockCaptain.id, snowRestockShown)[0];
+    if (firstPlayer && fallback) fallback.tier = firstPlayer.tier;
+    snowRestockIndex = 0;
+  }
+  assert(snowRestockIndex >= 0, '测试前提：雪定饿的喵商店应存在可加急调货的卡槽');
+  assert(snowRestock.hexcoreEngine.activate('urgent-restock', { shopCardIndex: snowRestockIndex }).ok, '加急调货应可替换被雪定饿的喵扰乱的商店卡');
   const restockRealIds = snowRestockDraw.cards.map(card => card.playerId).sort().join(',');
   const restockDisplayIds = snowRestockDraw.cards.map(card => card.displayPlayerId).sort().join(',');
   assert(restockDisplayIds === restockRealIds, `加急调货后雪定饿的喵显示身份仍应来自当前商店卡，真实 ${restockRealIds}，显示 ${restockDisplayIds}`);
