@@ -832,6 +832,83 @@
     `;
   }
 
+  function lastStandConfirmModal() {
+    const confirmState = Hexcore2.state.ui && Hexcore2.state.ui.lastStandConfirm;
+    if (!confirmState || !Hexcore2.hexcoreEngine || !Hexcore2.hexcoreEngine.lastStandCandidates) return '';
+    const captain = Hexcore2.state.captains.find(item => item.id === confirmState.captainId);
+    if (!captain) return '';
+    const oldPlayers = (captain.team || []).map(playerId => playerById(playerId)).filter(Boolean);
+    const candidates = Hexcore2.hexcoreEngine.lastStandCandidates(captain.id);
+    const ownedCandidates = candidates.filter(player => player.teamId && player.teamId !== captain.id);
+    const availableCandidates = candidates.filter(player => !player.teamId);
+    const campLabel = Hexcore2.selectors.campLabel(Hexcore2.selectors.captainCamp(captain.id));
+    const canConfirm = oldPlayers.length >= 4 && candidates.length >= 4;
+    const tierName = player => Hexcore2.state.settings.tierNames[player.tier] || `${player.tier || '?'}费`;
+    const candidateRows = candidates.slice(0, 8).map(player => {
+      const owner = player.teamId ? Hexcore2.state.captains.find(item => item.id === player.teamId) : null;
+      return `
+        <span>
+          <strong>${escapeHtml(player.name)}</strong>
+          <em>${escapeHtml(tierName(player))} · ${owner ? `来自 ${escapeHtml(owner.name)}` : '可选池'}</em>
+        </span>
+      `;
+    }).join('');
+    return `
+      <div class="recruit-reveal-backdrop" role="dialog" aria-modal="true" aria-labelledby="last-stand-title">
+        <section class="recruit-reveal-modal last-stand-modal">
+          <div class="recruit-reveal-head">
+            <span>整队置换确认</span>
+            <h2 id="last-stand-title">背水一战可发动</h2>
+            <p>${escapeHtml(captain.name)} 已拥有 ${oldPlayers.length}/4 名队员，将从${escapeHtml(campLabel)}本阵营候选中随机换入 4 人。</p>
+          </div>
+          <div class="last-stand-summary">
+            <article>
+              <strong>${oldPlayers.length}</strong>
+              <span>当前队员</span>
+            </article>
+            <article>
+              <strong>${candidates.length}</strong>
+              <span>本阵营候选</span>
+            </article>
+            <article>
+              <strong>${ownedCandidates.length}</strong>
+              <span>可能触发置换</span>
+            </article>
+            <article>
+              <strong>${availableCandidates.length}</strong>
+              <span>可选池候选</span>
+            </article>
+          </div>
+          <div class="last-stand-body">
+            <section>
+              <h3>当前四名队员</h3>
+              <div class="last-stand-chip-list">
+                ${oldPlayers.map(player => `<span><strong>${escapeHtml(player.name)}</strong><em>${escapeHtml(tierName(player))}</em></span>`).join('') || '<span><strong>无</strong><em>队伍未满</em></span>'}
+              </div>
+            </section>
+            <section>
+              <h3>候选池预览</h3>
+              <div class="last-stand-chip-list candidates">
+                ${candidateRows || '<span><strong>候选不足</strong><em>无法发动</em></span>'}
+              </div>
+            </section>
+          </div>
+          <div class="last-stand-warning">
+            <strong>执行规则</strong>
+            <span>只从本阵营候选中抽取，不可跨阵营置换。抽中别队本阵营队员时，该队从当前四名队员中随机获得 1 人补偿；抽中可选池选手时不补偿，未补偿的原队员回到可选池。本海克斯会消耗本轮购买权。</span>
+          </div>
+          <div class="recruit-reveal-foot">
+            <span>${canConfirm ? '确认后立即随机结算，结算结果会在入队揭示弹窗中展示。' : '当前条件不足，不能确认发动。'}</span>
+            <div class="last-stand-actions">
+              <button onclick="window.hexcoreUI.cancelLastStand()">取消</button>
+              <button class="primary-btn" ${canConfirm ? '' : 'disabled'} onclick="window.hexcoreUI.confirmLastStand()">确认发动</button>
+            </div>
+          </div>
+        </section>
+      </div>
+    `;
+  }
+
   function recruitRevealModal() {
     const reveal = Hexcore2.state.ui && Hexcore2.state.ui.recruitReveal;
     if (!reveal) return '';
@@ -2653,6 +2730,7 @@
       ${playerImportPreviewModal()}
       ${originSageNoticeModal()}
       ${chargedCannonDecisionModal()}
+      ${lastStandConfirmModal()}
       ${recruitRevealModal()}
       ${economyRevealModal()}
       ${hexDetailModal()}

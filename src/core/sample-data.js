@@ -12,7 +12,7 @@
     { id: 'donation', name: '捐赠', type: 'amber', category: 'economy', tags: ['gold', 'acquire'], mode: 'passive', uses: 0, desc: '获得时初始资金+2。' },
     { id: 'sponsor-flow', name: '赞助回流', type: 'amber', category: 'economy', tags: ['gold', 'refund'], mode: 'passive', uses: 0, desc: '每局2次。购买费用不低于3的选手后，返还1金币。' },
     { id: 'hungry-wave', name: '海浪，我没吃饭', type: 'violet', category: 'order_response', tags: ['round_start', 'steal', 'refund'], mode: 'passive', uses: 0, desc: '每轮开始随机1名持有者触发：失去全部金币并跳过本轮，免疫其他海克斯。本轮其他队长购买后按剩余机会判定；命中同阵营时夺取该队员，命中异阵营时仅退回该购买并返还金币、刷新和购买权，轮末按本轮概率从自己同阵营卡池随机获得1名队员。' },
-    { id: 'last-stand', name: '背水一战', type: 'violet', category: 'roster_replace', tags: ['team_swap', 'direct_roster'], mode: 'manual', uses: 1, desc: '放弃当前4名队员，随机从全体非队长选手中获得4人；被抽走队员的队伍从你的原队员中获得1人作为置换补偿。' },
+    { id: 'last-stand', name: '背水一战', type: 'violet', category: 'roster_replace', tags: ['team_swap', 'direct_roster'], mode: 'manual', uses: 1, desc: '当前队伍已有4名队员后可发动。放弃当前4名队员，从本阵营非禁用、非队长、非当前4人的全场候选中随机获得4人；若抽中别队队员，该队从原4人中随机获得1人补偿，未补偿原队员回到可选池。' },
     { id: 'open-feast', name: '开饭啦', type: 'violet', category: 'economy', tags: ['gold', 'round_income'], mode: 'passive', uses: 0, desc: '第3轮开始时，资金+3。' },
     { id: 'vampiric-habit', name: '吸血习性', type: 'violet', category: 'disruption', tags: ['target', 'economy'], mode: 'manual', uses: 1, desc: '从当前金币余额最高的三名其他队长处每人获得1金币，金币为0的队长跳过。' },
     { id: 'giant-slayer', name: '巨人杀手', type: 'violet', category: 'economy', tags: ['discount', 'high_tier'], mode: 'passive', uses: 0, desc: '首次购买4费和5费卡时，各优惠1金币。' },

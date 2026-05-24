@@ -307,12 +307,20 @@
   function lastStandCandidates(captainId) {
     const captain = Hexcore2.state.captains.find(item => item.id === captainId);
     const oldTeam = new Set(captain ? captain.team || [] : []);
+    const camp = captainCamp(captainId);
     return Hexcore2.state.players.filter(player =>
       player
+      && player.camp === camp
       && player.status !== 'disabled'
       && !oldTeam.has(player.id)
       && !Hexcore2.selectors.isCaptainPlayer(player.id)
+      && (!player.teamId || player.teamId === captainId || captainCamp(player.teamId) === camp)
     );
+  }
+
+  function lastStandOwner(player) {
+    if (!player || !player.teamId) return null;
+    return Hexcore2.state.captains.find(captain => captain.id === player.teamId && (captain.team || []).includes(player.id)) || null;
   }
 
   function ensureHexcoreEconomy(captain) {
@@ -750,10 +758,12 @@
         }
         if (hex.id === 'last-stand') {
           const candidates = lastStandCandidates(captain.id);
+          const draftedCandidates = candidates.filter(player => lastStandOwner(player) && lastStandOwner(player).id !== captain.id);
           if ((captain.team || []).length < 4) return blocked(base, '队伍未满', '背水一战需要当前已有4名队员作为置换筹码。');
+          if (roundState.purchaseUsed || roundState.skipped) return blocked(base, '购买权已使用', '背水一战会消耗本轮购买权，购买或跳过后不能发动。');
           return candidates.length >= 4
-            ? active(base, '可执行', `放弃当前4名队员，从 ${candidates.length} 名非队长选手中随机获得4人。`)
-            : blocked(base, '候选不足', `可置换非队长选手不足4人，当前 ${candidates.length} 人。`);
+            ? active(base, '可弹窗确认', `本阵营候选 ${candidates.length} 人，其中已在别队 ${draftedCandidates.length} 人；确认后随机替换当前4名队员。`)
+            : blocked(base, '候选不足', `本阵营可置换候选不足4人，当前 ${candidates.length} 人。`);
         }
         if (hex.id === 'origin-sage') {
           return passive(base, '轮次开始自动', '每轮开始自动提到第一顺位；无需裁判手动执行。');
@@ -941,8 +951,10 @@
       if (hexcore.id === 'last-stand') {
         const oldTeamIds = [...(captain.team || [])];
         if (oldTeamIds.length < 4) return logFail('背水一战需要当前已有4名队员');
+        const roundState = currentRoundState(captain.id);
+        if (roundState.purchaseUsed || roundState.skipped) return logFail('本轮购买权已使用或已跳过，不能发动背水一战');
         const candidates = lastStandCandidates(captain.id);
-        if (candidates.length < 4) return logFail(`可置换非队长选手不足4人，当前 ${candidates.length} 人`);
+        if (candidates.length < 4) return logFail(`本阵营可置换候选不足4人，当前 ${candidates.length} 人`);
         const picked = [...candidates].sort(() => Math.random() - 0.5).slice(0, 4);
         const oldPlayers = oldTeamIds
           .map(playerId => state.players.find(player => player.id === playerId))
@@ -958,7 +970,7 @@
         captain.team = [];
 
         picked.forEach(player => {
-          const previousOwner = state.captains.find(item => item.id !== captain.id && item.team.includes(player.id));
+          const previousOwner = lastStandOwner(player);
           if (previousOwner) {
             previousOwner.team = previousOwner.team.filter(playerId => playerId !== player.id);
             const compensation = compensationQueue.shift();
@@ -989,6 +1001,21 @@
           'warn',
           { captainId: captain.id, pickedPlayerIds: picked.map(player => player.id), oldPlayerIds: oldTeamIds }
         );
+        markUsed(hexcore);
+        return {
+          ok: true,
+          advanceTurn: true,
+          reveal: {
+            title: '背水一战置换揭示',
+            source: hexcore.name,
+            captainId: captain.id,
+            playerIds: picked.map(player => player.id),
+            summary: `${captain.name} 从本阵营全场候选中重组4名队员`,
+            detail: transfers.length
+              ? `已完成别队置换补偿：${transfers.join('；')}`
+              : '本次抽中均为可选池选手，原队员已回到可选池。',
+          },
+        };
       }
 
       if (hexcore.id === 'origin-sage') {

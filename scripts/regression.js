@@ -1977,19 +1977,47 @@ function testNewHexcores() {
   assert(!transmuteEmpty.hexcoreEngine.activate('transmute-prismatic').ok, '质变目标池为空时应失败并保留购买权');
   assert(!transmuteEmpty.economyEngine.roundState(transmuteEmptyCaptain.id).purchaseUsed, '质变失败不应消耗本轮购买权');
 
-  const lastStand = createReadyHarness().H;
+  const lastStandBlocked = createReadyHarness().H;
+  const lastStandBlockedCaptain = currentCaptain(lastStandBlocked);
+  lastStandBlocked.state.hexcoreAssignments[lastStandBlockedCaptain.id] = [
+    { ...lastStandBlocked.sampleData.hexcores.find(hex => hex.id === 'last-stand'), status: 'available' },
+  ];
+  const blockedCamp = lastStandBlocked.selectors.captainCamp(lastStandBlockedCaptain.id);
+  const blockedOldPlayers = lastStandBlocked.state.players
+    .filter(player => player.camp === blockedCamp && !lastStandBlocked.selectors.isCaptainPlayer(player.id))
+    .slice(0, 4);
+  blockedOldPlayers.forEach(player => {
+    player.status = 'drafted';
+    player.teamId = lastStandBlockedCaptain.id;
+  });
+  lastStandBlockedCaptain.team = blockedOldPlayers.map(player => player.id);
+  lastStandBlocked.state.players
+    .filter(player => !lastStandBlocked.selectors.isCaptainPlayer(player.id) && !blockedOldPlayers.includes(player))
+    .forEach(player => {
+      player.status = player.camp === blockedCamp ? 'disabled' : 'available';
+      delete player.teamId;
+    });
+  const blockedQueueItem = lastStandBlocked.hexcoreEngine.executionQueue(lastStandBlockedCaptain.id).find(item => item.id === 'last-stand');
+  assert(blockedQueueItem && !blockedQueueItem.executable, '背水一战不能用异阵营候选凑满4人');
+  assert(!lastStandBlocked.hexcoreEngine.activate('last-stand').ok, '本阵营替换候选不足4人时背水一战应失败');
+
+  const lastStandHarness = createReadyHarness();
+  const lastStand = lastStandHarness.H;
   const lastStandCaptain = currentCaptain(lastStand);
   const lastStandOther = lastStand.state.captains[1];
   lastStand.state.hexcoreAssignments[lastStandCaptain.id] = [
     { ...lastStand.sampleData.hexcores.find(hex => hex.id === 'last-stand'), status: 'available' },
   ];
+  const lastStandCamp = lastStand.selectors.captainCamp(lastStandCaptain.id);
   const nonCaptainPlayers = lastStand.state.players.filter(player => !lastStand.selectors.isCaptainPlayer(player.id));
   nonCaptainPlayers.forEach(player => {
     player.status = 'disabled';
     delete player.teamId;
   });
-  const oldPlayers = nonCaptainPlayers.slice(0, 4);
-  const pickedPlayers = nonCaptainPlayers.slice(4, 8);
+  const campPlayers = nonCaptainPlayers.filter(player => player.camp === lastStandCamp);
+  const outsiderPlayers = nonCaptainPlayers.filter(player => player.camp !== lastStandCamp).slice(0, 4);
+  const oldPlayers = campPlayers.slice(0, 4);
+  const pickedPlayers = campPlayers.slice(4, 8);
   oldPlayers.forEach(player => {
     player.status = 'drafted';
     player.teamId = lastStandCaptain.id;
@@ -2002,15 +2030,47 @@ function testNewHexcores() {
   pickedPlayers[0].status = 'drafted';
   pickedPlayers[0].teamId = lastStandOther.id;
   lastStandOther.team = [pickedPlayers[0].id];
+  outsiderPlayers.forEach(player => {
+    player.status = 'available';
+    delete player.teamId;
+  });
   lastStand.state.draft.currentDraw = null;
+  lastStand.turnOrderEngine.recompute();
+  assert(lastStand.state.draft.currentOrder.includes(lastStandCaptain.id), '已满员但可发动背水一战的队长仍应保留在本轮顺位中');
   const lastStandQueueItem = lastStand.hexcoreEngine.executionQueue(lastStandCaptain.id).find(item => item.id === 'last-stand');
   assert(lastStandQueueItem && lastStandQueueItem.executable, '背水一战在队伍已有4名队员时应在执行队列中可发动');
-  assert(lastStand.hexcoreEngine.activate('last-stand').ok, '背水一战应可在当前队伍满4名队员时发动');
+  const uiResult = lastStand.actions.useHexcore('last-stand');
+  assert(uiResult && uiResult.pendingConfirm, '通过裁判按钮发动背水一战应先打开确认弹窗');
+  assert(lastStand.state.ui.lastStandConfirm && lastStandHarness.app.innerHTML.includes('last-stand-modal'), '背水一战确认弹窗应写入UI状态并渲染');
+  assert(lastStandHarness.app.innerHTML.includes('本阵营候选') && lastStandHarness.app.innerHTML.includes('不可跨阵营置换') && lastStandHarness.app.innerHTML.includes('确认发动'), '背水一战弹窗应说明候选范围并提供确认入口');
+  assert(lastStandCaptain.team.every(playerId => oldPlayers.some(player => player.id === playerId)), '确认前不应提前置换队伍');
+  assert(lastStand.actions.confirmLastStand().ok, '确认弹窗后背水一战应可在当前队伍满4名队员时发动');
   assert(pickedPlayers.every(player => lastStandCaptain.team.includes(player.id)), '背水一战应随机换入4名非队长选手');
   assert(!lastStandCaptain.team.some(playerId => oldPlayers.some(player => player.id === playerId)), '背水一战后原队员不应留在使用者队伍中');
   assert(lastStandOther.team.length === 1 && oldPlayers.some(player => lastStandOther.team.includes(player.id)), '被抽走队员的队伍应获得1名原队员补偿');
   assert(pickedPlayers[0].teamId === lastStandCaptain.id, '被抽走选手归属应更新为背水一战使用者');
+  assert(lastStandCaptain.team.every(playerId => playerById(lastStand, playerId).camp === lastStandCamp), '背水一战换入队员必须全部来自本阵营');
+  assert(outsiderPlayers.every(player => !lastStandCaptain.team.includes(player.id)), '背水一战不得抽入异阵营候选');
+  assert(oldPlayers.filter(player => player.status === 'available' && !player.teamId).length === 3, '未作为补偿的原队员应回到可选池');
   assert(lastStand.economyEngine.roundState(lastStandCaptain.id).purchaseUsed, '背水一战应消耗本轮购买权');
+
+  const lastStandPurchased = createReadyHarness().H;
+  const lastStandPurchasedCaptain = currentCaptain(lastStandPurchased);
+  lastStandPurchased.state.hexcoreAssignments[lastStandPurchasedCaptain.id] = [
+    { ...lastStandPurchased.sampleData.hexcores.find(hex => hex.id === 'last-stand'), status: 'available' },
+  ];
+  lastStandPurchased.economyEngine.roundState(lastStandPurchasedCaptain.id).purchaseUsed = true;
+  assert(!lastStandPurchased.hexcoreEngine.activate('last-stand').ok, '本轮已购买后不能再发动背水一战');
+
+  const lastStandOrder = createReadyHarness().H;
+  const lastStandOrderCaptain = lastStandOrder.state.captains[5];
+  lastStandOrder.state.hexcoreAssignments[lastStandOrderCaptain.id] = [
+    { ...lastStandOrder.sampleData.hexcores.find(hex => hex.id === 'last-stand'), status: 'available' },
+  ];
+  lastStandOrder.state.draft.round = 4;
+  lastStandOrder.turnOrderEngine.recompute();
+  const lastStandOrderReason = (lastStandOrder.state.draft.explanations.find(item => item.captainId === lastStandOrderCaptain.id) || {}).reasons || [];
+  assert(!lastStandOrderReason.some(reason => reason.includes('背水一战')), '背水一战不应再产生第4轮顺位效果');
 
   const removed = createReadyHarness().H;
   assert(!removed.sampleData.hexcores.some(hex => ['directed-recruit', 'order-overtake', 'budget-refund'].includes(hex.id)), '废弃海克斯不应继续进入海克斯池');
@@ -2684,7 +2744,7 @@ function testThemeSafeModalsAndScrollbars() {
     '主题变量应包含弹层遮罩、弹窗背景和输入框背景，避免组件硬编码单一主题颜色',
   );
   assert(
-    css.includes('.form-modal,\n.origin-sage-modal,\n.charged-cannon-modal,\n.recruit-reveal-modal,\n.economy-reveal-modal,\n.hex-detail-modal')
+    css.includes('.form-modal,\n.origin-sage-modal,\n.charged-cannon-modal,\n.last-stand-modal,\n.recruit-reveal-modal,\n.economy-reveal-modal,\n.hex-detail-modal')
     && css.includes('background: var(--modal-bg);')
     && css.includes('color: var(--text);'),
     '所有主要弹窗应使用主题背景和主题文字色',
@@ -2713,7 +2773,7 @@ function testThemeSafeModalsAndScrollbars() {
     'Apple 主题下拉选中项应使用高对比文字色',
   );
   assert(
-    css.includes(':where(.form-modal, .origin-sage-modal, .charged-cannon-modal, .recruit-reveal-modal, .economy-reveal-modal, .hex-detail-modal) button:not(.primary-btn):not(.danger-btn):not(.danger-inline)')
+    css.includes(':where(.form-modal, .origin-sage-modal, .charged-cannon-modal, .last-stand-modal, .recruit-reveal-modal, .economy-reveal-modal, .hex-detail-modal) button:not(.primary-btn):not(.danger-btn):not(.danger-inline)')
     && css.includes('.import-preview-tabs button.active')
     && css.includes(':root[data-theme="apple"] .icon-close'),
     '弹窗内普通按钮、页签按钮和关闭按钮应使用统一主题按钮基线',

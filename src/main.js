@@ -1239,8 +1239,54 @@
       return result;
     },
 
+    cancelLastStand() {
+      if (Hexcore2.state.ui) delete Hexcore2.state.ui.lastStandConfirm;
+      renderAndPersist();
+    },
+
+    confirmLastStand() {
+      const confirmState = Hexcore2.state.ui && Hexcore2.state.ui.lastStandConfirm;
+      const captain = Hexcore2.selectors.currentCaptain();
+      if (!confirmState || !captain || confirmState.captainId !== captain.id) {
+        if (Hexcore2.state.ui) delete Hexcore2.state.ui.lastStandConfirm;
+        Hexcore2.eventStore.append('背水一战失败', '当前确认窗口已失效，请重新打开', 'warn');
+        Hexcore2.ui.render();
+        return { ok: false, reason: '确认窗口已失效' };
+      }
+      snapshot(`使用背水一战前：${captain.name}`);
+      const result = Hexcore2.hexcoreEngine.activate('last-stand', { confirmed: true });
+      if (result && result.ok && Hexcore2.state.ui) delete Hexcore2.state.ui.lastStandConfirm;
+      if (result && result.ok && result.reveal && openRecruitReveal(result.reveal, { advanceTurn: result.advanceTurn })) {
+        renderAndPersist();
+        return result;
+      }
+      if (result && result.advanceTurn) {
+        this.nextCaptain();
+      } else {
+        Hexcore2.ui.render();
+      }
+      return result;
+    },
+
     useHexcore(id, targetCaptainId, secondTargetCaptainId) {
       const captain = Hexcore2.selectors.currentCaptain();
+      if (id === 'last-stand') {
+        const item = captain && Hexcore2.hexcoreEngine && Hexcore2.hexcoreEngine.executionQueue
+          ? Hexcore2.hexcoreEngine.executionQueue(captain.id).find(entry => entry.id === 'last-stand')
+          : null;
+        if (!item || !item.executable) {
+          Hexcore2.eventStore.append('背水一战失败', item ? item.reason : '当前队长不能发动背水一战', 'warn');
+          Hexcore2.ui.render();
+          return { ok: false, reason: item ? item.reason : '当前不能发动' };
+        }
+        Hexcore2.state.ui = Hexcore2.state.ui || {};
+        Hexcore2.state.ui.lastStandConfirm = {
+          captainId: captain.id,
+          createdAt: Date.now(),
+        };
+        renderAndPersist();
+        return { ok: true, pendingConfirm: true };
+      }
       snapshot(`使用海克斯前：${captain ? captain.name : '未知'}`);
       const shopCardIndex = targetCaptainId === '' ? Hexcore2.state.draft.selectedSlot : Number(targetCaptainId);
       const result = Hexcore2.hexcoreEngine.activate(id, {
@@ -3362,6 +3408,8 @@
     Hexcore2.hexDetailEscHandler = event => {
       if (event && event.key === 'Escape' && Hexcore2.state.ui && Hexcore2.state.ui.hexDetailModal) {
         Hexcore2.actions.closeHexDetail();
+      } else if (event && event.key === 'Escape' && Hexcore2.state.ui && Hexcore2.state.ui.lastStandConfirm) {
+        Hexcore2.actions.cancelLastStand();
       }
     };
     global.document.addEventListener('keydown', Hexcore2.hexDetailEscHandler);

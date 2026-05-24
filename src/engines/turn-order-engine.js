@@ -5,6 +5,24 @@
     return Hexcore2.selectors.teamSize(captainId) < Hexcore2.selectors.teamMemberCapacity(captainId);
   }
 
+  function canUseFullTeamHexcore(captainId, round = Hexcore2.state.draft.round) {
+    const captain = Hexcore2.state.captains.find(item => item.id === captainId);
+    if (!captain || teamIsOpen(captainId)) return false;
+    const lastStand = (Hexcore2.state.hexcoreAssignments[captainId] || []).find(hexcore =>
+      hexcore
+      && hexcore.id === 'last-stand'
+      && hexcore.status !== 'used'
+      && Hexcore2.selectors.isHexcoreEnabled('last-stand')
+    );
+    if (!lastStand || (captain.team || []).length < 4) return false;
+    const roundState = Hexcore2.economyEngine ? Hexcore2.economyEngine.roundState(captainId, round) : null;
+    if (roundState && (roundState.purchaseUsed || roundState.skipped)) return false;
+    if (Hexcore2.hexcoreEngine && typeof Hexcore2.hexcoreEngine.lastStandCandidates === 'function') {
+      return Hexcore2.hexcoreEngine.lastStandCandidates(captainId).length >= 4;
+    }
+    return true;
+  }
+
   function isSkippedThisRound(captainId, round = Hexcore2.state.draft.round) {
     const state = Hexcore2.state;
     return state.draft.runtimeEffects.some(effect =>
@@ -83,7 +101,10 @@
       });
     }
 
-    const order = state.draft.baseOrder.filter(captainId => teamIsOpen(captainId) && !isSkippedThisRound(captainId, round));
+    const order = state.draft.baseOrder.filter(captainId =>
+      (teamIsOpen(captainId) || canUseFullTeamHexcore(captainId, round))
+      && !isSkippedThisRound(captainId, round)
+    );
     const explanations = new Map(order.map((id, index) => [id, [`基础顺位第 ${index + 1}`]]));
 
     if (round % 2 === 0) {
@@ -100,14 +121,6 @@
           position: 3,
           priority: 700,
           reason: '潘多拉魔盒：全程固定第3顺位',
-        });
-      }
-      if (hasHexcore(captainId, 'last-stand') && round === 4) {
-        modifiers.push({
-          captainId,
-          operation: 'move_first',
-          priority: 900,
-          reason: '背水一战：第4轮优先级最高，获得第1顺位',
         });
       }
       if (!hasHexcore(captainId, 'demon-contract')) return;

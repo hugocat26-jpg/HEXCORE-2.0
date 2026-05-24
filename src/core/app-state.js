@@ -800,6 +800,15 @@
       ? state.ui.playerImportSelected.map(index => clampNumber(index, 0, 9999, 0))
       : [];
     state.ui.orderDrawerOpen = Boolean(state.ui.orderDrawerOpen);
+    if (state.ui.lastStandConfirm && typeof state.ui.lastStandConfirm === 'object') {
+      state.ui.lastStandConfirm = {
+        captainId: captainIdMap.get(String(state.ui.lastStandConfirm.captainId || '')) || '',
+        createdAt: clampNumber(state.ui.lastStandConfirm.createdAt, 0, Number.MAX_SAFE_INTEGER, 0),
+      };
+      if (!state.ui.lastStandConfirm.captainId) delete state.ui.lastStandConfirm;
+    } else {
+      delete state.ui.lastStandConfirm;
+    }
     if (state.ui.recruitReveal && typeof state.ui.recruitReveal === 'object') {
       state.ui.recruitReveal = {
         title: sanitizeText(state.ui.recruitReveal.title, '海克斯入队揭示', 40),

@@ -3088,6 +3088,125 @@ h2 span {
     linear-gradient(180deg, rgba(37, 31, 17, 0.98), rgba(8, 16, 20, 0.98));
 }
 
+.last-stand-modal {
+  width: min(820px, calc(100vw - 48px));
+  border-color: color-mix(in srgb, var(--violet) 62%, var(--line));
+  background:
+    radial-gradient(circle at 50% 0, color-mix(in srgb, var(--violet) 24%, transparent), transparent 40%),
+    var(--modal-bg);
+}
+
+.last-stand-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.last-stand-summary article {
+  display: grid;
+  gap: 4px;
+  justify-items: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 12px 8px;
+}
+
+.last-stand-summary strong {
+  color: var(--amber);
+  font-size: 26px;
+  line-height: 1;
+}
+
+.last-stand-summary span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.last-stand-body {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  gap: 12px;
+}
+
+.last-stand-body section,
+.last-stand-warning {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 12px;
+}
+
+.last-stand-body h3 {
+  margin: 0 0 10px;
+  color: var(--text);
+  font-size: 14px;
+}
+
+.last-stand-chip-list {
+  display: grid;
+  gap: 8px;
+}
+
+.last-stand-chip-list.candidates {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.last-stand-chip-list span {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+  border: 1px solid var(--line-soft);
+  border-radius: 7px;
+  background: var(--surface-strong);
+  padding: 8px 10px;
+}
+
+.last-stand-chip-list strong {
+  color: var(--text);
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.last-stand-chip-list em {
+  color: var(--muted);
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 800;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.last-stand-warning {
+  display: grid;
+  gap: 5px;
+  border-color: color-mix(in srgb, var(--amber) 44%, var(--line));
+}
+
+.last-stand-warning strong {
+  color: var(--amber);
+  font-size: 13px;
+}
+
+.last-stand-warning span {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.45;
+}
+
+.last-stand-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
 .economy-reveal-total {
   display: grid;
   justify-items: center;
@@ -6902,6 +7021,7 @@ h2 span {
 .form-modal,
 .origin-sage-modal,
 .charged-cannon-modal,
+.last-stand-modal,
 .recruit-reveal-modal,
 .economy-reveal-modal,
 .hex-detail-modal {
@@ -6920,6 +7040,9 @@ h2 span {
 .cannon-preview-grid section,
 .economy-reveal-row,
 .recruit-reveal-card,
+.last-stand-summary article,
+.last-stand-body section,
+.last-stand-warning,
 .modal-derived-note,
 .derived-pool-field {
   background: var(--surface);
@@ -6982,7 +7105,7 @@ h2 span {
   color: var(--text);
 }
 
-:where(.form-modal, .origin-sage-modal, .charged-cannon-modal, .recruit-reveal-modal, .economy-reveal-modal, .hex-detail-modal) button:not(.primary-btn):not(.danger-btn):not(.danger-inline) {
+:where(.form-modal, .origin-sage-modal, .charged-cannon-modal, .last-stand-modal, .recruit-reveal-modal, .economy-reveal-modal, .hex-detail-modal) button:not(.primary-btn):not(.danger-btn):not(.danger-inline) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -6998,13 +7121,13 @@ h2 span {
   line-height: 1;
 }
 
-:where(.form-modal, .origin-sage-modal, .charged-cannon-modal, .recruit-reveal-modal, .economy-reveal-modal, .hex-detail-modal) button:not(.primary-btn):not(.danger-btn):not(.danger-inline):hover:not(:disabled) {
+:where(.form-modal, .origin-sage-modal, .charged-cannon-modal, .last-stand-modal, .recruit-reveal-modal, .economy-reveal-modal, .hex-detail-modal) button:not(.primary-btn):not(.danger-btn):not(.danger-inline):hover:not(:disabled) {
   border-color: color-mix(in srgb, var(--cyan) 44%, var(--line));
   background: var(--cyan-soft);
   color: var(--text);
 }
 
-:where(.form-modal, .origin-sage-modal, .charged-cannon-modal, .recruit-reveal-modal, .economy-reveal-modal, .hex-detail-modal) button:disabled {
+:where(.form-modal, .origin-sage-modal, .charged-cannon-modal, .last-stand-modal, .recruit-reveal-modal, .economy-reveal-modal, .hex-detail-modal) button:disabled {
   cursor: not-allowed;
   opacity: 0.56;
   transform: none;
@@ -7039,6 +7162,7 @@ h2 span {
 .form-modal,
 .origin-sage-modal,
 .charged-cannon-modal,
+.last-stand-modal,
 .recruit-reveal-modal,
 .economy-reveal-modal,
 .hex-detail-body,
@@ -7056,6 +7180,7 @@ h2 span {
 .form-modal::-webkit-scrollbar-track,
 .origin-sage-modal::-webkit-scrollbar-track,
 .charged-cannon-modal::-webkit-scrollbar-track,
+.last-stand-modal::-webkit-scrollbar-track,
 .recruit-reveal-modal::-webkit-scrollbar-track,
 .economy-reveal-modal::-webkit-scrollbar-track,
 .hex-detail-body::-webkit-scrollbar-track,
@@ -7073,6 +7198,7 @@ h2 span {
 .form-modal::-webkit-scrollbar-thumb,
 .origin-sage-modal::-webkit-scrollbar-thumb,
 .charged-cannon-modal::-webkit-scrollbar-thumb,
+.last-stand-modal::-webkit-scrollbar-thumb,
 .recruit-reveal-modal::-webkit-scrollbar-thumb,
 .economy-reveal-modal::-webkit-scrollbar-thumb,
 .hex-detail-body::-webkit-scrollbar-thumb,
@@ -7087,6 +7213,7 @@ h2 span {
 :root[data-theme="apple"] .form-modal,
 :root[data-theme="apple"] .origin-sage-modal,
 :root[data-theme="apple"] .charged-cannon-modal,
+:root[data-theme="apple"] .last-stand-modal,
 :root[data-theme="apple"] .recruit-reveal-modal,
 :root[data-theme="apple"] .economy-reveal-modal,
 :root[data-theme="apple"] .hex-detail-modal {
@@ -7104,19 +7231,22 @@ h2 span {
 :root[data-theme="apple"] .cannon-preview-grid section,
 :root[data-theme="apple"] .economy-reveal-row,
 :root[data-theme="apple"] .recruit-reveal-card,
+:root[data-theme="apple"] .last-stand-summary article,
+:root[data-theme="apple"] .last-stand-body section,
+:root[data-theme="apple"] .last-stand-warning,
 :root[data-theme="apple"] .modal-derived-note,
 :root[data-theme="apple"] .derived-pool-field {
   background: var(--surface-strong);
   border-color: #d9e0eb;
 }
 
-:root[data-theme="apple"] :where(.form-modal, .origin-sage-modal, .charged-cannon-modal, .recruit-reveal-modal, .economy-reveal-modal, .hex-detail-modal) button:not(.primary-btn):not(.danger-btn):not(.danger-inline) {
+:root[data-theme="apple"] :where(.form-modal, .origin-sage-modal, .charged-cannon-modal, .last-stand-modal, .recruit-reveal-modal, .economy-reveal-modal, .hex-detail-modal) button:not(.primary-btn):not(.danger-btn):not(.danger-inline) {
   background: #eef2f7;
   border-color: #d6dde8;
   color: var(--text);
 }
 
-:root[data-theme="apple"] :where(.form-modal, .origin-sage-modal, .charged-cannon-modal, .recruit-reveal-modal, .economy-reveal-modal, .hex-detail-modal) button:not(.primary-btn):not(.danger-btn):not(.danger-inline):hover:not(:disabled) {
+:root[data-theme="apple"] :where(.form-modal, .origin-sage-modal, .charged-cannon-modal, .last-stand-modal, .recruit-reveal-modal, .economy-reveal-modal, .hex-detail-modal) button:not(.primary-btn):not(.danger-btn):not(.danger-inline):hover:not(:disabled) {
   background: rgba(0, 113, 227, 0.1);
   border-color: rgba(0, 113, 227, 0.32);
   color: #075aa8;
@@ -7797,6 +7927,23 @@ h2 span {
 
   .recruit-reveal-foot button {
     width: 100%;
+  }
+
+  .last-stand-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .last-stand-body,
+  .last-stand-chip-list.candidates {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .last-stand-actions {
+    width: 100%;
+  }
+
+  .last-stand-actions button {
+    flex: 1 1 0;
   }
 
   .import-preview-list {
