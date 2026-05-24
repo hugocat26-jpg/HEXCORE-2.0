@@ -994,7 +994,7 @@
         const realPlayer = Hexcore2.state.players.find(item => item.id === slot.playerId);
         Hexcore2.eventStore.append(
           '雪定饿的喵揭示',
-          `${captain.name} 按显示卡「${displayedPlayer ? displayedPlayer.name : slot.displayPlayerId}」支付 ${result.price} 金币，揭示真实选手「${realPlayer ? realPlayer.name : slot.playerId}」`,
+          `${captain.name} 点击显示卡「${displayedPlayer ? displayedPlayer.name : slot.displayPlayerId}」，实际支付 ${result.price} 金币，揭示真实选手「${realPlayer ? realPlayer.name : slot.playerId}」`,
           'warn',
           { displayPlayerId: slot.displayPlayerId, playerId: slot.playerId, price: result.price }
         );

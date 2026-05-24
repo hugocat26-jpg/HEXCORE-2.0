@@ -89,6 +89,10 @@
     return Boolean(effect && effect.captainId === captainId && effect.immune);
   }
 
+  function isHungryWaveOrderImmune(captainId, round = Hexcore2.state.draft.round) {
+    return hasHexcore(captainId, 'hungry-wave') || isHungryWaveImmune(captainId, round);
+  }
+
   function hungryWaveAlreadyCreated(round = Hexcore2.state.draft.round) {
     return (Hexcore2.state.draft.runtimeEffects || []).find(effect =>
       effect.type === 'hungry_wave_round'
@@ -270,6 +274,31 @@
     return card && Hexcore2.state.players.find(player => player.id === card.playerId);
   }
 
+  function refreshSnowCatDisplayForDraw(draw) {
+    if (!draw || !Array.isArray(draw.cards)) return;
+    const effect = (draw.appliedEffects || []).find(item => item && item.type === 'snow_cat_shuffle');
+    if (!effect) return;
+    const cards = draw.cards.filter(Boolean);
+    if (!cards.length) return;
+    if (cards.length === 1) {
+      cards[0].displayPlayerId = cards[0].playerId;
+      cards[0].snowCatShuffled = true;
+      effect.displayOffset = 0;
+      effect.affectedSlots = 1;
+      return;
+    }
+    let offset = Math.round(Number(effect.displayOffset) || 1);
+    offset = ((offset % cards.length) + cards.length) % cards.length;
+    if (offset === 0) offset = 1;
+    cards.forEach((card, index) => {
+      const displayCard = cards[(index + offset) % cards.length];
+      card.displayPlayerId = displayCard.playerId;
+      card.snowCatShuffled = true;
+    });
+    effect.displayOffset = offset;
+    effect.affectedSlots = cards.length;
+  }
+
   function logFail(message, payload) {
     Hexcore2.eventStore.append('海克斯执行失败', message, 'warn', payload || {});
     return { ok: false, reason: message };
@@ -314,6 +343,7 @@
       && player.status !== 'disabled'
       && !oldTeam.has(player.id)
       && !Hexcore2.selectors.isCaptainPlayer(player.id)
+      && !belongsToHungryWaveTeam(player)
       && (!player.teamId || player.teamId === captainId || captainCamp(player.teamId) === camp)
     );
   }
@@ -321,6 +351,11 @@
   function lastStandOwner(player) {
     if (!player || !player.teamId) return null;
     return Hexcore2.state.captains.find(captain => captain.id === player.teamId && (captain.team || []).includes(player.id)) || null;
+  }
+
+  function belongsToHungryWaveTeam(player) {
+    const owner = lastStandOwner(player);
+    return Boolean(owner && hasHexcore(owner.id, 'hungry-wave'));
   }
 
   function ensureHexcoreEconomy(captain) {
@@ -459,7 +494,7 @@
       .filter(captain =>
         captain
         && captain.id !== sourceCaptainId
-        && !isHungryWaveImmune(captain.id)
+        && !isHungryWaveOrderImmune(captain.id)
         && Hexcore2.selectors.teamSize(captain.id) < Hexcore2.selectors.teamMemberCapacity(captain.id)
       );
   }
@@ -574,7 +609,7 @@
         && captain.id !== sourceCaptainId
         && index < order.length - 1
         && !protectedIds.has(captain.id)
-        && !isHungryWaveImmune(captain.id)
+        && !isHungryWaveOrderImmune(captain.id)
       )
       .map(item => item.captain);
   }
@@ -615,7 +650,7 @@
     if (usedThisRound(hexcore)) return logFail('大炮已充能本轮已经处理过');
     if (state.draft.currentDraw) return logFail('大炮已充能只能在轮次开始、商店打开前使用');
     const target = chargedCannonDelayTargets(captain.id).find(item => item.id === targetCaptainId);
-    if (!target) return logFail('雷霆一击需要选择非自己、非启元保护且非最后顺位的队长');
+    if (!target) return logFail('雷霆一击需要选择非自己、非启元保护、非海浪免疫且非最后顺位的队长');
     pushEffect({
       type: 'move_down_one',
       captainId: target.id,
@@ -868,6 +903,7 @@
         if (!candidates.length) return logFail('没有同阵营同费用的替换目标');
         const replacement = candidates[Math.floor(Math.random() * candidates.length)];
         draw.cards[cardIndex] = { ...card, playerId: replacement.id, tier: replacement.tier, price: replacement.tier, camp: replacement.camp };
+        refreshSnowCatDisplayForDraw(draw);
       }
 
       if (hexcore.id === 'camp-blockade') {

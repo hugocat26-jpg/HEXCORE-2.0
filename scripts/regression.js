@@ -1576,6 +1576,26 @@ function testNewHexcores() {
   assert(!snowNext.state.draft.currentDraw, '点击下一位后应清空上一位商店');
   assert(snowNextHarness.app.innerHTML.includes(snowNext.selectors.currentCaptain().name), '下一位后界面应渲染目标队长');
 
+  const snowRestock = createReadyHarness().H;
+  const snowRestockCaptain = currentCaptain(snowRestock);
+  snowRestock.state.hexcoreAssignments[snowRestockCaptain.id] = [
+    { ...snowRestock.sampleData.hexcores.find(hex => hex.id === 'urgent-restock'), status: 'available' },
+  ];
+  snowRestock.state.draft.runtimeEffects.push({
+    type: 'snow_cat_shuffle',
+    captainId: snowRestockCaptain.id,
+    sourceCaptainId: 'c2',
+    consumed: false,
+    reason: '测试：雪定饿的喵影响当前商店',
+  });
+  snowRestock.actions.drawCards();
+  const snowRestockDraw = snowRestock.state.draft.currentDraw;
+  assert(snowRestockDraw.appliedEffects.some(effect => effect.type === 'snow_cat_shuffle'), '测试前提：加急调货前商店应受雪定饿的喵影响');
+  assert(snowRestock.hexcoreEngine.activate('urgent-restock', { shopCardIndex: 0 }).ok, '加急调货应可替换被雪定饿的喵扰乱的商店卡');
+  const restockRealIds = snowRestockDraw.cards.map(card => card.playerId).sort().join(',');
+  const restockDisplayIds = snowRestockDraw.cards.map(card => card.displayPlayerId).sort().join(',');
+  assert(restockDisplayIds === restockRealIds, `加急调货后雪定饿的喵显示身份仍应来自当前商店卡，真实 ${restockRealIds}，显示 ${restockDisplayIds}`);
+
   const hungryHarness = createReadyHarness();
   const hungry = hungryHarness.H;
   hungry.state.draft.currentOrder = hungry.state.captains.map(captain => captain.id);
@@ -1758,6 +1778,22 @@ function testNewHexcores() {
   const hungryFilteredTargets = cannonTargetCount.hexcoreEngine.chargedCannonDelayTargets(cannonSource.id);
   assert(!hungryFilteredTargets.some(target => target.id === hungryDelayTarget.id), '海浪我没吃饭触发者本轮跳过且不受顺位影响，不能成为雷霆一击目标');
   assert(hungryFilteredTargets.length === 7, `自己是最后顺位且存在海浪触发者时，雷霆一击应有7名目标，实际 ${hungryFilteredTargets.length}`);
+
+  const cannonHungryOwner = createReadyHarness().H;
+  releaseHexcoreEverywhere(cannonHungryOwner, 'charged-cannon');
+  releaseHexcoreEverywhere(cannonHungryOwner, 'hungry-wave');
+  releaseHexcoreEverywhere(cannonHungryOwner, 'origin-sage');
+  const cannonHungrySource = cannonHungryOwner.state.captains[0];
+  const cannonHungryTarget = cannonHungryOwner.state.captains[1];
+  cannonHungryOwner.state.hexcoreAssignments[cannonHungrySource.id] = [
+    { ...cannonHungryOwner.sampleData.hexcores.find(hex => hex.id === 'charged-cannon'), status: 'available' },
+  ];
+  cannonHungryOwner.state.hexcoreAssignments[cannonHungryTarget.id] = [
+    { ...cannonHungryOwner.sampleData.hexcores.find(hex => hex.id === 'hungry-wave'), status: 'passive' },
+  ];
+  cannonHungryOwner.state.draft.currentOrder = cannonHungryOwner.state.captains.map(captain => captain.id);
+  cannonHungryOwner.state.draft.baseOrder = [...cannonHungryOwner.state.draft.currentOrder];
+  assert(!cannonHungryOwner.hexcoreEngine.chargedCannonDelayTargets(cannonHungrySource.id).some(target => target.id === cannonHungryTarget.id), '持有海浪我没吃饭的队长不应成为雷霆一击目标，即使本轮尚未触发海浪');
 
   const cannonModalHarness = createHarness();
   const cannonModal = cannonModalHarness.H;
@@ -2000,6 +2036,31 @@ function testNewHexcores() {
   const blockedQueueItem = lastStandBlocked.hexcoreEngine.executionQueue(lastStandBlockedCaptain.id).find(item => item.id === 'last-stand');
   assert(blockedQueueItem && !blockedQueueItem.executable, '背水一战不能用异阵营候选凑满4人');
   assert(!lastStandBlocked.hexcoreEngine.activate('last-stand').ok, '本阵营替换候选不足4人时背水一战应失败');
+
+  const lastStandHungry = createReadyHarness().H;
+  const lastStandHungryCaptain = currentCaptain(lastStandHungry);
+  const lastStandHungryOwner = lastStandHungry.state.captains[1];
+  lastStandHungry.state.hexcoreAssignments[lastStandHungryCaptain.id] = [
+    { ...lastStandHungry.sampleData.hexcores.find(hex => hex.id === 'last-stand'), status: 'available' },
+  ];
+  lastStandHungry.state.hexcoreAssignments[lastStandHungryOwner.id] = [
+    { ...lastStandHungry.sampleData.hexcores.find(hex => hex.id === 'hungry-wave'), status: 'passive' },
+  ];
+  const hungryCamp = lastStandHungry.selectors.captainCamp(lastStandHungryCaptain.id);
+  const hungryOldPlayers = lastStandHungry.state.players
+    .filter(player => player.camp === hungryCamp && !lastStandHungry.selectors.isCaptainPlayer(player.id))
+    .slice(0, 4);
+  const hungryOwnedCandidate = lastStandHungry.state.players
+    .find(player => player.camp === hungryCamp && !lastStandHungry.selectors.isCaptainPlayer(player.id) && !hungryOldPlayers.includes(player));
+  hungryOldPlayers.forEach(player => {
+    player.status = 'drafted';
+    player.teamId = lastStandHungryCaptain.id;
+  });
+  lastStandHungryCaptain.team = hungryOldPlayers.map(player => player.id);
+  hungryOwnedCandidate.status = 'drafted';
+  hungryOwnedCandidate.teamId = lastStandHungryOwner.id;
+  lastStandHungryOwner.team = [hungryOwnedCandidate.id];
+  assert(!lastStandHungry.hexcoreEngine.lastStandCandidates(lastStandHungryCaptain.id).some(player => player.id === hungryOwnedCandidate.id), '背水一战候选不应包含海浪我没吃饭队伍当前拥有的队员');
 
   const lastStandHarness = createReadyHarness();
   const lastStand = lastStandHarness.H;
