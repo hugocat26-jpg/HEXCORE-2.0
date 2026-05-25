@@ -14,6 +14,11 @@
     return captain ? captain.name : '待定';
   }
 
+  function versionLabel() {
+    const meta = Hexcore2.meta || {};
+    return `${meta.product || 'HEXCORE 2.0'} v${meta.version || '2.0'} 裁判端`;
+  }
+
   function isCampVersusTournamentContext(tournament, round, match) {
     return Boolean(
       (tournament && tournament.pairingMode === 'camp_versus')
@@ -647,7 +652,7 @@
           <p>系统名称：HEXCORE 2.0</p>
           <p>抽选规模：${teamCount} 队征召制</p>
           <p>队伍范围：${Hexcore2.state.settings.minTeams}-${Hexcore2.state.settings.maxTeams} 队</p>
-          <p>版本：2.0 裁判端</p>
+          <p>版本：${escapeHtml(versionLabel())}</p>
           <p>模式：裁判代执行</p>
           <p>创建时间：2026-05-19 09:00</p>
           <p>可撤销步骤：${(Hexcore2.state.undoStack || []).length}</p>
@@ -2924,7 +2929,7 @@
     return `
       ${pageHeader('系统设置', '本地裁判端状态备份、导入和重置。部署访问请使用 npm start 或静态 HTTP 服务。')}
       <section class="data-panel system-summary">
-        <div><span>当前版本</span><strong>HEXCORE 2.0 裁判端</strong></div>
+        <div><span>当前版本</span><strong>${escapeHtml(versionLabel())}</strong></div>
         <div><span>事件数量</span><strong>${Hexcore2.state.events.length}</strong></div>
         <div><span>撤销快照</span><strong>${(Hexcore2.state.undoStack || []).length}</strong></div>
         <div><span>最近事件</span><strong>${lastEvent ? escapeHtml(lastEvent.title) : '暂无'}</strong></div>

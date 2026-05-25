@@ -1,5 +1,10 @@
 (function initSampleData(global) {
   const Hexcore2 = global.Hexcore2 || (global.Hexcore2 = {});
+  Hexcore2.meta = {
+    product: 'HEXCORE 2.0',
+    version: '2.0.1',
+    releaseDate: '2026-05-25',
+  };
 
   const hexcores = [
     { id: 'camp-scout', name: '阵营侦察', type: 'cyan', category: 'shop_control', tags: ['shop', 'camp'], mode: 'manual', uses: 1, desc: '开店前使用。下一次商店额外展示1张同阵营可抽卡，仍只能购买1人。' },
