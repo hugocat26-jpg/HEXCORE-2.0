@@ -2669,8 +2669,9 @@ function testDraftRosterBoard() {
   H.actions.focusTeamFromRoster(target.id);
   assert(H.state.ui.activeView === 'teams', '点击阵容看板队伍卡应切换到队伍管理页');
   assert(H.state.ui.highlightCaptainId === target.id, '点击阵容看板队伍卡应高亮目标队伍');
+  assert(!H.state.ui.scrollCaptainIntoViewId, '队伍定位渲染后应清除一次性居中滚动目标');
   assert(H.state.draft.currentIndex === previousIndex, '点击阵容看板只定位队伍，不应改变当前抽选顺位');
-  assert(app.innerHTML.includes('located-card'), '队伍管理页应显示被定位队伍的高亮状态');
+  assert(app.innerHTML.includes('located-card') && app.innerHTML.includes(`data-captain-id="${target.id}"`), '队伍管理页应显示被定位队伍的高亮状态和可滚动定位标记');
 }
 
 function testHexTargetPickerExplainsInvalidTargets() {
@@ -3191,6 +3192,10 @@ function testHexcoreLibraryResponsiveStyles() {
     '海克斯 PNG 图标应覆盖候选卡、海克斯库、已拥有和详情弹窗四种独立尺寸',
   );
   assert(css.includes('.team-roster-card') && css.includes('.roster-card-popover') && css.includes('.status-dot.abnormal'), '实时抽选阵容看板应有固定卡片、hover详情和异常状态样式');
+  assert(
+    css.includes('.located-card') && css.includes('animation: locatePulse 0.72s ease-in-out 2;'),
+    '定位队伍高亮应只荧光闪烁2次，避免持续闪烁干扰裁判操作',
+  );
 }
 
 function testThemeSafeModalsAndScrollbars() {

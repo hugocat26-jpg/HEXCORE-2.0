@@ -1653,6 +1653,7 @@
       }
       Hexcore2.state.ui.activeView = 'teams';
       Hexcore2.state.ui.highlightCaptainId = captain.id;
+      Hexcore2.state.ui.scrollCaptainIntoViewId = captain.id;
       Hexcore2.state.ui.orderDrawerOpen = false;
       Hexcore2.state.ui.resetScrollOnRender = true;
       Hexcore2.state.ui.feedback = {

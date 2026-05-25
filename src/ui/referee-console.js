@@ -109,6 +109,10 @@
     return JSON.stringify(String(value ?? '')).replace(/</g, '\\u003c');
   }
 
+  function cssAttributeValue(value) {
+    return String(value ?? '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  }
+
   function eventLevelClass(level) {
     return ['info', 'draw', 'warn', 'success'].includes(level) ? level : 'info';
   }
@@ -1981,7 +1985,7 @@
             );
             const canBackfill = captain.team.length < capacity && backfillPlayers.length > 0;
             return `
-            <article class="data-card ${currentCaptain && currentCaptain.id === captain.id ? 'active-card' : ''} ${Hexcore2.state.ui.highlightCaptainId === captain.id ? 'located-card' : ''}">
+            <article class="data-card ${currentCaptain && currentCaptain.id === captain.id ? 'active-card' : ''} ${Hexcore2.state.ui.highlightCaptainId === captain.id ? 'located-card' : ''}" data-captain-id="${escapeHtml(captain.id)}">
               <div class="data-card-head">
                 <span>${index + 1}</span>
                 <label class="captain-name-field">
@@ -2880,6 +2884,8 @@
     render() {
       const shouldResetScroll = Boolean(Hexcore2.state.ui && Hexcore2.state.ui.resetScrollOnRender);
       if (Hexcore2.state.ui) delete Hexcore2.state.ui.resetScrollOnRender;
+      const scrollCaptainIntoViewId = Hexcore2.state.ui && Hexcore2.state.ui.scrollCaptainIntoViewId;
+      if (Hexcore2.state.ui) delete Hexcore2.state.ui.scrollCaptainIntoViewId;
       const scrollTarget = document.scrollingElement || document.documentElement;
       const scrollLeft = shouldResetScroll ? 0 : (scrollTarget ? scrollTarget.scrollLeft : 0);
       const scrollTop = shouldResetScroll ? 0 : (scrollTarget ? scrollTarget.scrollTop : 0);
@@ -2909,8 +2915,21 @@
           });
         }
       };
+      const focusLocatedCaptain = () => {
+        if (!scrollCaptainIntoViewId || !document.querySelector) return;
+        const target = document.querySelector(`[data-captain-id="${cssAttributeValue(scrollCaptainIntoViewId)}"]`);
+        if (target && typeof target.scrollIntoView === 'function') {
+          target.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' });
+        }
+      };
       restoreScroll();
-      if (global.requestAnimationFrame) global.requestAnimationFrame(restoreScroll);
+      focusLocatedCaptain();
+      if (global.requestAnimationFrame) {
+        global.requestAnimationFrame(() => {
+          restoreScroll();
+          focusLocatedCaptain();
+        });
+      }
     },
   };
 })(window);
