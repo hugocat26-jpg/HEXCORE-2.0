@@ -15,8 +15,13 @@
       && Hexcore2.selectors.isHexcoreEnabled('last-stand')
     );
     if (!lastStand || (captain.team || []).length < 4) return false;
-    const roundState = Hexcore2.economyEngine ? Hexcore2.economyEngine.roundState(captainId, round) : null;
-    if (roundState && (roundState.purchaseUsed || roundState.skipped)) return false;
+    if (
+      Hexcore2.hexcoreEngine
+      && typeof Hexcore2.hexcoreEngine.lastStandDeclinedThisRound === 'function'
+      && Hexcore2.hexcoreEngine.lastStandDeclinedThisRound(captainId, round)
+    ) {
+      return false;
+    }
     if (Hexcore2.hexcoreEngine && typeof Hexcore2.hexcoreEngine.lastStandCandidates === 'function') {
       return Hexcore2.hexcoreEngine.lastStandCandidates(captainId).length >= 4;
     }

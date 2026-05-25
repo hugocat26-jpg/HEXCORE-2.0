@@ -1859,7 +1859,11 @@ function testNewHexcores() {
   assert(oppositeBuyer.economy.gold === oppositeBuyerGold, '海浪命中异阵营时应返还原购买队长金币');
   assert(!oppositeHungry.economyEngine.roundState(oppositeBuyer.id).purchaseUsed, '海浪命中异阵营时应返还原购买队长购买权');
   assert(oppositeHungry.economyEngine.nextRefreshCost(oppositeBuyer.id) === 0, '海浪命中异阵营时应返还1次免费刷新');
-  assert(!oppositeHungry.state.draft.currentDraw.cards[0].purchased, '海浪命中异阵营时当前商店卡片应恢复可购买');
+  assert(oppositeHungry.state.draft.currentDraw.cards[0].purchased, '海浪命中异阵营时原商店卡位应保持已处理，不能把退回卡池的选手留在当前商店');
+  const oppositeBuyerTeamSize = oppositeBuyer.team.length;
+  oppositeHungry.state.draft.selectedSlot = 0;
+  oppositeHungry.actions.pickCard();
+  assert(oppositeBuyer.team.length === oppositeBuyerTeamSize, '海浪命中异阵营返池后原购买队长不能从当前商店再次购买同一卡位');
   assert(oppositeHungry.state.draft.runtimeEffects.some(effect => effect.type === 'hungry_wave_round' && effect.pendingRoundReward), '海浪命中异阵营后应登记轮末奖励');
   oppositeHungry.actions.nextCaptain();
   assert(oppositeHungry.state.draft.round === 2, '异阵营海浪轮末奖励应在进入下一轮前结算并推进轮次');
@@ -2224,6 +2228,11 @@ function testNewHexcores() {
   assert(heavenlyFull.actions.useHeavenlyDescent(heavenlyFullOwner.id).ok, '神兵天降发动者满员时仍应可发动');
   assert(!heavenlyFullOwner.team.includes(heavenlyFullPlayerId), '神兵天降发动者满员时不能获得选手');
   assert(playerById(heavenlyFull, heavenlyFullPlayerId).status === 'available', '神兵天降发动者满员时被夺取选手应回到卡池');
+  assert(heavenlyFull.state.draft.currentDraw.cards[0].purchased, '神兵天降满员返池时原商店卡位应保持已处理，不能把卡退回当前商店');
+  const heavenlyFullTargetSize = heavenlyFullTarget.team.length;
+  heavenlyFull.state.draft.selectedSlot = 0;
+  heavenlyFull.actions.pickCard();
+  assert(heavenlyFullTarget.team.length === heavenlyFullTargetSize, '神兵天降满员返池后原购买队长不能从当前商店再次购买同一卡位');
 
   const heavenlySkipHarness = createReadyHarness();
   const heavenlySkip = heavenlySkipHarness.H;
@@ -2453,6 +2462,7 @@ function testNewHexcores() {
   assert(uiResult && uiResult.pendingConfirm, '通过裁判按钮发动背水一战应先打开确认弹窗');
   assert(lastStand.state.ui.lastStandConfirm && lastStandHarness.app.innerHTML.includes('last-stand-modal'), '背水一战确认弹窗应写入UI状态并渲染');
   assert(lastStandHarness.app.innerHTML.includes('本阵营候选') && lastStandHarness.app.innerHTML.includes('不可跨阵营置换') && lastStandHarness.app.innerHTML.includes('确认发动'), '背水一战弹窗应说明候选范围并提供确认入口');
+  assert(lastStandHarness.app.innerHTML.includes('last-stand-candidate-panel'), '背水一战候选池预览应有独立可滚动容器');
   assert(lastStandCaptain.team.every(playerId => oldPlayers.some(player => player.id === playerId)), '确认前不应提前置换队伍');
   assert(lastStand.actions.confirmLastStand().ok, '确认弹窗后背水一战应可在当前队伍满4名队员时发动');
   assert(pickedPlayers.every(player => lastStandCaptain.team.includes(player.id)), '背水一战应随机换入4名非队长选手');
@@ -2462,15 +2472,58 @@ function testNewHexcores() {
   assert(lastStandCaptain.team.every(playerId => playerById(lastStand, playerId).camp === lastStandCamp), '背水一战换入队员必须全部来自本阵营');
   assert(outsiderPlayers.every(player => !lastStandCaptain.team.includes(player.id)), '背水一战不得抽入异阵营候选');
   assert(oldPlayers.filter(player => player.status === 'available' && !player.teamId).length === 3, '未作为补偿的原队员应回到可选池');
-  assert(lastStand.economyEngine.roundState(lastStandCaptain.id).purchaseUsed, '背水一战应消耗本轮购买权');
+  assert(!lastStand.economyEngine.roundState(lastStandCaptain.id).purchaseUsed, '背水一战本身不应消耗购买权；满员后购买权自然失效');
+
+  const lastStandAutoHarness = createReadyHarness();
+  const lastStandAuto = lastStandAutoHarness.H;
+  const lastStandAutoCaptain = currentCaptain(lastStandAuto);
+  lastStandAuto.state.hexcoreAssignments[lastStandAutoCaptain.id] = [
+    { ...lastStandAuto.sampleData.hexcores.find(hex => hex.id === 'last-stand'), status: 'available' },
+  ];
+  const autoCamp = lastStandAuto.selectors.captainCamp(lastStandAutoCaptain.id);
+  const autoPlayers = lastStandAuto.state.players
+    .filter(player => player.camp === autoCamp && !lastStandAuto.selectors.isCaptainPlayer(player.id))
+    .slice(0, 4);
+  autoPlayers.slice(0, 3).forEach(player => {
+    player.status = 'drafted';
+    player.teamId = lastStandAutoCaptain.id;
+  });
+  lastStandAutoCaptain.team = autoPlayers.slice(0, 3).map(player => player.id);
+  lastStandAuto.state.draft.currentDraw = {
+    id: 'last_stand_auto_shop',
+    captainId: lastStandAutoCaptain.id,
+    round: lastStandAuto.state.draft.round,
+    pickMode: 'shop',
+    generatedBy: 'test',
+    cards: [{ slotId: 'auto_slot_1', playerId: autoPlayers[3].id, tier: autoPlayers[3].tier, price: 0 }],
+    appliedEffects: [],
+  };
+  lastStandAutoCaptain.economy.gold = 10;
+  lastStandAuto.state.draft.selectedSlot = 0;
+  lastStandAuto.actions.pickCard();
+  assert(lastStandAuto.state.ui.lastStandConfirm && lastStandAuto.state.ui.lastStandConfirm.autoOneChance, '拥有背水一战的队伍满员后应自动弹出一次性确认窗口');
+  assert(lastStandAutoHarness.app.innerHTML.includes('唯一一次机会') && lastStandAutoHarness.app.innerHTML.includes('确认发动'), '背水一战自动弹窗应强提示只有一次机会');
+  lastStandAuto.actions.cancelLastStand();
+  assert(lastStandAuto.state.draft.runtimeEffects.some(effect => effect.type === 'last_stand_declined' && effect.captainId === lastStandAutoCaptain.id), '取消自动背水弹窗应记录本轮已放弃，避免重复询问');
 
   const lastStandPurchased = createReadyHarness().H;
   const lastStandPurchasedCaptain = currentCaptain(lastStandPurchased);
   lastStandPurchased.state.hexcoreAssignments[lastStandPurchasedCaptain.id] = [
     { ...lastStandPurchased.sampleData.hexcores.find(hex => hex.id === 'last-stand'), status: 'available' },
   ];
+  const purchasedCamp = lastStandPurchased.selectors.captainCamp(lastStandPurchasedCaptain.id);
+  const purchasedOldPlayers = lastStandPurchased.state.players
+    .filter(player => player.camp === purchasedCamp && !lastStandPurchased.selectors.isCaptainPlayer(player.id))
+    .slice(0, 4);
+  purchasedOldPlayers.forEach(player => {
+    player.status = 'drafted';
+    player.teamId = lastStandPurchasedCaptain.id;
+  });
+  lastStandPurchasedCaptain.team = purchasedOldPlayers.map(player => player.id);
   lastStandPurchased.economyEngine.roundState(lastStandPurchasedCaptain.id).purchaseUsed = true;
-  assert(!lastStandPurchased.hexcoreEngine.activate('last-stand').ok, '本轮已购买后不能再发动背水一战');
+  const purchasedQueueItem = lastStandPurchased.hexcoreEngine.executionQueue(lastStandPurchasedCaptain.id).find(item => item.id === 'last-stand');
+  assert(purchasedQueueItem && purchasedQueueItem.executable, '背水一战在队伍满员后即使无购买权也应可发动');
+  assert(lastStandPurchased.hexcoreEngine.activate('last-stand').ok, '本轮已购买但队伍满员后仍可发动背水一战');
 
   const lastStandOrder = createReadyHarness().H;
   const lastStandOrderCaptain = lastStandOrder.state.captains[5];
@@ -3242,7 +3295,15 @@ function testHexcoreLibraryResponsiveStyles() {
     && css.includes('.hex-png-icon.size-popover') && css.includes('width: 42px;'),
     '海克斯 PNG 图标应覆盖候选卡、海克斯库、已拥有和详情弹窗四种独立尺寸',
   );
-  assert(css.includes('.team-roster-card') && css.includes('.roster-card-popover') && css.includes('.status-dot.abnormal'), '实时抽选阵容看板应有固定卡片、hover详情和异常状态样式');
+  assert(
+    css.includes('.team-roster-card')
+    && css.includes('.roster-card-popover')
+    && css.includes('width: 280px;')
+    && css.includes('max-height: none;')
+    && css.includes('overflow: visible;')
+    && css.includes('.status-dot.abnormal'),
+    '实时抽选阵容看板应有固定卡片、hover自适应详情和异常状态样式',
+  );
   assert(
     css.includes('.located-card') && css.includes('animation: locatePulse 0.72s ease-in-out 2;'),
     '定位队伍高亮应只荧光闪烁2次，避免持续闪烁干扰裁判操作',
@@ -3279,6 +3340,12 @@ function testThemeSafeModalsAndScrollbars() {
     && css.includes('.import-preview-list::-webkit-scrollbar-thumb')
     && css.includes('border-color: var(--scroll-track);'),
     '全局和主要滚动容器应使用主题滚动条变量',
+  );
+  assert(
+    css.includes('.last-stand-body section {\n  display: grid;')
+    && css.includes('height: 296px;')
+    && css.includes('.last-stand-chip-list.candidates {\n  grid-template-columns: repeat(2, minmax(0, 1fr));\n  align-content: start;\n  overflow-y: auto;'),
+    '背水一战候选池预览应与当前队员框等高，并在框内滚动',
   );
   assert(
     css.includes(':root[data-theme="apple"] select option:checked') && css.includes('color: #ffffff;'),

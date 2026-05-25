@@ -511,6 +511,46 @@
     scheduleHeavenlyWindowTick();
   }
 
+  function openLastStandConfirm(captain, options = {}) {
+    if (!captain || !Hexcore2.state.ui) return false;
+    Hexcore2.state.ui.lastStandConfirm = {
+      captainId: captain.id,
+      createdAt: Date.now(),
+      autoOneChance: Boolean(options.autoOneChance),
+      reason: options.reason || '',
+    };
+    return true;
+  }
+
+  function maybeOpenAutoLastStandPrompt(captainId, reason = 'team_full') {
+    const captain = Hexcore2.state.captains.find(item => item.id === captainId);
+    const current = Hexcore2.selectors.currentCaptain();
+    if (!captain || !current || captain.id !== current.id) return false;
+    if (Hexcore2.state.ui && (Hexcore2.state.ui.lastStandConfirm || Hexcore2.state.ui.recruitReveal)) return false;
+    if (activeHeavenlyWindow()) return false;
+    if (
+      Hexcore2.hexcoreEngine
+      && typeof Hexcore2.hexcoreEngine.lastStandDeclinedThisRound === 'function'
+      && Hexcore2.hexcoreEngine.lastStandDeclinedThisRound(captain.id)
+    ) {
+      return false;
+    }
+    const item = Hexcore2.hexcoreEngine && Hexcore2.hexcoreEngine.executionQueue
+      ? Hexcore2.hexcoreEngine.executionQueue(captain.id).find(entry => entry.id === 'last-stand')
+      : null;
+    if (!item || !item.executable) return false;
+    const opened = openLastStandConfirm(captain, { autoOneChance: true, reason });
+    if (opened) {
+      Hexcore2.eventStore.append(
+        '背水一战可发动',
+        `${captain.name} 已满 4 名队员，背水一战现在可用。系统已弹出唯一一次确认窗口，请立即决定是否发动。`,
+        'warn',
+        { captainId: captain.id, reason }
+      );
+    }
+    return opened;
+  }
+
   function prepareCompensationTurn(captainId) {
     const state = Hexcore2.state;
     const order = state.draft.currentOrder || [];
@@ -1099,6 +1139,7 @@
         }
       } else {
         openHeavenlyWindow(captain, slot, result.price);
+        maybeOpenAutoLastStandPrompt(captain.id, 'team_full_after_purchase');
       }
       renderAndPersist();
     },
@@ -1336,7 +1377,25 @@
     },
 
     cancelLastStand() {
+      const confirmState = Hexcore2.state.ui && Hexcore2.state.ui.lastStandConfirm;
+      const captain = confirmState && Hexcore2.state.captains.find(item => item.id === confirmState.captainId);
+      const autoOneChance = Boolean(confirmState && confirmState.autoOneChance);
+      if (autoOneChance && captain) {
+        Hexcore2.state.draft.runtimeEffects = Hexcore2.state.draft.runtimeEffects || [];
+        Hexcore2.state.draft.runtimeEffects.push({
+          type: 'last_stand_declined',
+          captainId: captain.id,
+          round: Hexcore2.state.draft.round,
+          reason: `${captain.name} 放弃满员后的背水一战唯一确认机会`,
+          createdAt: new Date().toISOString(),
+        });
+        Hexcore2.eventStore.append('背水一战已放弃', `${captain.name} 放弃本轮满员后的背水一战唯一机会。`, 'warn', { captainId: captain.id });
+      }
       if (Hexcore2.state.ui) delete Hexcore2.state.ui.lastStandConfirm;
+      if (autoOneChance) {
+        this.nextCaptain({ skipSnapshot: true });
+        return;
+      }
       renderAndPersist();
     },
 
@@ -1376,10 +1435,7 @@
           return { ok: false, reason: item ? item.reason : '当前不能发动' };
         }
         Hexcore2.state.ui = Hexcore2.state.ui || {};
-        Hexcore2.state.ui.lastStandConfirm = {
-          captainId: captain.id,
-          createdAt: Date.now(),
-        };
+        openLastStandConfirm(captain);
         renderAndPersist();
         return { ok: true, pendingConfirm: true };
       }

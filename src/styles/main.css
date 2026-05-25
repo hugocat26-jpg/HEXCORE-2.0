@@ -1339,7 +1339,7 @@ h2 span {
 
 .cards-grid.shop-grid .player-card,
 .cards-grid.shop-grid .shop-empty-slot {
-  flex-basis: 128px;
+  flex-basis: 152px;
 }
 
 .cards-grid.open-pick-grid .player-card {
@@ -1353,8 +1353,8 @@ h2 span {
 
 .player-card {
   position: relative;
-  min-height: 132px;
-  min-width: 122px;
+  min-height: 146px;
+  min-width: 136px;
   border: 1px solid var(--line);
   border-radius: 7px;
   background: linear-gradient(180deg, rgba(16, 31, 40, 0.96), rgba(9, 18, 25, 0.96));
@@ -2008,14 +2008,18 @@ h2 span {
 }
 
 .player-card strong {
-  display: block;
+  display: -webkit-box;
   overflow: hidden;
   max-width: calc(100% - 40px);
-  margin-bottom: 5px;
+  min-height: 41px;
+  margin-bottom: 4px;
   font-size: 17px;
   line-height: 1.22;
   text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .player-card small {
@@ -3148,6 +3152,13 @@ h2 span {
   padding: 12px;
 }
 
+.last-stand-body section {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  height: 296px;
+  min-height: 0;
+}
+
 .last-stand-body h3 {
   margin: 0 0 10px;
   color: var(--text);
@@ -3161,6 +3172,11 @@ h2 span {
 
 .last-stand-chip-list.candidates {
   grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-content: start;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 4px;
+  scrollbar-color: var(--scroll-thumb) var(--scroll-track);
 }
 
 .last-stand-chip-list span {
@@ -7615,6 +7631,7 @@ h2 span {
 .origin-sage-modal::-webkit-scrollbar-track,
 .charged-cannon-modal::-webkit-scrollbar-track,
 .last-stand-modal::-webkit-scrollbar-track,
+.last-stand-chip-list.candidates::-webkit-scrollbar-track,
 .recruit-reveal-modal::-webkit-scrollbar-track,
 .economy-reveal-modal::-webkit-scrollbar-track,
 .hex-detail-body::-webkit-scrollbar-track,
@@ -7633,6 +7650,7 @@ h2 span {
 .origin-sage-modal::-webkit-scrollbar-thumb,
 .charged-cannon-modal::-webkit-scrollbar-thumb,
 .last-stand-modal::-webkit-scrollbar-thumb,
+.last-stand-chip-list.candidates::-webkit-scrollbar-thumb,
 .recruit-reveal-modal::-webkit-scrollbar-thumb,
 .economy-reveal-modal::-webkit-scrollbar-thumb,
 .hex-detail-body::-webkit-scrollbar-thumb,
@@ -8000,13 +8018,13 @@ h2 span {
 
 .roster-card-popover {
   position: absolute;
-  left: 8px;
-  right: 8px;
+  left: 50%;
   bottom: calc(100% + 8px);
   z-index: 18;
   display: none;
-  max-height: min(300px, 48vh);
-  overflow: auto;
+  width: 280px;
+  max-height: none;
+  overflow: visible;
   border: 1px solid rgba(34, 211, 238, 0.34);
   border-radius: 8px;
   background: rgba(7, 18, 26, 0.98);
@@ -8014,6 +8032,8 @@ h2 span {
   padding: 10px;
   color: var(--text);
   cursor: default;
+  transform: translateX(-50%);
+  pointer-events: none;
 }
 
 .team-roster-card:hover .roster-card-popover,

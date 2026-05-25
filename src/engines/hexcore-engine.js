@@ -34,6 +34,15 @@
       && (Hexcore2.state.hexcoreAssignments[captainId] || []).some(hexcore => hexcore.id === hexcoreId);
   }
 
+  function lastStandDeclinedThisRound(captainId, round = Hexcore2.state.draft.round) {
+    return (Hexcore2.state.draft.runtimeEffects || []).some(effect =>
+      effect
+      && effect.type === 'last_stand_declined'
+      && effect.captainId === captainId
+      && Number(effect.round) === Number(round)
+    );
+  }
+
   function markUsed(hexcore) {
     if (!hexcore || hexcore.mode === 'passive') return;
     if (hexcore.maxUsesPerRound) {
@@ -814,7 +823,7 @@
           const candidates = lastStandCandidates(captain.id);
           const draftedCandidates = candidates.filter(player => lastStandOwner(player) && lastStandOwner(player).id !== captain.id);
           if ((captain.team || []).length < 4) return blocked(base, '队伍未满', '背水一战需要当前已有4名队员作为置换筹码。');
-          if (roundState.purchaseUsed || roundState.skipped) return blocked(base, '购买权已使用', '背水一战会消耗本轮购买权，购买或跳过后不能发动。');
+          if (lastStandDeclinedThisRound(captain.id)) return blocked(base, '本轮已放弃', '背水一战满员提示只有一次机会，本轮已放弃。');
           return candidates.length >= 4
             ? active(base, '可弹窗确认', `本阵营候选 ${candidates.length} 人，其中已在别队 ${draftedCandidates.length} 人；确认后随机替换当前4名队员。`)
             : blocked(base, '候选不足', `本阵营可置换候选不足4人，当前 ${candidates.length} 人。`);
@@ -1010,8 +1019,6 @@
       if (hexcore.id === 'last-stand') {
         const oldTeamIds = [...(captain.team || [])];
         if (oldTeamIds.length < 4) return logFail('背水一战需要当前已有4名队员');
-        const roundState = currentRoundState(captain.id);
-        if (roundState.purchaseUsed || roundState.skipped) return logFail('本轮购买权已使用或已跳过，不能发动背水一战');
         const candidates = lastStandCandidates(captain.id);
         if (candidates.length < 4) return logFail(`本阵营可置换候选不足4人，当前 ${candidates.length} 人`);
         const picked = [...candidates].sort(() => Math.random() - 0.5).slice(0, 4);
@@ -1051,7 +1058,6 @@
           player.status = 'available';
           delete player.teamId;
         });
-        currentRoundState(captain.id).purchaseUsed = true;
         state.draft.currentDraw = null;
         state.draft.pickedThisTurn = true;
         Hexcore2.eventStore.append(
@@ -1284,6 +1290,7 @@
     isHungryWaveImmune,
     activeHungryWave,
     clearWeatherFogForCaptain,
+    lastStandDeclinedThisRound,
 
     effectStatusForCaptain(captainId) {
       const effects = Hexcore2.state.draft.runtimeEffects || [];
@@ -1513,8 +1520,7 @@
       const sameCamp = hungryCamp && player.camp === hungryCamp;
       const appliedPrice = Math.max(0, Number(paidPrice) || 0);
       if (!sameCamp) {
-        const keepShopPurchased = Boolean(options.keepShopPurchasedOnReturn);
-        returnPurchasedPlayerToPool(buyer, player, { restoreShopCard: !keepShopPurchased });
+        returnPurchasedPlayerToPool(buyer, player, { restoreShopCard: false });
         const compensation = Hexcore2.economyEngine.compensateHungryWaveVictim
           ? Hexcore2.economyEngine.compensateHungryWaveVictim(buyer.id, paidPrice, state.draft.round)
           : { ok: false };
@@ -1530,7 +1536,7 @@
         effect.rewardProbabilityRound = state.draft.round;
         effect.appliedAt = new Date().toISOString();
         Hexcore2.eventStore.append(
-          keepShopPurchased ? '海浪空手而归' : '海浪异阵营命中',
+          '海浪空手而归',
           `${hungryCaptain.name} 的【海浪，我没吃饭】命中 ${buyer.name} 刚购买的异阵营选手「${player.name}」：不夺取，已退回卡池，返还 ${buyer.name} ${appliedPrice} 金币、1 次免费刷新和购买权；${hungryCaptain.name} 将在本轮结束后按第 ${state.draft.round} 轮概率从同阵营卡池随机获得 1 名选手`,
           'warn',
           { sourceCaptainId: hungryCaptain.id, buyerId: buyer.id, playerId: player.id, price: appliedPrice, compensation }
@@ -1538,19 +1544,19 @@
         return {
           handled: true,
           returned: true,
-          returnedToPool: keepShopPurchased,
+          returnedToPool: true,
           captainId: hungryCaptain.id,
           buyerId: buyer.id,
           playerId: player.id,
           price: appliedPrice,
-          reveal: keepShopPurchased ? {
+          reveal: {
             title: '海浪空手而归',
             source: '海浪，我没吃饭',
             captainId: hungryCaptain.id,
             playerIds: [player.id],
             summary: `命中的「${player.name}」不是同阵营，海浪没有带走他，只把他冲回了卡池`,
             detail: `${buyer.name} 原卡位显示为已购买，并返还 ${appliedPrice} 金币、1次免费刷新和购买权。`,
-          } : null,
+          },
         };
       }
       if (Hexcore2.selectors.teamSize(hungryCaptain.id) >= Hexcore2.selectors.teamMemberCapacity(hungryCaptain.id)) {
