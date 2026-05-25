@@ -1070,9 +1070,16 @@
         );
       }
       const hungryWave = Hexcore2.hexcoreEngine.resolveHungryWaveAfterPurchase
-        ? Hexcore2.hexcoreEngine.resolveHungryWaveAfterPurchase(captain.id, slot.playerId, result.price)
+        ? Hexcore2.hexcoreEngine.resolveHungryWaveAfterPurchase(captain.id, slot.playerId, result.price, {
+          keepShopPurchasedOnReturn: weatherFogActive,
+        })
         : { handled: false };
       if (hungryWave.handled) {
+        if (weatherFogActive && (hungryWave.returnedToPool || !hungryWave.returned)) {
+          delete slot.revealUntil;
+          delete slot.revealFlipUntil;
+          delete slot.purchaseRevealReason;
+        }
         Hexcore2.state.draft.pickedThisTurn = false;
         const nextSlotIndex = draw.cards.findIndex(card => !card.purchased);
         Hexcore2.state.draft.selectedSlot = nextSlotIndex >= 0 ? nextSlotIndex : 0;

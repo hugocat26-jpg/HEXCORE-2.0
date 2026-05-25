@@ -144,12 +144,12 @@
     delete card.purchaseRevealReason;
   }
 
-  function returnPurchasedPlayerToPool(buyer, player) {
+  function returnPurchasedPlayerToPool(buyer, player, options = {}) {
     buyer.team = (buyer.team || []).filter(id => id !== player.id);
     player.status = 'available';
     delete player.teamId;
     delete player.teamBypassReason;
-    restoreCurrentShopCard(player.id);
+    if (options.restoreShopCard !== false) restoreCurrentShopCard(player.id);
   }
 
   function hungryWaveRewardPlayer(captainId, round) {
@@ -1481,7 +1481,7 @@
         },
       };
     },
-    resolveHungryWaveAfterPurchase(buyerId, playerId, paidPrice) {
+    resolveHungryWaveAfterPurchase(buyerId, playerId, paidPrice, options = {}) {
       const state = Hexcore2.state;
       const buyer = state.captains.find(captain => captain.id === buyerId);
       const player = state.players.find(item => item.id === playerId);
@@ -1513,7 +1513,8 @@
       const sameCamp = hungryCamp && player.camp === hungryCamp;
       const appliedPrice = Math.max(0, Number(paidPrice) || 0);
       if (!sameCamp) {
-        returnPurchasedPlayerToPool(buyer, player);
+        const keepShopPurchased = Boolean(options.keepShopPurchasedOnReturn);
+        returnPurchasedPlayerToPool(buyer, player, { restoreShopCard: !keepShopPurchased });
         const compensation = Hexcore2.economyEngine.compensateHungryWaveVictim
           ? Hexcore2.economyEngine.compensateHungryWaveVictim(buyer.id, paidPrice, state.draft.round)
           : { ok: false };
@@ -1529,12 +1530,28 @@
         effect.rewardProbabilityRound = state.draft.round;
         effect.appliedAt = new Date().toISOString();
         Hexcore2.eventStore.append(
-          '海浪异阵营命中',
+          keepShopPurchased ? '海浪空手而归' : '海浪异阵营命中',
           `${hungryCaptain.name} 的【海浪，我没吃饭】命中 ${buyer.name} 刚购买的异阵营选手「${player.name}」：不夺取，已退回卡池，返还 ${buyer.name} ${appliedPrice} 金币、1 次免费刷新和购买权；${hungryCaptain.name} 将在本轮结束后按第 ${state.draft.round} 轮概率从同阵营卡池随机获得 1 名选手`,
           'warn',
           { sourceCaptainId: hungryCaptain.id, buyerId: buyer.id, playerId: player.id, price: appliedPrice, compensation }
         );
-        return { handled: true, returned: true, captainId: hungryCaptain.id, buyerId: buyer.id, playerId: player.id, price: appliedPrice };
+        return {
+          handled: true,
+          returned: true,
+          returnedToPool: keepShopPurchased,
+          captainId: hungryCaptain.id,
+          buyerId: buyer.id,
+          playerId: player.id,
+          price: appliedPrice,
+          reveal: keepShopPurchased ? {
+            title: '海浪空手而归',
+            source: '海浪，我没吃饭',
+            captainId: hungryCaptain.id,
+            playerIds: [player.id],
+            summary: `命中的「${player.name}」不是同阵营，海浪没有带走他，只把他冲回了卡池`,
+            detail: `${buyer.name} 原卡位显示为已购买，并返还 ${appliedPrice} 金币、1次免费刷新和购买权。`,
+          } : null,
+        };
       }
       if (Hexcore2.selectors.teamSize(hungryCaptain.id) >= Hexcore2.selectors.teamMemberCapacity(hungryCaptain.id)) {
         effect.consumed = true;
@@ -1571,11 +1588,11 @@
         playerId: player.id,
         price: effect.appliedPrice,
         reveal: {
-          title: '海浪夺取入队揭示',
+          title: '海浪满载而归',
           source: '海浪，我没吃饭',
           captainId: hungryCaptain.id,
           playerIds: [player.id],
-          summary: `${hungryCaptain.name} 夺取了 ${buyer.name} 刚购买的队员`,
+          summary: `命中的「${player.name}」正好同阵营，海浪把他带回了自己的队伍`,
           detail: `${buyer.name} 已返还 ${effect.appliedPrice} 金币、1次免费刷新和购买权。`,
         },
       };

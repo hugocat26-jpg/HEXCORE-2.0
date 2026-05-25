@@ -1772,6 +1772,50 @@ function testNewHexcores() {
   assert(playerById(hungry, hungrySlot.playerId).teamId === hungryCaptain.id, '被夺取选手归属应更新为海浪持有者');
   assert(hungry.state.ui.recruitReveal && hungry.state.ui.recruitReveal.playerIds.includes(hungrySlot.playerId), '海浪同阵营夺取成功后应打开入队揭示弹窗');
 
+  const fogHungryHarness = createReadyHarness();
+  const fogHungry = fogHungryHarness.H;
+  fogHungry.state.draft.baseOrder = ['c1', 'c2'];
+  fogHungry.state.draft.currentOrder = ['c1', 'c2'];
+  fogHungry.state.draft.currentIndex = 0;
+  fogHungry.state.draft.currentDraw = null;
+  const fogHungryCaptain = fogHungry.state.captains.find(captain => captain.id === 'c1');
+  const fogHungryBuyer = fogHungry.state.captains.find(captain => captain.id === 'c2');
+  fogHungry.state.hexcoreAssignments[fogHungryCaptain.id] = [
+    { ...fogHungry.sampleData.hexcores.find(hex => hex.id === 'hungry-wave'), status: 'passive' },
+  ];
+  fogHungry.state.draft.runtimeEffects.push({
+    type: 'weather_fog',
+    captainId: fogHungryBuyer.id,
+    sourceCaptainId: 'c3',
+    triggerRound: 1,
+    round: 1,
+    reason: '组合回归：血雾卡被海浪夺走后原卡位显示已购买',
+  });
+  Math.random = () => 0;
+  fogHungry.actions.drawCards();
+  Math.random = hungryOriginalRandom;
+  assert(fogHungry.selectors.currentCaptain().id === fogHungryBuyer.id, '测试前提：血雾同阵营海浪应轮到受影响的本地队长购买');
+  assert(
+    fogHungry.state.draft.currentDraw.appliedEffects.some(effect => effect.type === 'weather_fog'),
+    '测试前提：同阵营海浪购买者商店应处于骤雨血雾清风遮蔽状态'
+  );
+  const fogHungrySlot = fogHungry.state.draft.currentDraw.cards[0];
+  const fogHungryPlayer = playerById(fogHungry, fogHungrySlot.playerId);
+  assert(fogHungryPlayer.camp === fogHungry.selectors.captainCamp(fogHungryCaptain.id), '测试前提：血雾购买卡应与海浪持有者同阵营');
+  fogHungryBuyer.economy.gold = 20;
+  fogHungry.state.draft.selectedSlot = 0;
+  Math.random = () => 0;
+  fogHungry.actions.pickCard();
+  Math.random = hungryOriginalRandom;
+  assert(fogHungryCaptain.team.includes(fogHungrySlot.playerId), '血雾商店同阵营海浪命中时真实选手应被海浪带回自己的队伍');
+  assert(!fogHungryBuyer.team.includes(fogHungrySlot.playerId), '血雾商店同阵营海浪命中时真实选手不应留在原购买队伍');
+  assert(fogHungryPlayer.status === 'drafted' && fogHungryPlayer.teamId === fogHungryCaptain.id, '血雾商店同阵营海浪命中后真实选手归属应更新为海浪队伍');
+  assert(fogHungrySlot.purchased && !fogHungrySlot.revealUntil && !fogHungrySlot.purchaseRevealReason, '血雾同阵营卡被海浪带走后原卡位应立即显示已购买并清除揭示状态');
+  assert(fogHungryHarness.app.innerHTML.includes('shop-empty-slot purchased'), '血雾同阵营卡被海浪带走后界面原位置应显示已购买空槽');
+  assert(fogHungryHarness.app.innerHTML.includes('海浪满载而归') && fogHungryHarness.app.innerHTML.includes('带回了自己的队伍'), '血雾同阵营卡被海浪带走后应弹窗提示带回自己的队伍');
+  assert(!fogHungry.economyEngine.roundState(fogHungryBuyer.id).purchaseUsed, '血雾同阵营卡被海浪带走后应返还原购买队长购买权');
+  assert(fogHungry.economyEngine.nextRefreshCost(fogHungryBuyer.id) === 0, '血雾同阵营卡被海浪带走后应返还1次免费刷新');
+
   const oppositeHungry = createReadyHarness().H;
   oppositeHungry.state.draft.baseOrder = ['c1', 'c6'];
   oppositeHungry.state.draft.currentOrder = ['c1', 'c6'];
@@ -1811,7 +1855,8 @@ function testNewHexcores() {
   assert(oppositeHungry.state.draft.runtimeEffects.some(effect => effect.type === 'hungry_wave_round' && effect.roundRewardResolved && effect.roundRewardPlayerId === rewardPlayer.id), '异阵营海浪轮末奖励应记录结算结果');
   assert(oppositeHungry.state.ui.recruitReveal && oppositeHungry.state.ui.recruitReveal.playerIds.includes(rewardPlayer.id), '海浪轮末补偿成功后应打开入队揭示弹窗');
 
-  const fogOppositeHungry = createReadyHarness().H;
+  const fogOppositeHungryHarness = createReadyHarness();
+  const fogOppositeHungry = fogOppositeHungryHarness.H;
   fogOppositeHungry.state.draft.baseOrder = ['c1', 'c6'];
   fogOppositeHungry.state.draft.currentOrder = ['c1', 'c6'];
   fogOppositeHungry.state.draft.currentIndex = 0;
@@ -1847,7 +1892,9 @@ function testNewHexcores() {
   assert(!fogWaveCaptain.team.includes(fogOppositeSlot.playerId), '血雾商店命中异阵营海浪时不得被海浪队伍夺取');
   assert(!fogBuyer.team.includes(fogOppositeSlot.playerId), '血雾商店命中异阵营海浪时应从原购买队伍移除选手');
   assert(fogOppositePlayer.status === 'available' && !fogOppositePlayer.teamId, '血雾商店命中异阵营海浪时真实购买选手应回到可选卡池');
-  assert(!fogOppositeSlot.purchased && !fogOppositeSlot.revealUntil && !fogOppositeSlot.purchaseRevealReason, '血雾商店命中异阵营海浪时当前卡槽应恢复为可购买状态并清除揭示状态');
+  assert(fogOppositeSlot.purchased && !fogOppositeSlot.revealUntil && !fogOppositeSlot.purchaseRevealReason, '血雾异阵营卡被海浪命中后原卡位应显示已购买并清除揭示状态');
+  assert(fogOppositeHungryHarness.app.innerHTML.includes('shop-empty-slot purchased'), '血雾异阵营卡被海浪命中后界面原位置应显示已购买空槽');
+  assert(fogOppositeHungryHarness.app.innerHTML.includes('海浪空手而归') && fogOppositeHungryHarness.app.innerHTML.includes('冲回了卡池'), '血雾异阵营卡被海浪命中后应弹窗提示海浪空手而归');
   assert(!fogOppositeHungry.economyEngine.roundState(fogBuyer.id).purchaseUsed, '血雾商店命中异阵营海浪时应返还购买权');
   assert(fogOppositeHungry.state.draft.runtimeEffects.some(effect => effect.type === 'hungry_wave_round' && effect.pendingRoundReward), '血雾商店命中异阵营海浪后仍应登记轮末奖励');
 
