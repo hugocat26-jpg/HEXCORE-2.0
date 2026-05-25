@@ -5885,26 +5885,54 @@ h2 span {
   font-weight: 800;
 }
 
+.tournament-control-panel {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+}
+
+.tournament-metrics-grid {
+  grid-template-columns: repeat(5, minmax(132px, 1fr));
+  gap: 10px;
+  margin-bottom: 0;
+}
+
+.tournament-metrics-grid > div {
+  min-height: 62px;
+  padding: 10px 12px;
+}
+
+.tournament-metrics-grid strong {
+  font-size: 22px;
+}
+
 .tournament-generate-row {
-  align-items: stretch;
+  display: grid;
+  grid-template-columns: minmax(360px, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 0;
+  border-bottom: 0;
+  padding-bottom: 0;
 }
 
 .tournament-mode-toggle {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  display: flex;
   align-items: center;
-  gap: 2px 9px;
-  min-width: min(420px, 100%);
+  gap: 8px;
   border: 1px solid var(--line-soft);
   border-radius: 7px;
   background: rgba(255, 255, 255, 0.03);
-  padding: 8px 10px;
+  padding: 7px 10px;
+  min-height: 38px;
 }
 
 .tournament-mode-toggle input {
-  grid-row: 1 / span 2;
+  flex: 0 0 auto;
   width: 17px;
+  min-height: 17px;
   height: 17px;
+  padding: 0;
   accent-color: var(--cyan);
 }
 
@@ -5912,12 +5940,52 @@ h2 span {
   color: #e8f6fb;
   font-size: 13px;
   font-weight: 900;
+  white-space: nowrap;
 }
 
 .tournament-mode-toggle small {
   color: var(--muted);
   font-size: 12px;
   font-weight: 800;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.toolbar-row .tournament-generate-actions,
+.tournament-generate-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.tournament-generate-actions .primary-btn,
+.tournament-generate-actions .danger-btn {
+  min-width: 116px;
+  white-space: nowrap;
+}
+
+@media (max-width: 900px) {
+  .tournament-metrics-grid {
+    grid-template-columns: repeat(2, minmax(132px, 1fr));
+  }
+
+  .tournament-generate-row {
+    grid-template-columns: 1fr;
+  }
+
+  .tournament-mode-toggle small {
+    white-space: normal;
+  }
+
+  .tournament-generate-actions {
+    justify-content: stretch;
+  }
+
+  .tournament-generate-actions .primary-btn,
+  .tournament-generate-actions .danger-btn {
+    flex: 1 1 0;
+  }
 }
 
 .tournament-round {
@@ -6065,11 +6133,12 @@ h2 span {
 
 .slot-select-btn {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  justify-items: start;
   gap: 6px;
   min-width: 0;
-  min-height: 34px;
+  min-height: 42px;
   border: 1px solid rgba(25, 212, 240, 0.2);
   border-radius: 6px;
   background: rgba(4, 14, 20, 0.72);
@@ -6091,12 +6160,14 @@ h2 span {
 
 .slot-select-btn strong {
   min-width: 0;
-  overflow: hidden;
+  overflow: visible;
   color: #dce9ef;
   font-size: 14px;
   font-weight: 900;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.25;
+  text-align: left;
+  white-space: normal;
+  word-break: keep-all;
 }
 
 .slot-select-btn small {
@@ -6112,12 +6183,13 @@ h2 span {
 
 .slot-team-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr);
   gap: 6px;
-  align-items: center;
+  align-items: start;
 }
 
 .slot-remove-btn {
+  justify-self: end;
   min-width: 44px;
   height: 24px;
   border: 1px solid rgba(255, 135, 149, 0.42);
@@ -6135,11 +6207,12 @@ h2 span {
 }
 
 .match-score-row .slot-team-row > span {
-  overflow: hidden;
+  overflow: visible;
   color: #dce9ef;
   font-weight: 900;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.25;
+  white-space: normal;
+  word-break: keep-all;
 }
 
 .tournament-slot-picker-modal {

@@ -2656,8 +2656,8 @@
 
     return `
       ${pageHeader('赛程', '为金币商店组队结束后的队伍安排淘汰赛赛程，录入比分后系统自动晋级胜者。')}
-      <section class="data-panel">
-        <div class="metrics-grid">
+      <section class="data-panel tournament-control-panel">
+        <div class="metrics-grid tournament-metrics-grid">
           <div><span>参赛队伍</span><strong>${Hexcore2.selectors.teamCount()}</strong></div>
           <div><span>赛程状态</span><strong>${statusText}</strong></div>
           <div><span>已完成场次</span><strong>${completedMatches}/${totalMatches || 0}</strong></div>
@@ -2668,10 +2668,12 @@
           <label class="tournament-mode-toggle">
             <input id="tournament-camp-versus-toggle" type="checkbox" ${campVersusEnabled ? 'checked' : ''} onchange="window.hexcoreUI.setTournamentCampVersus(this.checked)">
             <span>阵营对抗</span>
-            <small>勾选：本地队伍在左、外地队伍在右；不勾选：全随机对抗。</small>
+            <small>勾选左蓝本地 vs 右红外地；取消后全随机。</small>
           </label>
-          <button class="primary-btn" onclick="window.hexcoreUI.generateTournamentSchedule()">一键生成赛程</button>
-          <button class="danger-btn" onclick="window.hexcoreUI.resetTournamentSchedule()">清空赛程</button>
+          <div class="tournament-generate-actions">
+            <button class="primary-btn" onclick="window.hexcoreUI.generateTournamentSchedule()">一键生成赛程</button>
+            <button class="danger-btn" onclick="window.hexcoreUI.resetTournamentSchedule()">清空赛程</button>
+          </div>
         </div>
       </section>
       ${tournament.rounds.length ? `

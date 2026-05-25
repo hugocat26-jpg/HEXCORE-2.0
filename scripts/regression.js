@@ -3023,7 +3023,7 @@ function testTournamentScheduleRandomizesEntrants() {
   H.actions.closeTournamentSlotPicker();
   firstRound.matches[0].status = 'pending_opponent';
   H.actions.setActiveView('tournament');
-  assert(app.innerHTML.includes('本地队伍') && app.innerHTML.includes('外地队伍'), '赛程页应展示阵营对抗左右槽位文案');
+  assert(app.innerHTML.includes('左蓝本地') && app.innerHTML.includes('右红外地'), '赛程页应展示阵营对抗左右槽位文案');
   assert(app.innerHTML.includes('更换') && app.innerHTML.includes('移出') && app.innerHTML.includes('清空本场'), '赛程页已放入队伍后应提供更换、移出和清空本场操作');
   assert(app.innerHTML.includes('待录分'), '双方都已填入队伍时，即使旧状态仍是待补齐，也应显示待录分');
   assert(!app.innerHTML.includes('确认轮空'), '双方都已填入队伍时，即使旧状态仍是待补齐，也不应显示确认轮空');
