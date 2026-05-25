@@ -327,10 +327,20 @@
   }
 
   function transmuteTargets(captainId, hexcoreId) {
-    const tier = transmuteTier(hexcoreId);
-    if (!tier) return [];
-    return Hexcore2.selectors.availableCampPlayers(captainId)
-      .filter(player => Number(player.tier) === tier);
+    return transmutePlan(captainId, hexcoreId).targets;
+  }
+
+  function transmutePlan(captainId, hexcoreId) {
+    const requestedTier = transmuteTier(hexcoreId);
+    if (!requestedTier) return { requestedTier: 0, tier: 0, targets: [], downgraded: false };
+    const available = Hexcore2.selectors.availableCampPlayers(captainId);
+    for (let tier = requestedTier; tier >= 1; tier -= 1) {
+      const targets = available.filter(player => Number(player.tier) === tier);
+      if (targets.length) {
+        return { requestedTier, tier, targets, downgraded: tier < requestedTier };
+      }
+    }
+    return { requestedTier, tier: 0, targets: [], downgraded: false };
   }
 
   function lastStandCandidates(captainId) {
@@ -383,13 +393,21 @@
       .filter(player => player && (player.tier === 2 || player.tier === 3));
   }
 
-  function stuckTogetherTargets(captainId) {
+  function stuckTogetherMaxTier(round = Hexcore2.state.draft.round) {
+    const baseTier = Hexcore2.selectors.roundTier
+      ? Hexcore2.selectors.roundTier(round)
+      : Math.max(1, Math.min(5, Number(round) || 1));
+    return Math.max(1, Math.min(5, (Number(baseTier) || 1) + 1));
+  }
+
+  function stuckTogetherTargets(captainId, round = Hexcore2.state.draft.round) {
     const camp = captainCamp(captainId);
+    const maxTier = stuckTogetherMaxTier(round);
     return Hexcore2.state.players
       .filter(player =>
         player.status === 'available'
         && player.tier >= 1
-        && player.tier <= 5
+        && player.tier <= maxTier
         && player.camp === camp
         && !Hexcore2.selectors.isCaptainPlayer(player.id)
       )
@@ -703,6 +721,7 @@
     },
 
     executionQueue(captainId) {
+      const state = Hexcore2.state;
       const captain = Hexcore2.state.captains.find(item => item.id === captainId) || currentCaptain();
       if (!captain) return [];
       const roundState = currentRoundState(captain.id);
@@ -813,12 +832,15 @@
           return active(base, '可执行', `支付3金币，从 ${targets.length} 名同阵营2-5费可选选手中随机盲抽1人。`);
         }
         if (hex.id === 'transmute-gold' || hex.id === 'transmute-prismatic') {
-          const tier = transmuteTier(hex.id);
-          const targets = transmuteTargets(captain.id, hex.id);
+          const plan = transmutePlan(captain.id, hex.id);
           if (shopOpen) return blocked(base, '商店已打开', '质变必须在本轮商店打开前使用。');
           if (roundState.purchaseUsed || roundState.skipped) return blocked(base, '购买权已使用', '质变会消耗本轮购买权。');
-          if (!targets.length) return blocked(base, '目标池为空', `同阵营没有${tier}费可选选手。`);
-          return active(base, '可执行', `免费从同阵营${tier}费可选池随机获得1人，并消耗本轮购买权。`);
+          if (!plan.targets.length) return blocked(base, '目标池为空', `同阵营${plan.requestedTier}费及以下卡池均无可选选手，质变无法发动。`);
+          return active(
+            base,
+            '可执行',
+            `${plan.downgraded ? `原${plan.requestedTier}费池为空，降级` : '免费'}从同阵营${plan.tier}费可选池随机获得1人，并消耗本轮购买权。`
+          );
         }
         if (hex.id === 'decompose-knowledge') {
           const hexcoreEconomy = ensureHexcoreEconomy(captain);
@@ -831,10 +853,11 @@
         }
         if (hex.id === 'stuck-together') {
           if (state.draft.round >= state.draft.maxRounds) return blocked(base, '无后续轮次', '该海克斯需要等到你的下一轮选人开始时结算。');
-          const targets = stuckTogetherTargets(captain.id);
+          const maxTier = stuckTogetherMaxTier(state.draft.round);
+          const targets = stuckTogetherTargets(captain.id, state.draft.round);
           return targets.length
-            ? target(base, '需选择选手', `选择1名未被选走的可选选手；若到第 ${state.draft.round + 1} 轮仍未被买走，将直接入队。`, { targetCount: targets.length })
-            : blocked(base, '无可锁定目标', '当前没有可锁定的未被选走选手。');
+            ? target(base, '需选择选手', `从本阵营全池选择1名${maxTier}费及以下、未被选走的选手；若到第 ${state.draft.round + 1} 轮仍未被买走，将直接入队。`, { targetCount: targets.length, maxTier })
+            : blocked(base, '无可锁定目标', `当前没有${maxTier}费及以下、可锁定的本阵营未入队选手。`);
         }
         if (hex.id === 'storm-fog') {
           const targets = weatherFogTargets(captain.id);
@@ -1096,17 +1119,17 @@
         if (isShopOpenFor(captain.id)) return logFail('质变必须在商店打开前使用');
         const roundState = currentRoundState(captain.id);
         if (roundState.purchaseUsed || roundState.skipped) return logFail('本轮购买权已使用或已跳过');
-        const tier = transmuteTier(hexcore.id);
-        const targets = transmuteTargets(captain.id, hexcore.id);
-        if (!targets.length) return logFail(`同阵营没有${tier}费可选选手`);
-        const player = targets[Math.floor(Math.random() * targets.length)];
+        const plan = transmutePlan(captain.id, hexcore.id);
+        if (!plan.targets.length) return logFail(`同阵营${plan.requestedTier}费及以下卡池均无可选选手，质变失败`);
+        const player = plan.targets[Math.floor(Math.random() * plan.targets.length)];
         const source = hexcore.id === 'transmute-gold' ? 'transmute_gold' : 'transmute_prismatic';
         const assigned = Hexcore2.assignmentEngine.assign(captain.id, player.id, source);
         if (!assigned) return logFail('质变入队失败，队伍容量或选手状态已变化');
         roundState.purchaseUsed = true;
         state.draft.pickedThisTurn = true;
         state.draft.currentDraw = null;
-        Hexcore2.eventStore.append(hexcore.name, `${captain.name} 免费质变，从${tier}费池获得「${player.name}」`, 'success');
+        const tierNote = plan.downgraded ? `（原${plan.requestedTier}费池为空，已降级）` : '';
+        Hexcore2.eventStore.append(hexcore.name, `${captain.name} 免费质变${tierNote}，从${plan.tier}费池获得「${player.name}」`, 'success');
         markUsed(hexcore);
         return {
           ok: true,
@@ -1116,7 +1139,7 @@
             source: hexcore.name,
             captainId: captain.id,
             playerIds: [player.id],
-            summary: `${captain.name} 免费质变，从${tier}费池获得队员`,
+            summary: `${captain.name} 免费质变，从${plan.tier}费池获得队员`,
             detail: '该海克斯已消耗本轮购买权，确认后进入下一位队长。',
           },
         };
@@ -1171,8 +1194,9 @@
 
       if (hexcore.id === 'stuck-together') {
         if (state.draft.round >= state.draft.maxRounds) return logFail('最后一轮无法使用【和我困在一起】');
-        const targetPlayer = stuckTogetherTargets(captain.id).find(player => player.id === options.targetPlayerId || player.id === options.firstPlayerId);
-        if (!targetPlayer) return logFail('请选择一名同阵营且未被选走的可选选手');
+        const maxTier = stuckTogetherMaxTier(state.draft.round);
+        const targetPlayer = stuckTogetherTargets(captain.id, state.draft.round).find(player => player.id === options.targetPlayerId || player.id === options.firstPlayerId);
+        if (!targetPlayer) return logFail(`请选择一名同阵营、未被选走且不高于${maxTier}费的可选选手`);
         pushEffect({
           type: 'stuck_together',
           captainId: captain.id,
@@ -1220,9 +1244,11 @@
     },
 
     decomposeTargets,
+    transmutePlan,
     transmuteTargets,
     lastStandCandidates,
     decomposableTeamPlayers,
+    stuckTogetherMaxTier,
     stuckTogetherTargets,
     weatherFogTargets,
     openCaptainTargets,

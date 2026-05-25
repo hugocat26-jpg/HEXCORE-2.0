@@ -44,6 +44,8 @@
 
   function shopActionBlockReason(captain, roundState, inSetup = false) {
     if (inSetup) return '';
+    if (Hexcore2.state.ui && Hexcore2.state.ui.originSageNotice) return '请先关闭神秘贤者·启元提示';
+    if (Hexcore2.state.ui && Hexcore2.state.ui.chargedCannonDecision) return '请先处理轮初大炮已充能';
     if (!captain) return '当前没有可操作队长';
     if (Hexcore2.state.draft.phase === 'completed') return '选人已完成';
     if (!roundState) return '等待进入操作';
@@ -242,7 +244,74 @@
     return '裁判手动';
   }
 
+  const purchaseConsumingHexIds = new Set([
+    'steady-reinforce',
+    'last-stand',
+    'mystery-box',
+    'transmute-gold',
+    'transmute-prismatic',
+    'decompose-knowledge',
+  ]);
+
+  function pendingAutoRosterEffects(captainId) {
+    return (Hexcore2.state.draft.runtimeEffects || [])
+      .filter(effect =>
+        effect
+        && effect.type === 'stuck_together'
+        && effect.captainId === captainId
+        && !effect.consumed
+      )
+      .map(effect => {
+        const player = Hexcore2.state.players.find(item => item.id === effect.playerId);
+        return {
+          ...effect,
+          playerName: player ? player.name : effect.playerId,
+          playerAvailable: player ? player.status === 'available' : false,
+        };
+      });
+  }
+
+  function autoRosterReminder(captain, queue = []) {
+    if (!captain) return '';
+    const pending = pendingAutoRosterEffects(captain.id);
+    if (!pending.length) return '';
+    const riskyHexes = queue.filter(item =>
+      item.executable
+      && (
+        purchaseConsumingHexIds.has(item.id)
+        || (Array.isArray(item.tags) && item.tags.includes('direct_roster'))
+      )
+    );
+    const currentDraw = Hexcore2.state.draft.currentDraw;
+    const roundState = Hexcore2.economyEngine && Hexcore2.economyEngine.roundState
+      ? Hexcore2.economyEngine.roundState(captain.id)
+      : null;
+    const canStillBuy = currentDraw
+      && currentDraw.captainId === captain.id
+      && roundState
+      && !roundState.purchaseUsed
+      && !roundState.skipped;
+    const pendingText = pending.map(effect =>
+      `${escapeHtml(effect.playerName || '目标选手')}（第 ${escapeHtml(effect.triggerRound || Hexcore2.state.draft.round + 1)} 轮检查）`
+    ).join('、');
+    const riskText = [
+      canStillBuy ? '购买商店卡' : '',
+      ...riskyHexes.map(item => `使用【${escapeHtml(item.name)}】`),
+    ].filter(Boolean).join('、') || '使用其他直接入队海克斯';
+    const unavailableText = pending.some(effect => !effect.playerAvailable)
+      ? '<em>当前锁定目标已有不可用迹象，请优先确认效果状态。</em>'
+      : '';
+    return `
+      <section class="auto-roster-reminder" aria-live="polite">
+        <b>延迟自动入队提醒</b>
+        <span>已锁定 ${pendingText}。在自动检查前，${riskText} 可能消耗本轮购买权或占满队伍名额，导致自动入队失效。</span>
+        ${unavailableText}
+      </section>
+    `;
+  }
+
   function hexcoreExecutionQueue(captainId) {
+    const captain = Hexcore2.state.captains.find(item => item.id === captainId);
     const queue = Hexcore2.hexcoreEngine.executionQueue(captainId);
     const targetableIds = new Set(['reserved-seat', 'urgent-restock', 'camp-blockade', 'price-interference', 'decompose-knowledge', 'stuck-together', 'storm-fog', 'snow-cat']);
     return `
@@ -251,6 +320,7 @@
           <strong>本轮海克斯执行队列</strong>
           <span>${queue.length ? `${queue.length} 项` : '暂无'}</span>
         </div>
+        ${autoRosterReminder(captain, queue)}
         <div class="hex-queue-list">
           ${queue.map(item => `
             <article class="hex-queue-item ${escapeHtml(item.type)} ${item.executable ? 'has-action' : ''}">
@@ -283,12 +353,14 @@
       .filter(item => item.executable);
     if (!usable.length) return '';
     const urgent = usable.some(item => item.id === 'decompose-knowledge' || item.id === 'last-stand' || item.id === 'mystery-box' || item.id === 'transmute-gold' || item.id === 'transmute-prismatic');
+    const reminder = autoRosterReminder(captain, usable);
     return `
       <section class="usable-hex-alert ${urgent ? 'urgent' : ''}">
         <div class="usable-hex-alert-main">
           <b>当前有海克斯可使用</b>
           <strong>${escapeHtml(captain.name)}：${usable.map(item => `【${escapeHtml(item.name)}】`).join('、')}</strong>
           <span>${usable.map(item => `${escapeHtml(item.name)}：${escapeHtml(item.reason)}`).join('；')}</span>
+          ${reminder}
         </div>
         <div class="usable-hex-alert-actions">
           ${usable.slice(0, 3).map(item => `
@@ -452,11 +524,16 @@
         </label>
       `;
     } else if (hex.id === 'stuck-together') {
+      const maxTier = Hexcore2.hexcoreEngine.stuckTogetherMaxTier ? Hexcore2.hexcoreEngine.stuckTogetherMaxTier() : 5;
       const targets = Hexcore2.hexcoreEngine.stuckTogetherTargets ? Hexcore2.hexcoreEngine.stuckTogetherTargets(captain.id) : [];
-      markNoTargets(targets, '当前没有未被选走且可锁定的选手，或已经没有后续轮次可结算。');
+      markNoTargets(targets, `当前没有${maxTier}费及以下、未被选走且可锁定的本阵营选手，或已经没有后续轮次可结算。`);
       body = `
+        <div class="hex-target-decision">
+          <strong>费用上限</strong>
+          <span>本轮从本阵营全池选择，最多锁定 ${maxTier} 费选手；目标必须未入队且不是队长。</span>
+        </div>
         <label>
-          <small>锁定选手</small>
+          <small>锁定选手（${maxTier}费及以下）</small>
           <select id="hex-target-first">
             ${targets.map(player => `<option value="${escapeHtml(player.id)}">${escapeHtml(player.name)} · ${player.tier}费 · 评分 ${player.score}</option>`).join('') || '<option value="">没有可锁定目标</option>'}
           </select>
@@ -771,6 +848,7 @@
     `;
     const step = decision.step || 'choose';
     const targetOptions = delayTargets.map(target => `<option value="${escapeHtml(target.id)}">${escapeHtml(target.name)}</option>`).join('');
+    const decisionError = decision.error ? `<div class="cannon-warning">${escapeHtml(decision.error)}</div>` : '';
     const body = step === 'boost'
       ? `
         <p>加速之门只能对自己使用。确认后 ${escapeHtml(captain.name)} 本轮顺位前移 1 位，但不能超过神秘贤者·启元占据的第 1 顺位。</p>
@@ -780,8 +858,8 @@
         </div>
         ${boostPreview.canBoost ? '' : `<div class="cannon-warning">${escapeHtml(boostPreview.reason || '当前无法使用加速之门')}</div>`}
         <div class="cannon-modal-actions">
-          <button class="subtle-btn" onclick="window.hexcoreUI.backChargedCannonDecision()">上一步</button>
-          <button class="primary-btn" ${boostPreview.canBoost ? '' : 'disabled'} onclick="window.hexcoreUI.confirmChargedCannonBoost()">确定使用加速之门</button>
+          <button type="button" class="subtle-btn" onclick="window.hexcoreUI.backChargedCannonDecision()">上一步</button>
+          <button type="button" class="primary-btn" ${boostPreview.canBoost ? '' : 'disabled'} onclick="window.hexcoreUI.confirmChargedCannonBoost()">确定使用加速之门</button>
         </div>
       `
       : (step === 'delay'
@@ -795,25 +873,25 @@
           </label>
           ${delayTargets.length ? '' : '<div class="cannon-warning">当前没有可使用雷霆一击的目标。</div>'}
           <div class="cannon-modal-actions">
-            <button class="subtle-btn" onclick="window.hexcoreUI.backChargedCannonDecision()">上一步</button>
-            <button class="primary-btn" ${delayTargets.length ? '' : 'disabled'} onclick="window.hexcoreUI.confirmChargedCannonDelay(document.getElementById('charged-cannon-delay-target').value)">确定使用雷霆一击</button>
+            <button type="button" class="subtle-btn" onclick="window.hexcoreUI.backChargedCannonDecision()">上一步</button>
+            <button type="button" class="primary-btn" ${delayTargets.length ? '' : 'disabled'} onclick="window.hexcoreUI.confirmChargedCannonDelay(document.getElementById('charged-cannon-delay-target').value)">确定使用雷霆一击</button>
           </div>
         `
         : `
           <p>本轮开始前，${escapeHtml(captain.name)} 可在两个转换技中选择 1 个；也可以本轮不使用。确认或跳过后，本轮不再询问。</p>
           ${orderList(order, captain.id)}
           <div class="cannon-choice-grid">
-            <button onclick="window.hexcoreUI.chooseChargedCannonMode('boost')" ${boostPreview.canBoost ? '' : 'disabled'}>
+            <button type="button" onclick="window.hexcoreUI.chooseChargedCannonMode('boost')" ${boostPreview.canBoost ? '' : 'disabled'}>
               <strong>加速之门</strong>
               <span>${boostPreview.canBoost ? '自己前移 1 位' : escapeHtml(boostPreview.reason || '当前无法前移')}</span>
             </button>
-            <button onclick="window.hexcoreUI.chooseChargedCannonMode('delay')" ${delayTargets.length ? '' : 'disabled'}>
+            <button type="button" onclick="window.hexcoreUI.chooseChargedCannonMode('delay')" ${delayTargets.length ? '' : 'disabled'}>
               <strong>雷霆一击</strong>
               <span>${delayTargets.length ? `可指定 ${delayTargets.length} 名队长后移 1 位` : '没有可后移目标'}</span>
             </button>
           </div>
           <div class="cannon-modal-actions">
-            <button class="subtle-btn" onclick="window.hexcoreUI.skipChargedCannonDecision()">本轮不使用</button>
+            <button type="button" class="subtle-btn" onclick="window.hexcoreUI.skipChargedCannonDecision()">本轮不使用</button>
           </div>
         `);
     return `
@@ -826,6 +904,7 @@
               <p>第 ${Number(decision.round) || Hexcore2.state.draft.round} 轮轮初转换技：${escapeHtml(captain.name)}</p>
             </div>
           </div>
+          ${decisionError}
           ${body}
         </section>
       </div>
@@ -903,6 +982,46 @@
               <button onclick="window.hexcoreUI.cancelLastStand()">取消</button>
               <button class="primary-btn" ${canConfirm ? '' : 'disabled'} onclick="window.hexcoreUI.confirmLastStand()">确认发动</button>
             </div>
+          </div>
+        </section>
+      </div>
+    `;
+  }
+
+  function dissolveTeamsConfirmModal() {
+    const confirmState = Hexcore2.state.ui && Hexcore2.state.ui.dissolveTeamsConfirm;
+    if (!confirmState) return '';
+    const captainCount = Hexcore2.state.captains.length;
+    const captainPlayers = Hexcore2.state.captains.filter(captain => Hexcore2.selectors.captainPlayer(captain.id)).length;
+    const memberCount = Hexcore2.state.captains.reduce((sum, captain) => sum + (captain.team || []).length, 0);
+    const hexcoreCount = Object.values(Hexcore2.state.hexcoreAssignments || {})
+      .reduce((sum, list) => sum + (Array.isArray(list) ? list.length : 0), 0);
+    return `
+      <div class="recruit-reveal-backdrop" role="dialog" aria-modal="true" aria-labelledby="dissolve-teams-title">
+        <section class="recruit-reveal-modal dissolve-teams-modal">
+          <div class="recruit-reveal-head">
+            <span>队伍批量解散</span>
+            <h2 id="dissolve-teams-title">确认一键解散队伍</h2>
+            <p>当前 ${captainCount} 支队伍、${captainPlayers} 名队长、${memberCount} 名队员、${hexcoreCount} 个海克斯。请选择本次解散方式。</p>
+          </div>
+          <div class="last-stand-body">
+            <section>
+              <h3>保留队长</h3>
+              <p>保留每队队长身份和已持有海克斯，只将普通队员全部移回可选池。</p>
+            </section>
+            <section>
+              <h3>不保留队长</h3>
+              <p>队长和普通队员全部回到可选池，所有队伍海克斯清空，队伍变为空壳等待重新设置。</p>
+            </section>
+          </div>
+          <div class="modal-derived-note">
+            <strong>注意</strong>
+            <span>该操作会清空当前商店结果、轮内临时效果和正在显示的结算弹窗；执行前会写入撤销快照。</span>
+          </div>
+          <div class="modal-actions">
+            <button type="button" onclick="window.hexcoreUI.closeDissolveTeamsDialog()">取消</button>
+            <button type="button" class="primary-btn" onclick="window.hexcoreUI.dissolveAllTeams(true)">保留队长并解散</button>
+            <button type="button" class="danger-btn" onclick="window.hexcoreUI.dissolveAllTeams(false)">全部成员回池</button>
           </div>
         </section>
       </div>
@@ -1014,7 +1133,7 @@
       'hungry-wave': ['这是高风险延迟收益，触发者会失去金币并跳过本轮。', '命中同阵营购买时收益最高，异阵营时更偏向干扰和轮末补偿。'],
       'origin-sage': ['适合想抢轮初优先权的队伍，轮次开始自动生效。', '若已经处于第一顺位或已经打开商店，不会重复改变顺位。'],
       'decompose-knowledge': ['满 3 层后再选择高价值目标，收益更稳定。', '金币不足时可以分解 2/3 费队员抵扣，使用前应确认队伍结构。'],
-      'stuck-together': ['适合提前锁定同阵营关键选手。', '目标被其他规则拿走时会失效，应选择不容易被抢的目标。'],
+      'stuck-together': ['适合提前锁定同阵营关键选手，选择列表会标注费用。', '目标受本轮费用上限限制，被其他规则拿走时会失效。'],
       'charged-cannon': ['雷霆一击用于延后对手，加速之门用于抢在关键队长前行动。', '每轮最多一次，使用前确认当前顺位。'],
     };
     if (tipsById[hex.id]) return tipsById[hex.id];
@@ -1124,6 +1243,9 @@
 
   function shopActionText(captain, roundState, nextRefreshCost, nextRefreshReason, inSetup = false) {
     if (inSetup) return { title: '开始抽卡', hint: '触发轮初海克斯' };
+    if (Hexcore2.state.ui && (Hexcore2.state.ui.originSageNotice || Hexcore2.state.ui.chargedCannonDecision)) {
+      return { title: '处理轮初海克斯', hint: '处理完成后才能开店' };
+    }
     if (!roundState || !roundState.freeShopUsed) return { title: '免费开店', hint: '本轮首次免费5张' };
     if (nextRefreshCost === 0) {
       return {
@@ -1339,6 +1461,10 @@
     const priceBonus = captain ? priceInterferenceBonus(captain.id) : 0;
     const isOpenPick = Boolean(draw && draw.pickMode === 'open_pick');
     const shouldAnimateShop = Boolean(draw && !isOpenPick && !draw.revealAnimationPlayed);
+    const inSetup = Hexcore2.state.draft.phase === 'setup';
+    const shopPanelBlockReason = shopActionBlockReason(captain, roundState, inSetup);
+    const shopPanelButton = shopActionText(captain, roundState, nextRefreshCost, nextRefreshReason, inSetup);
+    const shopPanelClick = shopPanelBlockReason ? '' : (inSetup ? 'window.hexcoreUI.startDraft()' : 'window.hexcoreUI.drawCards()');
     if (shouldAnimateShop) draw.revealAnimationPlayed = true;
     const shopSlotCount = 6;
     const slotCount = isOpenPick ? cards.length : Math.max(shopSlotCount, cards.length);
@@ -1356,7 +1482,7 @@
       <section class="draw-panel">
         <div class="panel-title-row">
           <h2>${escapeHtml(currentDrawLabel())} <span>${draw && draw.reason ? escapeHtml(draw.reason) : '每次展示最多 5 张，按轮次概率生成'}</span></h2>
-          <button class="subtle-btn" onclick="${Hexcore2.state.draft.phase === 'setup' ? 'window.hexcoreUI.startDraft()' : 'window.hexcoreUI.drawCards()'}">${Hexcore2.icon('cube')}${escapeHtml(shopActionText(captain, roundState, nextRefreshCost, nextRefreshReason, Hexcore2.state.draft.phase === 'setup').title)}</button>
+          <button class="subtle-btn ${shopPanelBlockReason ? 'disabled' : ''}" ${shopPanelBlockReason ? 'disabled' : ''} title="${escapeHtml(shopPanelBlockReason || shopPanelButton.hint)}" onclick="${shopPanelClick}">${Hexcore2.icon('cube')}${escapeHtml(shopPanelBlockReason ? '处理轮初海克斯' : shopPanelButton.title)}</button>
         </div>
         <div class="draw-timeout-bar">
           <strong>${captain ? `${escapeHtml(captain.name)} · ${economy ? economy.gold : 0} 金币` : '无当前队长'}</strong>
@@ -1827,6 +1953,7 @@
             <input id="teams-team-count" type="number" min="${Hexcore2.state.settings.minTeams}" max="${Hexcore2.state.settings.maxTeams}" value="${Hexcore2.selectors.teamCount()}" aria-label="队伍数量">
             <button class="subtle-btn" onclick="window.hexcoreUI.updateTeamCountFromTeams()">应用数量</button>
             <button class="primary-btn" onclick="window.hexcoreUI.addCaptain()">${Hexcore2.icon('team')}新增队伍</button>
+            <button class="danger-btn" type="button" onclick="window.hexcoreUI.openDissolveTeamsDialog()">${Hexcore2.icon('users')}一键解散队伍</button>
           </div>
         </div>
         <div class="metrics-grid">
@@ -2731,6 +2858,7 @@
       ${originSageNoticeModal()}
       ${chargedCannonDecisionModal()}
       ${lastStandConfirmModal()}
+      ${dissolveTeamsConfirmModal()}
       ${recruitRevealModal()}
       ${economyRevealModal()}
       ${hexDetailModal()}

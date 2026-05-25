@@ -142,6 +142,68 @@
     if (Hexcore2.economyEngine) Hexcore2.economyEngine.ensureAll();
   }
 
+  function resetCaptainProgressForRestart(captain, keepHexcores) {
+    if (!captain) return;
+    captain.economy = {
+      gold: Hexcore2.state.settings.initialGold,
+      incomeAppliedRounds: [1],
+      roundState: {},
+    };
+    captain.hexcoreEconomy = {};
+    captain.sponsorFlowUsed = 0;
+    captain.giantSlayerDiscountUsed = {};
+    if (!keepHexcores) return;
+    (Hexcore2.state.hexcoreAssignments[captain.id] || []).forEach(hexcore => {
+      if (!hexcore) return;
+      const baseHexcore = Hexcore2.sampleData.hexcores.find(item => item.id === hexcore.id) || hexcore;
+      hexcore.status = baseHexcore.mode === 'passive' ? 'passive' : 'available';
+      delete hexcore.lastUsedRound;
+      if (hexcore.id === 'donation' && !captain.hexcoreEconomy.donationApplied) {
+        captain.economy.gold += 2;
+        captain.hexcoreEconomy.donationApplied = true;
+      }
+      if (hexcore.id === 'origin-sage' && !captain.hexcoreEconomy.originSageBonusApplied) {
+        captain.economy.gold += 2;
+        captain.hexcoreEconomy.originSageBonusApplied = true;
+      }
+    });
+  }
+
+  function resetHexcoreDraftSession() {
+    Hexcore2.state.hexcoreDraft = {
+      captainId: '',
+      slots: [],
+      chosen: [],
+      seenIds: [],
+      refreshUsed: false,
+      drawOrder: [],
+    };
+  }
+
+  function resetDraftForRestart() {
+    const baseOrder = Hexcore2.state.draft.baseOrder && Hexcore2.state.draft.baseOrder.length
+      ? [...Hexcore2.state.draft.baseOrder]
+      : Hexcore2.state.captains.map(captain => captain.id);
+    Hexcore2.state.draft = {
+      ...Hexcore2.state.draft,
+      phase: 'setup',
+      round: 1,
+      maxRounds: 4,
+      baseOrder,
+      currentOrder: [...baseOrder],
+      currentIndex: 0,
+      selectedSlot: 0,
+      currentDraw: null,
+      runtimeEffects: [],
+      explanations: [],
+      pickedThisTurn: false,
+      finalFillCompleted: false,
+      started: false,
+      heavenlyWindow: null,
+    };
+    Hexcore2.state.tournament = { status: 'empty', championId: '', rounds: [] };
+  }
+
   function nextCaptainNumber() {
     return Hexcore2.state.captains.reduce((max, captain) => {
       const match = String(captain.id).match(/^c(\d+)$/);
@@ -716,6 +778,11 @@
     return openNextChargedCannonDecision(round);
   }
 
+  function setChargedCannonDecisionError(decision, message) {
+    if (!decision) return;
+    decision.error = String(message || '大炮已充能当前无法执行').slice(0, 120);
+  }
+
   Hexcore2.actions = {
     startDraft(options = {}) {
       if (!playersDraftReady()) {
@@ -780,23 +847,26 @@
         Hexcore2.ui.render();
         return;
       }
-      if (
-        Hexcore2.state.ui
-        && Hexcore2.state.ui.originSageNotice
-        && Hexcore2.hexcoreEngine
-        && Hexcore2.hexcoreEngine.chargedCannonPendingOwners
-        && Hexcore2.hexcoreEngine.chargedCannonPendingOwners(Hexcore2.state.draft.round).length
-      ) {
-        Hexcore2.eventStore.append('大炮已充能', '请先关闭神秘贤者·启元提示，再处理轮初大炮已充能转换技', 'warn');
+      if (Hexcore2.state.ui && Hexcore2.state.ui.originSageNotice) {
+        Hexcore2.eventStore.append('神秘贤者·启元', '请先关闭神秘贤者·启元提示并处理轮初海克斯，再生成商店', 'warn');
         Hexcore2.ui.render();
         return;
       }
       if (Hexcore2.hexcoreEngine && Hexcore2.hexcoreEngine.ensureOriginSageForRound) {
         const originResult = Hexcore2.hexcoreEngine.ensureOriginSageForRound(Hexcore2.state.draft.round);
         showOriginSageNotice(originResult, Hexcore2.state.draft.round);
+        if (Hexcore2.state.ui && Hexcore2.state.ui.originSageNotice) {
+          renderAndPersist();
+          return;
+        }
       }
       if (Hexcore2.hexcoreEngine && Hexcore2.hexcoreEngine.ensureHungryWaveForRound) {
         Hexcore2.hexcoreEngine.ensureHungryWaveForRound(Hexcore2.state.draft.round);
+      }
+      if (openNextChargedCannonDecision(Hexcore2.state.draft.round)) {
+        Hexcore2.eventStore.append('大炮已充能', '请先处理轮初大炮已充能转换技，再生成商店', 'warn');
+        renderAndPersist();
+        return;
       }
       const captain = Hexcore2.selectors.currentCaptain();
       if (!captain) {
@@ -1184,6 +1254,7 @@
       const decision = Hexcore2.state.ui && Hexcore2.state.ui.chargedCannonDecision;
       if (!decision) return;
       decision.step = mode === 'delay' ? 'delay' : 'boost';
+      delete decision.error;
       renderAndPersist();
     },
 
@@ -1191,6 +1262,7 @@
       const decision = Hexcore2.state.ui && Hexcore2.state.ui.chargedCannonDecision;
       if (!decision) return;
       decision.step = 'choose';
+      delete decision.error;
       renderAndPersist();
     },
 
@@ -1200,8 +1272,10 @@
       snapshot('跳过大炮已充能前');
       const result = Hexcore2.hexcoreEngine.skipChargedCannon(decision.captainId);
       if (!result.ok) {
-        Hexcore2.eventStore.append('大炮已充能失败', result.reason || '跳过失败', 'warn');
-        Hexcore2.ui.render();
+        const reason = result.reason || '跳过失败';
+        setChargedCannonDecisionError(decision, reason);
+        Hexcore2.eventStore.append('大炮已充能失败', reason, 'warn');
+        renderAndPersist();
         return result;
       }
       closeOrContinueChargedCannonDecision(decision.round);
@@ -1215,8 +1289,10 @@
       snapshot('使用大炮已充能加速之门前');
       const result = Hexcore2.hexcoreEngine.activateChargedCannonBoost(decision.captainId);
       if (!result.ok) {
-        Hexcore2.eventStore.append('大炮已充能失败', result.reason || '加速之门无法使用', 'warn');
-        Hexcore2.ui.render();
+        const reason = result.reason || '加速之门无法使用';
+        setChargedCannonDecisionError(decision, reason);
+        Hexcore2.eventStore.append('大炮已充能失败', reason, 'warn');
+        renderAndPersist();
         return result;
       }
       closeOrContinueChargedCannonDecision(decision.round);
@@ -1230,8 +1306,10 @@
       snapshot('使用大炮已充能雷霆一击前');
       const result = Hexcore2.hexcoreEngine.activateChargedCannonDelay(decision.captainId, targetCaptainId);
       if (!result.ok) {
-        Hexcore2.eventStore.append('大炮已充能失败', result.reason || '雷霆一击无法使用', 'warn');
-        Hexcore2.ui.render();
+        const reason = result.reason || '雷霆一击无法使用';
+        setChargedCannonDecisionError(decision, reason);
+        Hexcore2.eventStore.append('大炮已充能失败', reason, 'warn');
+        renderAndPersist();
         return result;
       }
       closeOrContinueChargedCannonDecision(decision.round);
@@ -2088,6 +2166,65 @@
       );
       normalizeAfterConfigChange();
       Hexcore2.eventStore.append('队伍管理', `删除队伍 ${captain.name}`, 'warn');
+      renderAndPersist();
+    },
+
+    openDissolveTeamsDialog() {
+      Hexcore2.state.ui = Hexcore2.state.ui || {};
+      Hexcore2.state.ui.dissolveTeamsConfirm = { createdAt: Date.now() };
+      Hexcore2.ui.render();
+    },
+
+    closeDissolveTeamsDialog() {
+      if (Hexcore2.state.ui) delete Hexcore2.state.ui.dissolveTeamsConfirm;
+      Hexcore2.ui.render();
+    },
+
+    dissolveAllTeams(keepCaptains) {
+      if (!Hexcore2.state.captains.length) return;
+      snapshot(`一键解散队伍前：${keepCaptains ? '保留队长' : '不保留队长'}`);
+      let releasedMembers = 0;
+      let releasedCaptains = 0;
+      Hexcore2.state.captains.forEach(captain => {
+        (captain.team || []).forEach(playerId => {
+          const player = Hexcore2.state.players.find(item => item.id === playerId);
+          if (player) {
+            markPlayerAvailable(player);
+            releasedMembers += 1;
+          }
+        });
+        captain.team = [];
+        const captainPlayer = Hexcore2.selectors.captainPlayer(captain.id);
+        if (keepCaptains) {
+          if (captainPlayer) bindCaptainPlayer(captain, captainPlayer);
+          return;
+        }
+        if (captainPlayer) {
+          markPlayerAvailable(captainPlayer);
+          releasedCaptains += 1;
+        }
+        clearCaptainBinding(captain);
+        Hexcore2.state.hexcoreAssignments[captain.id] = [];
+      });
+      Hexcore2.state.captains.forEach(captain => resetCaptainProgressForRestart(captain, keepCaptains));
+      Hexcore2.state.ui = Hexcore2.state.ui || {};
+      delete Hexcore2.state.ui.dissolveTeamsConfirm;
+      delete Hexcore2.state.ui.recruitReveal;
+      delete Hexcore2.state.ui.economyReveal;
+      delete Hexcore2.state.ui.lastStandConfirm;
+      delete Hexcore2.state.ui.chargedCannonDecision;
+      if (!keepCaptains) {
+        resetHexcoreDraftSession();
+      }
+      resetDraftForRestart();
+      normalizeAfterConfigChange();
+      Hexcore2.eventStore.append(
+        '一键解散队伍',
+        keepCaptains
+          ? `已保留队长和海克斯，${releasedMembers} 名队员返回可选池，流程回到第1轮开始前`
+          : `已清空队长身份和海克斯，${releasedCaptains + releasedMembers} 名成员返回可选池，请先重新设置队长并抽海克斯`,
+        'warn'
+      );
       renderAndPersist();
     },
 

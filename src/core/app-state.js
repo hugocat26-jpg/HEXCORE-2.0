@@ -809,6 +809,13 @@
     } else {
       delete state.ui.lastStandConfirm;
     }
+    if (state.ui.dissolveTeamsConfirm && typeof state.ui.dissolveTeamsConfirm === 'object') {
+      state.ui.dissolveTeamsConfirm = {
+        createdAt: clampNumber(state.ui.dissolveTeamsConfirm.createdAt, 0, Number.MAX_SAFE_INTEGER, 0),
+      };
+    } else {
+      delete state.ui.dissolveTeamsConfirm;
+    }
     if (state.ui.recruitReveal && typeof state.ui.recruitReveal === 'object') {
       state.ui.recruitReveal = {
         title: sanitizeText(state.ui.recruitReveal.title, '海克斯入队揭示', 40),

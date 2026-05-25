@@ -640,7 +640,26 @@ function testDraftRequiresStartButtonAndOriginSageNotice() {
   assert(H.state.draft.phase === 'captain_action', '点击开始抽卡后应进入队长操作阶段');
   assert(H.state.draft.started, '点击开始抽卡后应记录抽卡流程已开始，避免旧状态再次被迁移回待开始');
   assert(H.state.ui.originSageNotice && H.state.ui.originSageNotice.captainIds.includes(originCaptain.id), '点击开始抽卡后应触发神秘贤者启元轮初弹窗');
+  assert(!H.state.draft.currentDraw, '轮初海克斯弹窗未处理前不应打开商店');
+  assert(harness.app.innerHTML.includes('处理轮初海克斯') && harness.app.innerHTML.includes('请先关闭神秘贤者·启元提示'), '启元提示存在时商店按钮应禁用并提示先处理轮初海克斯');
   assert(H.state.draft.currentOrder[0] === originCaptain.id, '神秘贤者启元应在第一轮开始时将持有者提到首位');
+
+  const directHarness = createHarness();
+  const direct = directHarness.H;
+  installReadyTestData(direct);
+  releaseHexcoreEverywhere(direct, 'origin-sage');
+  const directOriginCaptain = direct.state.captains[3];
+  setOnlyHexcore(direct, directOriginCaptain.id, 'origin-sage');
+  direct.state.draft.phase = 'captain_action';
+  direct.state.draft.started = true;
+  direct.state.draft.round = 1;
+  direct.state.draft.currentIndex = 0;
+  direct.state.draft.currentDraw = null;
+  direct.state.ui.originSageNotice = null;
+  direct.turnOrderEngine.recompute();
+  direct.actions.drawCards();
+  assert(direct.state.ui.originSageNotice && direct.state.ui.originSageNotice.captainIds.includes(directOriginCaptain.id), '直接开店时若刚触发神秘贤者启元，也应先弹出提示');
+  assert(!direct.state.draft.currentDraw, '直接开店时刚触发启元提示也不应同步生成商店');
 
   const legacyHarness = createHarness();
   const legacy = legacyHarness.H;
@@ -919,6 +938,82 @@ function testGoldModeAllowsManualMoveBackToPool() {
   assert(captain.team.includes(player.id), '金币模式下纠错补录应允许同阵营可选选手回到队伍');
   assert(player.status === 'drafted' && player.teamId === captain.id, '金币模式下纠错补录应同步选手归属');
   assert(H.state.events[0] && H.state.events[0].title === '队伍纠错', '金币模式下纠错补录应写入队伍纠错日志');
+}
+
+function testDissolveTeamsKeepsCaptainsAndHexcores() {
+  const { H, app } = createReadyHarness();
+  const captain = H.state.captains[0];
+  const captainPlayer = H.selectors.captainPlayer(captain.id);
+  const teammate = H.state.players.find(player =>
+    player.status === 'available'
+    && player.camp === H.selectors.captainCamp(captain.id)
+    && !H.selectors.isCaptainPlayer(player.id)
+  );
+  teammate.status = 'drafted';
+  teammate.teamId = captain.id;
+  captain.team = [teammate.id];
+  H.state.hexcoreAssignments[captain.id] = [assignedHexcore(H.sampleData.hexcores.find(hex => hex.id === 'charged-cannon'))];
+  H.state.draft.currentDraw = { captainId: captain.id, cards: [{ slot: 0, playerId: teammate.id, price: 1 }] };
+  H.state.draft.phase = 'captain_action';
+  H.state.draft.round = 3;
+  H.state.draft.currentIndex = 5;
+  H.state.draft.started = true;
+  H.state.draft.runtimeEffects = [{ type: 'test_effect', captainId: captain.id }];
+  captain.economy.gold = 1;
+  captain.economy.roundState[3].freeShopUsed = true;
+  captain.economy.roundState[3].purchaseUsed = true;
+  captain.hexcoreEconomy = { decomposeKnowledgeStacks: 2 };
+
+  H.actions.setActiveView('teams');
+  assert(app.innerHTML.includes('一键解散队伍'), '队伍管理工具栏应显示一键解散队伍按钮');
+  H.actions.openDissolveTeamsDialog();
+  assert(H.state.ui.dissolveTeamsConfirm && app.innerHTML.includes('保留队长并解散'), '点击一键解散应打开模式选择弹窗');
+  H.actions.dissolveAllTeams(true);
+
+  assert(captain.team.length === 0, '保留队长解散时普通队员应全部移出队伍');
+  assert(teammate.status === 'available' && !teammate.teamId, '保留队长解散时普通队员应返回可选池');
+  assert(captain.playerId === captainPlayer.id && captainPlayer.status === 'captain', '保留队长解散时队长身份应保留');
+  assert((H.state.hexcoreAssignments[captain.id] || []).some(hex => hex.id === 'charged-cannon'), '保留队长解散时海克斯应保留');
+  assert(!H.state.draft.currentDraw && H.state.draft.runtimeEffects.length === 0, '一键解散后应清空当前商店和轮内临时效果');
+  assert(H.state.draft.phase === 'setup' && H.state.draft.round === 1 && H.state.draft.currentIndex === 0 && !H.state.draft.started, '保留队长解散后应回到第一轮开始前');
+  assert(H.selectors.workflowStatus().playersDraftReady, '保留队长和海克斯后应允许直接重新开始选人');
+  assert(captain.economy.gold === H.state.settings.initialGold && !captain.economy.roundState[3].purchaseUsed, '保留队长解散后应重置金币和轮次购买状态');
+  assert((H.state.hexcoreAssignments[captain.id] || [])[0].status !== 'used' && !(H.state.hexcoreAssignments[captain.id] || [])[0].lastUsedRound, '保留队长解散后主动海克斯应恢复可用状态');
+  assert(!H.state.ui.dissolveTeamsConfirm, '一键解散后应关闭确认弹窗');
+  assert(H.state.events[0] && H.state.events[0].title === '一键解散队伍', '一键解散应写入事件日志');
+}
+
+function testDissolveTeamsReleasesCaptainsAndHexcores() {
+  const { H } = createReadyHarness();
+  const captain = H.state.captains[0];
+  const captainPlayer = H.selectors.captainPlayer(captain.id);
+  const teammate = H.state.players.find(player =>
+    player.status === 'available'
+    && player.camp === H.selectors.captainCamp(captain.id)
+    && !H.selectors.isCaptainPlayer(player.id)
+  );
+  teammate.status = 'drafted';
+  teammate.teamId = captain.id;
+  captain.team = [teammate.id];
+  H.state.hexcoreAssignments[captain.id] = [assignedHexcore(H.sampleData.hexcores.find(hex => hex.id === 'charged-cannon'))];
+  H.state.hexcoreDraft.captainId = captain.id;
+  H.state.hexcoreDraft.slots = ['charged-cannon'];
+
+  H.actions.openDissolveTeamsDialog();
+  H.actions.dissolveAllTeams(false);
+
+  assert(captain.team.length === 0 && !captain.playerId, '不保留队长解散时队伍应变为空壳');
+  assert(captainPlayer.status === 'available' && !captainPlayer.teamId, '不保留队长解散时队长应回到可选池');
+  assert(teammate.status === 'available' && !teammate.teamId, '不保留队长解散时普通队员也应回到可选池');
+  assert((H.state.hexcoreAssignments[captain.id] || []).length === 0, '不保留队长解散时该队海克斯应清空');
+  assert(!H.state.hexcoreDraft.captainId && H.state.hexcoreDraft.slots.length === 0, '不保留队长解散时应清空正在进行的海克斯抽取会话');
+  assert(!H.selectors.workflowStatus().captainReady && !H.selectors.workflowStatus().playersDraftReady, '全部回卡池后应要求先重新设置队长并抽海克斯');
+  const workflowAfterDissolve = H.selectors.workflowStatus();
+  assert(
+    workflowAfterDissolve.checklist.blockingItems.some(item => item.id === 'captain-player')
+      && workflowAfterDissolve.stage.order <= 2,
+    `全部回卡池后的下一步应回到队长配置，当前阶段：${workflowAfterDissolve.stage.id}`
+  );
 }
 
 function testSystemIntegrityCheck() {
@@ -1334,12 +1429,43 @@ function testNewHexcores() {
   stuck.state.hexcoreAssignments[stuckCaptain.id] = [
     { ...stuck.sampleData.hexcores.find(hex => hex.id === 'stuck-together'), status: 'available' },
   ];
+  const stuckMaxTier = stuck.hexcoreEngine.stuckTogetherMaxTier();
+  assert(stuckMaxTier === 2, '和我困在一起第1轮费用上限应为2费');
+  const overCapTarget = stuck.state.players.find(player =>
+    player.status === 'available'
+    && player.camp === stuck.selectors.captainCamp(stuckCaptain.id)
+    && Number(player.tier) > stuckMaxTier
+    && !stuck.selectors.isCaptainPlayer(player.id)
+  ) || {
+    id: 'regression-stuck-over-cap',
+    name: '上限外测试选手',
+    camp: stuck.selectors.captainCamp(stuckCaptain.id),
+    tier: stuckMaxTier + 1,
+    score: 99,
+    status: 'available',
+  };
+  if (!stuck.state.players.some(player => player.id === overCapTarget.id)) {
+    stuck.state.players.push(overCapTarget);
+  }
+  assert(
+    !stuck.hexcoreEngine.stuckTogetherTargets(stuckCaptain.id).some(player => player.id === overCapTarget.id),
+    '和我困在一起目标池应排除超过本轮费用上限的全池选手'
+  );
+  const overCapResult = stuck.hexcoreEngine.activate('stuck-together', { targetPlayerId: overCapTarget.id });
+  assert(
+    !overCapResult.ok && overCapResult.reason.includes(`不高于${stuckMaxTier}费`),
+    '和我困在一起选择超过费用上限的选手时应失败并提示费用限制'
+  );
   const stuckTarget = stuck.hexcoreEngine.stuckTogetherTargets(stuckCaptain.id)
     .find(player => player.camp === stuck.selectors.captainCamp(stuckCaptain.id));
   assert(stuckTarget, '和我困在一起目标池应包含未被选走的同阵营选手');
   assert(
     stuck.hexcoreEngine.stuckTogetherTargets(stuckCaptain.id).every(player => player.camp === stuck.selectors.captainCamp(stuckCaptain.id)),
     '和我困在一起目标池不得出现异阵营选手'
+  );
+  assert(
+    stuck.hexcoreEngine.stuckTogetherTargets(stuckCaptain.id).every(player => Number(player.tier) <= stuckMaxTier),
+    '和我困在一起目标池不得出现超过本轮费用上限的选手'
   );
   assert(stuck.hexcoreEngine.activate('stuck-together', { targetPlayerId: stuckTarget.id }).ok, '和我困在一起应可指定同阵营未被选走的可选选手');
   assert(stuck.state.draft.runtimeEffects.some(effect => effect.type === 'stuck_together' && effect.playerId === stuckTarget.id), '和我困在一起应记录下一轮延迟检查效果');
@@ -1831,6 +1957,7 @@ function testNewHexcores() {
   assert(!cannonModal.state.draft.currentDraw, '启元弹窗未关闭且大炮待处理时不应允许开店');
   cannonModal.actions.closeOriginSageNotice();
   assert(cannonModal.state.ui.chargedCannonDecision && cannonModal.state.ui.chargedCannonDecision.captainId === modalCaptain.id, '关闭神秘贤者·启元弹窗后才应打开大炮已充能转换技弹窗');
+  assert(cannonModalHarness.app.innerHTML.includes('处理轮初海克斯') && cannonModalHarness.app.innerHTML.includes('请先处理轮初大炮已充能'), '大炮弹窗存在时商店按钮应禁用并提示先处理轮初海克斯');
   cannonModal.actions.drawCards();
   assert(!cannonModal.state.draft.currentDraw, '大炮轮初弹窗未处理前不应允许开店');
   cannonModal.actions.chooseChargedCannonMode('boost');
@@ -1840,6 +1967,71 @@ function testNewHexcores() {
   cannonModal.actions.skipChargedCannonDecision();
   assert(!cannonModal.state.ui.chargedCannonDecision, '本轮不使用后应关闭大炮弹窗');
   assert(!cannonModal.hexcoreEngine.chargedCannonPendingOwners(1).some(captain => captain.id === modalCaptain.id), '跳过大炮后本轮不应再次询问该队长');
+
+  const cannonDirectHarness = createHarness();
+  const cannonDirect = cannonDirectHarness.H;
+  installReadyTestData(cannonDirect);
+  releaseHexcoreEverywhere(cannonDirect, 'charged-cannon');
+  const directCannonCaptain = cannonDirect.state.captains[2];
+  cannonDirect.state.hexcoreAssignments[directCannonCaptain.id] = [
+    { ...cannonDirect.sampleData.hexcores.find(hex => hex.id === 'charged-cannon'), status: 'available' },
+  ];
+  cannonDirect.state.draft.phase = 'captain_action';
+  cannonDirect.state.draft.started = true;
+  cannonDirect.state.draft.round = 1;
+  cannonDirect.state.draft.currentIndex = 0;
+  cannonDirect.state.draft.currentDraw = null;
+  cannonDirect.state.ui.chargedCannonDecision = null;
+  cannonDirect.turnOrderEngine.recompute();
+  cannonDirect.actions.drawCards();
+  assert(cannonDirect.state.ui.chargedCannonDecision && cannonDirect.state.ui.chargedCannonDecision.captainId === directCannonCaptain.id, '直接开店时若刚发现大炮待处理，也应先打开大炮已充能弹窗');
+  assert(!cannonDirect.state.draft.currentDraw, '直接开店时刚打开大炮弹窗也不应同步生成商店');
+  assert(cannonDirectHarness.app.innerHTML.includes('处理轮初海克斯') && cannonDirectHarness.app.innerHTML.includes('请先处理轮初大炮已充能'), '直接触发大炮弹窗后商店按钮应禁用并提示先处理轮初海克斯');
+
+  const cannonConfirmHarness = createHarness();
+  const cannonConfirm = cannonConfirmHarness.H;
+  installReadyTestData(cannonConfirm);
+  releaseHexcoreEverywhere(cannonConfirm, 'charged-cannon');
+  releaseHexcoreEverywhere(cannonConfirm, 'origin-sage');
+  const confirmCaptain = cannonConfirm.state.captains[2];
+  const confirmOriginCaptain = cannonConfirm.state.captains[4];
+  cannonConfirm.state.hexcoreAssignments[confirmCaptain.id] = [
+    { ...cannonConfirm.sampleData.hexcores.find(hex => hex.id === 'charged-cannon'), status: 'available' },
+  ];
+  cannonConfirm.state.hexcoreAssignments[confirmOriginCaptain.id] = [
+    { ...cannonConfirm.sampleData.hexcores.find(hex => hex.id === 'origin-sage'), status: 'available' },
+  ];
+  cannonConfirm.state.draft.phase = 'setup';
+  cannonConfirm.ui.render();
+  cannonConfirm.actions.startDraft({ skipSnapshot: true });
+  cannonConfirm.actions.closeOriginSageNotice();
+  assert(cannonConfirm.state.ui.chargedCannonDecision && cannonConfirm.state.ui.chargedCannonDecision.captainId === confirmCaptain.id, '确认测试前提：应打开大炮已充能弹窗');
+  const confirmBeforeIndex = cannonConfirm.state.draft.currentOrder.indexOf(confirmCaptain.id);
+  cannonConfirm.actions.chooseChargedCannonMode('boost');
+  const confirmBoostResult = cannonConfirm.actions.confirmChargedCannonBoost();
+  assert(confirmBoostResult && confirmBoostResult.ok, '点击确定使用加速之门后应成功结算');
+  assert(!cannonConfirm.state.ui.chargedCannonDecision, '加速之门确认成功后应关闭大炮弹窗');
+  assert(cannonConfirm.state.draft.currentOrder.indexOf(confirmCaptain.id) === confirmBeforeIndex - 1, '加速之门确认成功后使用者应前移一位');
+  assert(cannonConfirm.state.events.some(event => event.title === '大炮已充能' && event.body.includes('加速之门')), '加速之门确认成功后应写入日志反馈');
+
+  const cannonFailHarness = createHarness();
+  const cannonFail = cannonFailHarness.H;
+  installReadyTestData(cannonFail);
+  releaseHexcoreEverywhere(cannonFail, 'charged-cannon');
+  const failCaptain = cannonFail.state.captains[2];
+  cannonFail.state.hexcoreAssignments[failCaptain.id] = [
+    { ...cannonFail.sampleData.hexcores.find(hex => hex.id === 'charged-cannon'), status: 'available' },
+  ];
+  cannonFail.state.draft.phase = 'setup';
+  cannonFail.ui.render();
+  cannonFail.actions.startDraft({ skipSnapshot: true });
+  assert(cannonFail.state.ui.chargedCannonDecision && cannonFail.state.ui.chargedCannonDecision.captainId === failCaptain.id, '失败提示测试前提：应打开大炮已充能弹窗');
+  cannonFail.actions.chooseChargedCannonMode('boost');
+  cannonFail.state.draft.currentDraw = { captainId: failCaptain.id, cards: [] };
+  const failBoostResult = cannonFail.actions.confirmChargedCannonBoost();
+  assert(failBoostResult && !failBoostResult.ok, '商店已打开时确认加速之门应被拒绝');
+  assert(cannonFail.state.ui.chargedCannonDecision && cannonFail.state.ui.chargedCannonDecision.error.includes('商店打开前'), '加速之门确认失败时应把原因保留在弹窗状态中');
+  assert(cannonFailHarness.app.innerHTML.includes('商店打开前'), '加速之门确认失败时应在弹窗内显示原因，避免看起来无反应');
 
   const heavenlyHarness = createReadyHarness();
   const heavenly = heavenlyHarness.H;
@@ -1998,6 +2190,48 @@ function testNewHexcores() {
   assert(prismaticTargets.some(player => transmutePrismaticCaptain.team.includes(player.id)), '质变棱彩阶目标应来自同阵营5费池');
   assert(transmutePrismatic.economyEngine.roundState(transmutePrismaticCaptain.id).purchaseUsed, '质变棱彩阶应消耗本轮购买权');
 
+  const transmutePrismaticFallback = createReadyHarness().H;
+  const transmutePrismaticFallbackCaptain = currentCaptain(transmutePrismaticFallback);
+  transmutePrismaticFallback.state.hexcoreAssignments[transmutePrismaticFallbackCaptain.id] = [
+    { ...transmutePrismaticFallback.sampleData.hexcores.find(hex => hex.id === 'transmute-prismatic'), status: 'available' },
+  ];
+  transmutePrismaticFallback.state.draft.currentDraw = null;
+  transmutePrismaticFallback.state.draft.pickedThisTurn = false;
+  transmutePrismaticFallback.selectors.availableCampPlayers(transmutePrismaticFallbackCaptain.id)
+    .filter(player => player.tier === 5)
+    .forEach(player => { player.status = 'disabled'; });
+  const prismaticFallbackPlan = transmutePrismaticFallback.hexcoreEngine.transmutePlan(transmutePrismaticFallbackCaptain.id, 'transmute-prismatic');
+  assert(prismaticFallbackPlan.targets.length > 0 && prismaticFallbackPlan.tier < 5, '质变棱彩阶5费池为空时应逐级降档寻找可用卡池');
+  const transmutePrismaticFallbackResult = transmutePrismaticFallback.hexcoreEngine.activate('transmute-prismatic');
+  assert(transmutePrismaticFallbackResult.ok, '质变棱彩阶目标池为空时应降级随机获得低一档可用选手');
+  assert(
+    prismaticFallbackPlan.targets.some(player => transmutePrismaticFallbackCaptain.team.includes(player.id)),
+    '质变棱彩阶降级后应从实际可用降档卡池入队'
+  );
+  assert(
+    transmutePrismaticFallback.state.events.some(event => event.title === '质变：棱彩阶' && event.body.includes('已降级')),
+    '质变棱彩阶降级结算应写入降级说明日志'
+  );
+
+  const transmuteGoldFallback = createReadyHarness().H;
+  const transmuteGoldFallbackCaptain = currentCaptain(transmuteGoldFallback);
+  transmuteGoldFallback.state.hexcoreAssignments[transmuteGoldFallbackCaptain.id] = [
+    { ...transmuteGoldFallback.sampleData.hexcores.find(hex => hex.id === 'transmute-gold'), status: 'available' },
+  ];
+  transmuteGoldFallback.state.draft.currentDraw = null;
+  transmuteGoldFallback.state.draft.pickedThisTurn = false;
+  transmuteGoldFallback.selectors.availableCampPlayers(transmuteGoldFallbackCaptain.id)
+    .filter(player => player.tier === 4)
+    .forEach(player => { player.status = 'disabled'; });
+  const goldFallbackPlan = transmuteGoldFallback.hexcoreEngine.transmutePlan(transmuteGoldFallbackCaptain.id, 'transmute-gold');
+  assert(goldFallbackPlan.targets.length > 0 && goldFallbackPlan.tier < 4, '质变黄金阶4费池为空时应逐级降档寻找可用卡池');
+  const transmuteGoldFallbackResult = transmuteGoldFallback.hexcoreEngine.activate('transmute-gold');
+  assert(transmuteGoldFallbackResult.ok, '质变黄金阶目标池为空时应降级随机获得低一档可用选手');
+  assert(
+    goldFallbackPlan.targets.some(player => transmuteGoldFallbackCaptain.team.includes(player.id)),
+    '质变黄金阶降级后应从实际可用降档卡池入队'
+  );
+
   const transmuteUiHarness = createReadyHarness();
   const transmuteUi = transmuteUiHarness.H;
   const transmuteUiCaptain = currentCaptain(transmuteUi);
@@ -2021,11 +2255,11 @@ function testNewHexcores() {
     { ...transmuteEmpty.sampleData.hexcores.find(hex => hex.id === 'transmute-prismatic'), status: 'available' },
   ];
   transmuteEmpty.selectors.availableCampPlayers(transmuteEmptyCaptain.id)
-    .filter(player => player.tier === 5)
     .forEach(player => { player.status = 'disabled'; });
   transmuteEmpty.state.draft.currentDraw = null;
-  assert(!transmuteEmpty.hexcoreEngine.activate('transmute-prismatic').ok, '质变目标池为空时应失败并保留购买权');
+  assert(!transmuteEmpty.hexcoreEngine.activate('transmute-prismatic').ok, '质变目标及以下卡池全空时应失败并保留购买权');
   assert(!transmuteEmpty.economyEngine.roundState(transmuteEmptyCaptain.id).purchaseUsed, '质变失败不应消耗本轮购买权');
+  assert(transmuteEmpty.state.events.some(event => event.body.includes('质变失败')), '质变失败时应提示目标及以下卡池均无可选选手');
 
   const lastStandBlocked = createReadyHarness().H;
   const lastStandBlockedCaptain = currentCaptain(lastStandBlocked);
@@ -2355,6 +2589,24 @@ function testHexTargetPickerExplainsInvalidTargets() {
   assert(app.innerHTML.includes('hex-target-warning'), '无有效目标时目标选择面板应显示不可执行原因');
   assert(app.innerHTML.includes('冲突/裁决说明') && app.innerHTML.includes('队伍已满员'), '目标被排除时应展示覆盖来源和最终裁决');
   assert(app.innerHTML.includes('确认执行</button>') && app.innerHTML.includes('disabled'), '无有效目标时确认执行按钮应禁用');
+
+  const stuckPicker = createReadyHarness();
+  const stuckCaptain = stuckPicker.H.selectors.currentCaptain();
+  setOnlyHexcore(stuckPicker.H, stuckCaptain.id, 'stuck-together');
+  const stuckMaxTier = stuckPicker.H.hexcoreEngine.stuckTogetherMaxTier();
+  const stuckTarget = stuckPicker.H.hexcoreEngine.stuckTogetherTargets(stuckCaptain.id)[0];
+  stuckPicker.H.actions.setActiveView('draft');
+  stuckPicker.H.actions.openHexTargetPicker('stuck-together');
+  assert(
+    stuckPicker.app.innerHTML.includes('费用上限')
+    && stuckPicker.app.innerHTML.includes(`最多锁定 ${stuckMaxTier} 费`)
+    && stuckPicker.app.innerHTML.includes(`锁定选手（${stuckMaxTier}费及以下）`),
+    '和我困在一起目标选择面板应展示本轮费用上限'
+  );
+  assert(
+    stuckTarget && stuckPicker.app.innerHTML.includes(`${stuckTarget.tier}费 · 评分 ${stuckTarget.score}`),
+    '和我困在一起目标选择项应标注选手费用和评分'
+  );
 }
 
 function testHexcoreGlobalUniquePool() {
@@ -2498,6 +2750,28 @@ function testUiNavigationAndSecurity() {
   H.actions.setActiveView('draft');
   assert(app.innerHTML.includes('当前有海克斯可使用') && app.innerHTML.includes('usable-hex-alert'), '海克斯满足可用条件时应在实时抽选页顶部醒目提示');
   assert(app.innerHTML.includes('可使用'), '可执行海克斯队列项应带有明确可使用标识');
+  const autoWarn = createReadyHarness();
+  const autoWarnCaptain = autoWarn.H.selectors.currentCaptain();
+  const autoWarnTarget = autoWarn.H.hexcoreEngine.stuckTogetherTargets(autoWarnCaptain.id)[0];
+  autoWarn.H.state.hexcoreAssignments[autoWarnCaptain.id] = [
+    assignedHexcore(autoWarn.H.sampleData.hexcores.find(hex => hex.id === 'stuck-together')),
+    assignedHexcore(autoWarn.H.sampleData.hexcores.find(hex => hex.id === 'steady-reinforce')),
+  ];
+  autoWarn.H.state.draft.runtimeEffects.push({
+    type: 'stuck_together',
+    captainId: autoWarnCaptain.id,
+    sourceCaptainId: autoWarnCaptain.id,
+    playerId: autoWarnTarget.id,
+    triggerRound: autoWarn.H.state.draft.round + 1,
+    reason: `${autoWarnCaptain.name} 已锁定 ${autoWarnTarget.name}`,
+  });
+  autoWarn.H.actions.setActiveView('draft');
+  assert(
+    autoWarn.app.innerHTML.includes('延迟自动入队提醒')
+    && autoWarn.app.innerHTML.includes('自动入队失效')
+    && autoWarn.app.innerHTML.includes('稳健补强'),
+    '存在延迟自动入队效果时，应提醒使用者不要先使用会消耗购买权或占名额的海克斯'
+  );
 
   assert(staticServer.resolveRequestPath('/') === path.join(root, 'index.html'), '静态服务应正常解析首页');
   assert(staticServer.resolveRequestPath('/src/main.js') === path.join(root, 'src', 'main.js'), '静态服务应正常解析项目内资源');
@@ -2777,8 +3051,8 @@ function testPostTaskIgnoresCompletedAcceptanceLanguage() {
 }
 
 function testHexcoreLibraryResponsiveStyles() {
-  const css = fs.readFileSync(path.join(root, 'src/styles/main.css'), 'utf8');
-  const uiSource = fs.readFileSync(path.join(root, 'src/ui/referee-console.js'), 'utf8');
+  const css = fs.readFileSync(path.join(root, 'src/styles/main.css'), 'utf8').replace(/\r\n/g, '\n');
+  const uiSource = fs.readFileSync(path.join(root, 'src/ui/referee-console.js'), 'utf8').replace(/\r\n/g, '\n');
   assert(css.includes('grid-template-columns: minmax(220px, 0.9fr) minmax(260px, 1.05fr) minmax(300px, 1.15fr);') && css.includes('justify-content: stretch;') && css.includes('overflow-x: auto;'), '裁判操作应横向填满操作栏，宽度不足时使用横向滚动');
   assert(css.includes('.shop-actions') && css.includes('grid-template-columns: minmax(0, 1fr);') && css.includes('.system-actions'), '裁判操作商店分组应只保留一个刷新/开店按钮');
   assert(css.includes('.primary-actions') && css.includes('grid-template-columns: repeat(2, minmax(0, 1fr));'), '流程分组取消购买按钮后应按剩余两个按钮重新均分');
@@ -2793,6 +3067,13 @@ function testHexcoreLibraryResponsiveStyles() {
   assert(css.includes('.hex-detail-backdrop') && css.includes('.hex-detail-modal') && css.includes('overflow-y: auto'), '海克斯详情应使用固定尺寸弹窗并在正文区域滚动');
   assert(css.includes('.hex-draw-actions') && css.includes('grid-template-columns: repeat(3, minmax(0, 1fr));'), '海克斯候选卡的详情、刷新、选择按钮应固定同一行三列显示');
   assert(css.includes('.hex-draw-actions > button') && css.includes('min-height: 36px;') && css.includes('text-overflow: ellipsis;'), '海克斯候选卡底部按钮应统一尺寸、字重和溢出处理');
+  assert(
+    css.includes('.cannon-choice-grid button') && css.includes('display: inline-flex;')
+    && css.includes('flex-direction: row;') && css.includes('justify-content: center;')
+    && css.includes('min-height: 44px;') && css.includes('.cannon-choice-grid span')
+    && css.includes('white-space: nowrap;'),
+    '大炮已充能选择按钮应使用单行横向居中布局，避免文字贴上边或换行'
+  );
   assert(css.includes('.hex-draw-actions .hex-detail-trigger') && css.includes('.hex-select-btn') && css.includes('linear-gradient(180deg, #12d9ff, #00aee4)'), '海克斯候选卡详情/刷新/选择按钮应共用按钮基线，并保留选择按钮主操作强调');
   assert(css.includes('.workspace > .workspace-main') && css.includes('overflow-y: auto;'), '实时抽选主内容超出视口高度时应在内容容器内纵向滚动');
   assert(uiSource.includes('function hexcoreIcon') && uiSource.includes('assets/hex-icons/${safeId}.png') && uiSource.includes('hex-svg-fallback'), '海克斯图标应优先加载同名本地 PNG，并保留 SVG 兜底');
@@ -2813,7 +3094,7 @@ function testHexcoreLibraryResponsiveStyles() {
 }
 
 function testThemeSafeModalsAndScrollbars() {
-  const css = fs.readFileSync(path.join(root, 'src/styles/main.css'), 'utf8');
+  const css = fs.readFileSync(path.join(root, 'src/styles/main.css'), 'utf8').replace(/\r\n/g, '\n');
   assert(
     css.includes('--overlay-strong:') && css.includes('--modal-bg:') && css.includes('--input-bg:'),
     '主题变量应包含弹层遮罩、弹窗背景和输入框背景，避免组件硬编码单一主题颜色',
@@ -2900,6 +3181,8 @@ async function run() {
     testRenderKeepsPageScroll,
     testTeamIssueDetectionAndRepair,
     testGoldModeAllowsManualMoveBackToPool,
+    testDissolveTeamsKeepsCaptainsAndHexcores,
+    testDissolveTeamsReleasesCaptainsAndHexcores,
     testSystemIntegrityCheck,
     testSystemIntegrityCheckMatchesCurrentRules,
     testNavigationResetsPageScroll,

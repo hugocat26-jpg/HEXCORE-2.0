@@ -2861,8 +2861,14 @@ h2 span {
 }
 
 .cannon-choice-grid button {
+  display: inline-flex;
+  min-height: 44px;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
   color: var(--text);
-  text-align: left;
+  text-align: center;
   cursor: pointer;
 }
 
@@ -2878,15 +2884,19 @@ h2 span {
 
 .cannon-choice-grid strong,
 .cannon-preview-grid strong {
-  display: block;
-  margin-bottom: 6px;
+  display: inline;
+  margin-bottom: 0;
+  line-height: 1.2;
   color: var(--accent);
+  white-space: nowrap;
 }
 
 .cannon-choice-grid span {
-  display: block;
+  display: inline;
   color: var(--muted);
   font-size: 12px;
+  line-height: 1.25;
+  white-space: nowrap;
 }
 
 .cannon-target-field {
@@ -4063,6 +4073,39 @@ h2 span {
   color: #d7edf4;
   font-size: 13px;
   line-height: 1.55;
+}
+
+.auto-roster-reminder {
+  display: grid;
+  gap: 5px;
+  margin-top: 10px;
+  padding: 10px 11px;
+  border: 1px solid rgba(255, 198, 92, 0.46);
+  border-radius: 7px;
+  background: rgba(91, 58, 12, 0.4);
+  color: #ffe8b8;
+}
+
+.hex-execution-queue .auto-roster-reminder {
+  margin: 0 0 10px;
+}
+
+.auto-roster-reminder b {
+  color: #ffd27a;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.auto-roster-reminder span,
+.auto-roster-reminder em {
+  color: #fff1cc;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.auto-roster-reminder em {
+  font-style: normal;
+  font-weight: 800;
 }
 
 .usable-hex-alert-actions {
@@ -7132,6 +7175,14 @@ h2 span {
   opacity: 0.56;
   transform: none;
   box-shadow: none;
+}
+
+.charged-cannon-modal .cannon-choice-grid button:not(.primary-btn):not(.danger-btn):not(.danger-inline) {
+  min-height: 44px;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
 }
 
 .import-preview-tabs button {
