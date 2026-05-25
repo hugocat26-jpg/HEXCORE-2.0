@@ -3001,9 +3001,12 @@ function testTournamentScheduleRandomizesEntrants() {
   assert(H.state.tournament.rounds.length === 1, '首轮单边待补齐时不应生成后续晋级轮次');
   H.actions.assignTournamentSlot(firstRound.id, firstRound.matches[0].id, 'B', outsiderCaptain.id);
   assert(firstRound.matches[0].teamAId === localCaptain.id && firstRound.matches[0].teamBId === outsiderCaptain.id, '阵营A/B队伍应能分别拖入对应槽位');
+  firstRound.matches[0].status = 'pending_opponent';
   H.actions.setActiveView('tournament');
   assert(app.innerHTML.includes('生成阵营对抗框架') && app.innerHTML.includes('阵营A队伍') && app.innerHTML.includes('阵营B队伍'), '赛程页应展示阵营对抗空栏位文案');
   assert(app.innerHTML.includes('移出') && app.innerHTML.includes('清空本场'), '赛程页已放入队伍后应提供移出和清空本场操作');
+  assert(app.innerHTML.includes('待录分'), '双方都已填入队伍时，即使旧状态仍是待补齐，也应显示待录分');
+  assert(!app.innerHTML.includes('确认轮空'), '双方都已填入队伍时，即使旧状态仍是待补齐，也不应显示确认轮空');
 }
 
 function testTournamentManualByeAndReorder() {

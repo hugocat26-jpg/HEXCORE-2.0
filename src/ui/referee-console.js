@@ -2579,20 +2579,24 @@
               <h2>${escapeHtml(round.name)}</h2>
               <div class="tournament-match-list">
                 ${round.matches.map(match => {
+                  const hasTeamA = Boolean(match.teamAId);
+                  const hasTeamB = Boolean(match.teamBId);
+                  const hasSingleTeam = hasTeamA !== hasTeamB;
                   const hasBye = match.status === 'bye' && Boolean(match.winnerId);
-                  const pendingOpponent = match.status === 'pending_opponent';
-                  const isEmptyMatch = match.status === 'empty' || (!match.teamAId && !match.teamBId);
+                  const pendingOpponent = !hasBye && hasSingleTeam;
+                  const canConfirmBye = roundIndex === 0 && pendingOpponent;
+                  const isEmptyMatch = match.status === 'empty' || (!hasTeamA && !hasTeamB);
                   const winnerName = match.winnerId ? captainName(match.winnerId) : '待定';
                   const slotLocked = roundIndex !== 0 || hasBye;
-                  const scoreDisabled = hasBye || !match.teamAId || !match.teamBId;
+                  const scoreDisabled = hasBye || !hasTeamA || !hasTeamB;
                   const statusLabel = match.status === 'bye'
                     ? '轮空晋级'
                     : (match.status === 'completed'
                       ? '已结束'
                       : (pendingOpponent ? '待补齐' : (isEmptyMatch ? '待编排' : '待录分')));
-                  const opponentHint = match.teamAId && !match.teamBId
+                  const opponentHint = hasTeamA && !hasTeamB
                     ? '等待阵营B队伍'
-                    : (!match.teamAId && match.teamBId ? '等待阵营A队伍' : '');
+                    : (!hasTeamA && hasTeamB ? '等待阵营A队伍' : '');
                   return `
                     <article class="tournament-match ${match.status}">
                       <div class="match-head">
@@ -2616,7 +2620,7 @@
                       `}
                       <div class="match-actions">
                         <span>${pendingOpponent ? escapeHtml(opponentHint) : `晋级：${escapeHtml(winnerName)}`}</span>
-                        ${roundIndex === 0 && pendingOpponent ? `<button class="subtle-btn" onclick='window.hexcoreUI.confirmTournamentBye(${safeJsonString(round.id)}, ${safeJsonString(match.id)})'>确认轮空</button>` : ''}
+                        ${canConfirmBye ? `<button class="subtle-btn" onclick='window.hexcoreUI.confirmTournamentBye(${safeJsonString(round.id)}, ${safeJsonString(match.id)})'>确认轮空</button>` : ''}
                         ${roundIndex === 0 ? `<button class="subtle-btn" ${isEmptyMatch ? 'disabled' : ''} onclick='window.hexcoreUI.clearTournamentMatch(${safeJsonString(round.id)}, ${safeJsonString(match.id)})'>清空本场</button>` : ''}
                         <button class="subtle-btn" ${scoreDisabled ? 'disabled' : ''} onclick='window.hexcoreUI.saveTournamentScore(${safeJsonString(round.id)}, ${safeJsonString(match.id)})'>保存比分</button>
                       </div>
