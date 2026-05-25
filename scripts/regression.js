@@ -345,6 +345,19 @@ function drawForCaptain(H, captainId) {
   return H.state.draft.currentDraw;
 }
 
+function testTurnContextShowsTeamAndCaptainNames() {
+  const { H, app } = createReadyHarness();
+  const captain = currentCaptain(H);
+  const captainPlayer = H.selectors.captainPlayer(captain.id);
+  assert(captain && captainPlayer, '测试前提：当前队伍应有队长选手');
+  assert(app.innerHTML.includes(captain.name), '顺位卡片应显示队伍名');
+  assert(app.innerHTML.includes(`队长 ${captainPlayer.name}`), '顺位卡片应同时显示队长名称');
+  assert(!app.innerHTML.includes(`<em>${captain.record || '待定'}</em>`), '顺位卡片不应继续用战绩/待定占用队长名称位置');
+  H.state.ui.orderDrawerOpen = true;
+  H.ui.render();
+  assert(app.innerHTML.includes(`队长 ${captainPlayer.name}`), '顺位详情也应显示队长名称');
+}
+
 function skipUntilCompleted(H, maxSteps = 80) {
   let steps = 0;
   while (H.state.draft.phase !== 'completed' && steps < maxSteps) {
@@ -3273,6 +3286,7 @@ async function run() {
     testSystemIntegrityCheck,
     testSystemIntegrityCheckMatchesCurrentRules,
     testNavigationResetsPageScroll,
+    testTurnContextShowsTeamAndCaptainNames,
     testNewHexcores,
     testHexcoreFiveDrawOneFlow,
     testDraftOrderFollowsHexcoreDrawOrder,

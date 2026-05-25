@@ -1316,6 +1316,11 @@
     const previousCaptain = captainById(previousId);
     const nextCaptain = captainById(nextId);
     const drawerOpen = Boolean(state.ui && state.ui.orderDrawerOpen);
+    const captainPlayerLabel = captain => {
+      if (!captain) return '队列起点';
+      const player = Hexcore2.selectors.captainPlayer(captain.id);
+      return player ? `队长 ${player.name}` : '待定';
+    };
     const orderRows = order.map((captainId, index) => {
       const captain = captainById(captainId);
       const status = !inSetup && index === currentIndex ? '当前' : (!inSetup && index < currentIndex ? '已过' : '待定');
@@ -1324,7 +1329,7 @@
         <article class="order-detail-row ${className}">
           <span>${index + 1}</span>
           <strong>${escapeHtml(captain ? captain.name : '未知队伍')}</strong>
-          <em>${escapeHtml(captain ? captain.record : '待定')}</em>
+          <em>${escapeHtml(captainPlayerLabel(captain))}</em>
           <b>${status}</b>
         </article>
       `;
@@ -1333,7 +1338,7 @@
       <div class="turn-context-card ${className}">
         <span>${label}</span>
         <strong>${captain ? escapeHtml(captain.name) : '无'}</strong>
-        <em>${captain ? escapeHtml(captain.record || '待定') : '队列起点'}</em>
+        <em>${escapeHtml(captainPlayerLabel(captain))}</em>
       </div>
     `;
     return `
