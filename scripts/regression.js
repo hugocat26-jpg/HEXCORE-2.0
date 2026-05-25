@@ -2982,6 +2982,22 @@ function testTournamentByeAndBracketLinks() {
   assert(app.innerHTML.includes('BYE') && app.innerHTML.includes('轮空'), '赛程图应明确显示轮空');
   assert(app.innerHTML.includes('tournament-bye-card') && !app.innerHTML.includes('VS</em>\\n                        <label class="tournament-slot empty'), '轮空场次应只显示轮空卡，不应显示VS空队伍');
   assert(app.innerHTML.includes('bracket-source') && app.innerHTML.includes('linked'), '赛程图应显示晋级来源和连接路径样式');
+
+  let guard = 0;
+  while (H.state.tournament.status !== 'completed' && guard < 10) {
+    guard += 1;
+    const currentRound = H.state.tournament.rounds[H.state.tournament.rounds.length - 1];
+    const playable = currentRound.matches.find(match => match.teamAId && match.teamBId && match.status !== 'completed');
+    if (!playable) break;
+    elements[`tournament-score-${currentRound.id}-${playable.id}-a`] = { value: '2' };
+    elements[`tournament-score-${currentRound.id}-${playable.id}-b`] = { value: '1' };
+    H.actions.saveTournamentScore(currentRound.id, playable.id);
+  }
+  assert(H.state.tournament.status === 'completed' && H.state.tournament.championId, '决赛保存比分后应产生冠军');
+  H.actions.setActiveView('tournament');
+  const championName = H.state.captains.find(captain => captain.id === H.state.tournament.championId).name;
+  assert(app.innerHTML.includes('tournament-champion-showcase') && app.innerHTML.includes('HEXCORE 2.0 最终胜者'), '赛程完成后应展示冠军展示区');
+  assert(app.innerHTML.includes(championName) && app.innerHTML.includes('亚军队伍') && app.innerHTML.includes('决赛'), '冠军展示区应包含冠军、亚军和决赛信息');
 }
 
 function testTournamentScheduleRandomizesEntrants() {

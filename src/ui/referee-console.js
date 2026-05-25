@@ -2578,6 +2578,31 @@
       sum + round.matches.filter(match => match.status === 'completed' || match.status === 'bye').length, 0);
     const totalMatches = tournament.rounds.reduce((sum, round) => sum + round.matches.length, 0);
     const championName = tournament.championId ? captainName(tournament.championId) : '未产生';
+    const championCaptain = tournament.championId
+      ? Hexcore2.state.captains.find(captain => captain.id === tournament.championId)
+      : null;
+    const championPlayer = championCaptain && championCaptain.playerId
+      ? Hexcore2.state.players.find(player => player.id === championCaptain.playerId)
+      : null;
+    const championMembers = championCaptain && Array.isArray(championCaptain.team)
+      ? championCaptain.team
+        .map(playerId => Hexcore2.state.players.find(player => player.id === playerId))
+        .filter(Boolean)
+      : [];
+    const championHexcores = championCaptain
+      ? (Hexcore2.state.hexcoreAssignments[championCaptain.id] || []).filter(Boolean)
+      : [];
+    const championGold = championCaptain && championCaptain.economy
+      ? Math.max(0, Math.round(Number(championCaptain.economy.gold) || 0))
+      : 0;
+    const finalRound = tournament.rounds[tournament.rounds.length - 1];
+    const finalMatch = finalRound && finalRound.matches ? finalRound.matches[0] : null;
+    const runnerUpId = finalMatch && finalMatch.winnerId
+      ? (finalMatch.winnerId === finalMatch.teamAId ? finalMatch.teamBId : finalMatch.teamAId)
+      : '';
+    const finalScore = finalMatch && finalMatch.scoreA !== '' && finalMatch.scoreB !== ''
+      ? `${finalMatch.scoreA} : ${finalMatch.scoreB}`
+      : '已决出胜者';
     const statusText = tournament.status === 'completed' ? '已完成' : (tournament.rounds.length ? '进行中' : '未排赛程');
     const campVersusEnabled = !(Hexcore2.state.ui && Hexcore2.state.ui.tournamentCampVersus === false);
     const currentPairingLabel = tournament.pairingMode === 'random'
@@ -2677,6 +2702,22 @@
         </div>
       </section>
       ${tournament.rounds.length ? `
+        ${championCaptain && tournament.status === 'completed' ? `
+          <section class="data-panel tournament-champion-showcase" aria-label="冠军展示">
+            <div class="champion-crown-mark">冠军</div>
+            <div class="champion-copy">
+              <span>HEXCORE 2.0 最终胜者</span>
+              <h2>${escapeHtml(championName)}</h2>
+              <p>${escapeHtml(Hexcore2.selectors.campLabel(Hexcore2.selectors.captainCamp(championCaptain.id)))} · 队长 ${escapeHtml(championPlayer ? championPlayer.name : '待定')} · 决赛 ${escapeHtml(finalScore)}</p>
+            </div>
+            <div class="champion-stat-strip">
+              <div><span>阵容人数</span><strong>${championMembers.length + 1}/5</strong></div>
+              <div><span>剩余金币</span><strong>${championGold}</strong></div>
+              <div><span>持有海克斯</span><strong>${championHexcores.length || 0}</strong></div>
+              <div><span>亚军队伍</span><strong>${escapeHtml(runnerUpId ? captainName(runnerUpId) : '待定')}</strong></div>
+            </div>
+          </section>
+        ` : ''}
         <section class="data-panel tournament-seed-panel">
           <div>
             <h2>排位与手动调整</h2>
