@@ -587,22 +587,24 @@
     };
   }
 
-  function buildCampVersusTournamentRound(roundNumber, campACount, campBCount, oldRound) {
+  function buildCampVersusTournamentRound(roundNumber, campAEntrants, campBEntrants, oldRound) {
     const matches = [];
-    const totalMatches = Math.max(campACount, campBCount);
+    const teamAIds = Array.isArray(campAEntrants) ? campAEntrants : [];
+    const teamBIds = Array.isArray(campBEntrants) ? campBEntrants : [];
+    const totalMatches = Math.max(teamAIds.length, teamBIds.length);
     for (let index = 0; index < totalMatches; index += 1) {
       const id = `r${roundNumber}m${index + 1}`;
       const oldMatch = oldRound && oldRound.matches
-        ? oldRound.matches.find(match => match.id === id)
+        ? oldRound.matches.find(match => match.id === id && match.teamAId === teamAIds[index] && match.teamBId === teamBIds[index])
         : null;
       matches.push(oldMatch ? { ...oldMatch } : {
         id,
-        teamAId: '',
-        teamBId: '',
+        teamAId: teamAIds[index] || '',
+        teamBId: teamBIds[index] || '',
         scoreA: '',
         scoreB: '',
         winnerId: '',
-        status: 'empty',
+        status: teamAIds[index] && teamBIds[index] ? 'pending' : 'empty',
         byeConfirmed: false,
         pairingMode: 'camp_versus',
         expectedCampA: 'local',
@@ -615,6 +617,15 @@
       matches,
       pairingMode: 'camp_versus',
     };
+  }
+
+  function isCampVersusTournamentContext(tournament, round, match) {
+    return Boolean(
+      (tournament && tournament.pairingMode === 'camp_versus')
+      || (round && round.pairingMode === 'camp_versus')
+      || (match && match.pairingMode === 'camp_versus')
+      || (round && String(round.name || '').includes('阵营对抗'))
+    );
   }
 
   function normalizeTournamentMatchStatus(match) {
@@ -3228,26 +3239,31 @@
     generateTournamentSchedule() {
       const orderedEntrants = Hexcore2.state.draft.baseOrder
         .filter(id => Hexcore2.state.captains.some(captain => captain.id === id));
-      const entrants = shuffledEntrants(orderedEntrants);
-      if (entrants.length < 2) {
+      if (orderedEntrants.length < 2) {
         Hexcore2.eventStore.append('生成赛程失败', '至少需要 2 支队伍才能生成赛程', 'warn');
         Hexcore2.ui.render();
         return;
       }
+      const optionInput = document.getElementById('tournament-camp-versus-toggle');
+      const useCampVersus = optionInput && typeof optionInput.checked === 'boolean'
+        ? Boolean(optionInput.checked)
+        : !(Hexcore2.state.ui && Hexcore2.state.ui.tournamentCampVersus === false);
+      Hexcore2.state.ui = Hexcore2.state.ui || {};
+      Hexcore2.state.ui.tournamentCampVersus = useCampVersus;
       const campAEntrants = orderedEntrants.filter(id => Hexcore2.selectors.captainCamp(id) === 'local');
       const campBEntrants = orderedEntrants.filter(id => Hexcore2.selectors.captainCamp(id) === 'outsider');
       const assignedCaptainCount = orderedEntrants.filter(id => Boolean(Hexcore2.selectors.captainPlayer(id))).length;
       if (assignedCaptainCount < orderedEntrants.length) {
         Hexcore2.eventStore.append(
           '生成赛程失败',
-          `当前已有 ${orderedEntrants.length} 支队伍，但只有 ${assignedCaptainCount} 支队伍已指定队长选手。请先补齐队伍人员并设置队长，再生成阵营对抗框架。`,
+          `当前已有 ${orderedEntrants.length} 支队伍，但只有 ${assignedCaptainCount} 支队伍已指定队长选手。请先补齐队伍人员并设置队长，再生成赛程。`,
           'warn'
         );
         Hexcore2.ui.render();
         return;
       }
-      if (!campAEntrants.length || !campBEntrants.length) {
-        Hexcore2.eventStore.append('生成赛程失败', '阵营对抗框架需要阵营 A 和阵营 B 都至少有 1 支已完成队伍，请检查队长阵营和队伍人员。', 'warn');
+      if (useCampVersus && (!campAEntrants.length || !campBEntrants.length || campAEntrants.length !== campBEntrants.length)) {
+        Hexcore2.eventStore.append('生成赛程失败', `阵营对抗需要本地队伍和外地队伍数量一致，当前本地 ${campAEntrants.length} 队、外地 ${campBEntrants.length} 队。`, 'warn');
         Hexcore2.ui.render();
         return;
       }
@@ -3259,15 +3275,31 @@
       }
 
       snapshot('生成赛程前');
+      const entrants = shuffledEntrants(orderedEntrants);
+      const rounds = useCampVersus
+        ? [buildCampVersusTournamentRound(1, shuffledEntrants(campAEntrants), shuffledEntrants(campBEntrants), null)]
+        : [buildTournamentRound(1, entrants, null)];
       Hexcore2.state.tournament = {
         status: 'running',
         championId: '',
-        rounds: [buildCampVersusTournamentRound(1, campAEntrants.length, campBEntrants.length, null)],
-        pairingMode: 'camp_versus',
+        rounds,
+        pairingMode: useCampVersus ? 'camp_versus' : 'random',
       };
       recomputeTournamentAdvancement();
-      Hexcore2.eventStore.append('赛程生成', `已生成阵营 A/B 对抗空赛程框架，等待裁判拖入 ${entrants.length} 支队伍`, 'success');
+      Hexcore2.eventStore.append(
+        '赛程生成',
+        useCampVersus
+          ? `已一键生成阵营对抗赛程：本地队伍在左侧，外地队伍在右侧，共 ${orderedEntrants.length} 支队伍。`
+          : `已一键生成全随机赛程，共 ${orderedEntrants.length} 支队伍。`,
+        'success'
+      );
       renderAndPersist();
+    },
+
+    setTournamentCampVersus(enabled) {
+      Hexcore2.state.ui = Hexcore2.state.ui || {};
+      Hexcore2.state.ui.tournamentCampVersus = Boolean(enabled);
+      Hexcore2.ui.render();
     },
 
     saveTournamentScore(roundId, matchId) {
@@ -3316,6 +3348,36 @@
       Hexcore2.state.ui.tournamentDragCaptainId = captain.id;
     },
 
+    openTournamentSlotPicker(roundId, matchId, side) {
+      const tournament = Hexcore2.state.tournament || {};
+      const roundIndex = (tournament.rounds || []).findIndex(item => item.id === roundId);
+      const round = roundIndex >= 0 ? tournament.rounds[roundIndex] : null;
+      const match = round && round.matches.find(item => item.id === matchId);
+      if (!round || !match || (side !== 'A' && side !== 'B')) {
+        Hexcore2.eventStore.append('打开队伍选择失败', '目标赛程槽无效', 'warn');
+        Hexcore2.ui.render();
+        return;
+      }
+      if (roundIndex !== 0 || match.status === 'bye') {
+        Hexcore2.eventStore.append('打开队伍选择失败', '只能调整首轮未轮空的队伍槽位', 'warn');
+        Hexcore2.ui.render();
+        return;
+      }
+      Hexcore2.state.ui = Hexcore2.state.ui || {};
+      Hexcore2.state.ui.tournamentSlotPicker = { roundId, matchId, side };
+      Hexcore2.ui.render();
+    },
+
+    closeTournamentSlotPicker() {
+      if (Hexcore2.state.ui) delete Hexcore2.state.ui.tournamentSlotPicker;
+      Hexcore2.ui.render();
+    },
+
+    selectTournamentSlotCaptain(roundId, matchId, side, captainId) {
+      if (Hexcore2.state.ui) delete Hexcore2.state.ui.tournamentSlotPicker;
+      this.assignTournamentSlot(roundId, matchId, side, captainId);
+    },
+
     assignTournamentSlot(roundId, matchId, side, captainId) {
       const tournament = Hexcore2.state.tournament || {};
       const roundIndex = (tournament.rounds || []).findIndex(item => item.id === roundId);
@@ -3333,7 +3395,12 @@
         Hexcore2.ui.render();
         return;
       }
-      if (round.pairingMode === 'camp_versus') {
+      if (isCampVersusTournamentContext(tournament, round, match)) {
+        tournament.pairingMode = 'camp_versus';
+        round.pairingMode = 'camp_versus';
+        match.pairingMode = 'camp_versus';
+        match.expectedCampA = 'local';
+        match.expectedCampB = 'outsider';
         const expectedCamp = side === 'A' ? 'local' : 'outsider';
         if (Hexcore2.selectors.captainCamp(captain.id) !== expectedCamp) {
           Hexcore2.eventStore.append(
@@ -3341,6 +3408,18 @@
             `${captain.name} 属于${Hexcore2.selectors.campLabel(Hexcore2.selectors.captainCamp(captain.id))}，只能放入${side === 'A' ? '阵营A' : '阵营B'}对应槽位`,
             'warn'
           );
+          Hexcore2.ui.render();
+          return;
+        }
+      }
+      const affectedMatches = round.matches.filter(item =>
+        item === match || item.teamAId === captain.id || item.teamBId === captain.id
+      );
+      if (affectedMatches.some(item => tournamentChangeNeedsConfirm(roundIndex, item))) {
+        const confirmed = typeof confirm === 'function'
+          ? confirm('调整队伍槽位会清空相关场次比分、轮空确认和后续晋级结果。确认继续？')
+          : true;
+        if (!confirmed) {
           Hexcore2.ui.render();
           return;
         }
@@ -3367,6 +3446,7 @@
       tournament.status = 'running';
       tournament.championId = '';
       Hexcore2.state.ui.tournamentDragCaptainId = '';
+      delete Hexcore2.state.ui.tournamentSlotPicker;
       recomputeTournamentAdvancement();
       Hexcore2.eventStore.append('赛程调整', `${captain.name} 已放入 ${match.id.toUpperCase()} 的 ${side} 槽位，比分和后续晋级已重算`, 'warn');
       renderAndPersist();
@@ -3410,6 +3490,7 @@
       tournament.rounds = tournament.rounds.slice(0, 1);
       tournament.status = 'running';
       tournament.championId = '';
+      if (Hexcore2.state.ui) delete Hexcore2.state.ui.tournamentSlotPicker;
       recomputeTournamentAdvancement();
       Hexcore2.eventStore.append('赛程移出', `${captainName(removedId)} 已从 ${match.id.toUpperCase()} 的 ${side} 槽位移出，可重新排位`, 'warn');
       renderAndPersist();
@@ -3447,6 +3528,7 @@
       tournament.rounds = tournament.rounds.slice(0, 1);
       tournament.status = 'running';
       tournament.championId = '';
+      if (Hexcore2.state.ui) delete Hexcore2.state.ui.tournamentSlotPicker;
       recomputeTournamentAdvancement();
       Hexcore2.eventStore.append('赛程清空场次', `${match.id.toUpperCase()} 已清空，可重新拖入队伍`, 'warn');
       renderAndPersist();
@@ -3499,6 +3581,7 @@
 
       snapshot('清空赛程前');
       Hexcore2.state.tournament = { status: 'empty', championId: '', rounds: [] };
+      if (Hexcore2.state.ui) delete Hexcore2.state.ui.tournamentSlotPicker;
       Hexcore2.eventStore.append('赛程清空', '裁判清空了当前赛程', 'warn');
       renderAndPersist();
     },
@@ -3551,7 +3634,9 @@
   global.hexcoreUI = Hexcore2.actions;
   if (!Hexcore2.hexDetailEscHandler && global.document && typeof global.document.addEventListener === 'function') {
     Hexcore2.hexDetailEscHandler = event => {
-      if (event && event.key === 'Escape' && Hexcore2.state.ui && Hexcore2.state.ui.hexDetailModal) {
+      if (event && event.key === 'Escape' && Hexcore2.state.ui && Hexcore2.state.ui.tournamentSlotPicker) {
+        Hexcore2.actions.closeTournamentSlotPicker();
+      } else if (event && event.key === 'Escape' && Hexcore2.state.ui && Hexcore2.state.ui.hexDetailModal) {
         Hexcore2.actions.closeHexDetail();
       } else if (event && event.key === 'Escape' && Hexcore2.state.ui && Hexcore2.state.ui.lastStandConfirm) {
         Hexcore2.actions.cancelLastStand();

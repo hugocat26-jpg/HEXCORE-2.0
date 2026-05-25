@@ -591,9 +591,11 @@
     return {
       status: ['empty', 'running', 'completed'].includes(source.status) ? source.status : 'empty',
       championId: captainIds.has(source.championId) ? source.championId : '',
+      pairingMode: ['camp_versus', 'random'].includes(source.pairingMode) ? source.pairingMode : '',
       rounds: rounds.slice(0, 8).map((round, roundIndex) => ({
         id: String(round.id || `r${roundIndex + 1}`).slice(0, 24),
         name: String(round.name || `第 ${roundIndex + 1} 轮`).slice(0, 32),
+        pairingMode: ['camp_versus', 'random'].includes(round.pairingMode) ? round.pairingMode : '',
         matches: (Array.isArray(round.matches) ? round.matches : []).slice(0, 32).map((match, matchIndex) => ({
           id: String(match.id || `r${roundIndex + 1}m${matchIndex + 1}`).slice(0, 32),
           teamAId: captainIds.has(match.teamAId) ? match.teamAId : '',
@@ -601,7 +603,11 @@
           scoreA: match.scoreA === '' || match.scoreA === undefined ? '' : Math.max(0, Number(match.scoreA) || 0),
           scoreB: match.scoreB === '' || match.scoreB === undefined ? '' : Math.max(0, Number(match.scoreB) || 0),
           winnerId: captainIds.has(match.winnerId) ? match.winnerId : '',
-          status: ['pending', 'bye', 'completed'].includes(match.status) ? match.status : 'pending',
+          status: ['empty', 'pending', 'pending_opponent', 'bye', 'completed'].includes(match.status) ? match.status : 'pending',
+          byeConfirmed: Boolean(match.byeConfirmed),
+          pairingMode: ['camp_versus', 'random'].includes(match.pairingMode) ? match.pairingMode : '',
+          expectedCampA: ['local', 'outsider'].includes(match.expectedCampA) ? match.expectedCampA : '',
+          expectedCampB: ['local', 'outsider'].includes(match.expectedCampB) ? match.expectedCampB : '',
         })),
       })),
     };
@@ -783,6 +789,7 @@
     state.ui.eventCaptainFilter = typeof state.ui.eventCaptainFilter === 'string' ? state.ui.eventCaptainFilter.slice(0, 48) : 'all';
     state.ui.eventSearch = typeof state.ui.eventSearch === 'string' ? state.ui.eventSearch.slice(0, 80) : '';
     state.ui.theme = ['default', 'neon', 'apple'].includes(state.ui.theme) ? state.ui.theme : 'default';
+    state.ui.tournamentCampVersus = state.ui.tournamentCampVersus !== false;
     state.ui.playerFilter = typeof state.ui.playerFilter === 'string' ? state.ui.playerFilter.slice(0, 32) : 'all';
     const campFilters = state.ui.playerCampFilters && typeof state.ui.playerCampFilters === 'object' ? state.ui.playerCampFilters : {};
     state.ui.playerCampFilters = {

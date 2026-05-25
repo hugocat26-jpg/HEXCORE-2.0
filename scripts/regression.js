@@ -2956,13 +2956,12 @@ function testTournamentByeAndBracketLinks() {
   const { H, app, elements } = createReadyHarness();
   H.actions.generateTournamentSchedule();
   const firstRound = H.state.tournament.rounds[0];
-  const localCaptains = H.state.captains.filter(captain => H.selectors.captainCamp(captain.id) === 'local');
-  const outsiderCaptains = H.state.captains.filter(captain => H.selectors.captainCamp(captain.id) === 'outsider');
-  assert(firstRound.matches.every(match => !match.teamAId && !match.teamBId), '生成阵营对抗赛程时首轮应先生成空栏位，不应自动填入队伍');
-  firstRound.matches.forEach((match, index) => {
-    H.actions.assignTournamentSlot(firstRound.id, match.id, 'A', localCaptains[index].id);
-    H.actions.assignTournamentSlot(firstRound.id, match.id, 'B', outsiderCaptains[index].id);
-  });
+  assert(firstRound.matches.every(match =>
+    match.teamAId
+    && match.teamBId
+    && H.selectors.captainCamp(match.teamAId) === 'local'
+    && H.selectors.captainCamp(match.teamBId) === 'outsider'
+  ), '阵营对抗一键生成时首轮应自动填入本地 vs 外地队伍');
   firstRound.matches.forEach((match, index) => {
     elements[`tournament-score-${firstRound.id}-${match.id}-a`] = { value: String(index + 1) };
     elements[`tournament-score-${firstRound.id}-${match.id}-b`] = { value: '0' };
@@ -2989,24 +2988,55 @@ function testTournamentScheduleRandomizesEntrants() {
   const { H, app } = createReadyHarness();
   H.actions.generateTournamentSchedule();
   const firstRound = H.state.tournament.rounds[0];
-  const localCaptain = H.state.captains.find(captain => H.selectors.captainCamp(captain.id) === 'local');
+  const secondMatch = firstRound.matches[1];
+  const firstLocalId = firstRound.matches[0].teamAId;
+  const firstOutsiderId = firstRound.matches[0].teamBId;
+  const secondLocalId = secondMatch.teamAId;
   const outsiderCaptain = H.state.captains.find(captain => H.selectors.captainCamp(captain.id) === 'outsider');
   assert(firstRound.pairingMode === 'camp_versus' && H.state.tournament.pairingMode === 'camp_versus', '赛程应标记为阵营A/B对抗模式');
-  assert(firstRound.matches.length === 5, '10队阵营对抗应生成5个空首轮对阵栏位');
-  assert(firstRound.matches.every(match => match.pairingMode === 'camp_versus' && !match.teamAId && !match.teamBId), '阵营对抗框架应保留空队伍栏位等待拖拽');
+  assert(firstRound.matches.length === 5, '10队阵营对抗应生成5场首轮对阵');
+  assert(firstRound.matches.every(match =>
+    match.pairingMode === 'camp_versus'
+    && match.teamAId
+    && match.teamBId
+    && H.selectors.captainCamp(match.teamAId) === 'local'
+    && H.selectors.captainCamp(match.teamBId) === 'outsider'
+  ), '阵营对抗一键生成必须全部为本地队伍 vs 外地队伍');
+  delete firstRound.matches[0].pairingMode;
+
+  H.actions.setActiveView('tournament');
+  assert(app.innerHTML.includes('一键生成赛程') && app.innerHTML.includes('阵营对抗') && app.innerHTML.includes('更换'), '赛程页应提供一键生成和点击槽位更换入口');
+  H.actions.openTournamentSlotPicker(firstRound.id, firstRound.matches[0].id, 'A');
+  assert(H.state.ui.tournamentSlotPicker && app.innerHTML.includes('tournament-slot-picker-modal'), '点击首轮槽位应打开赛程队伍选择弹窗');
+  assert(app.innerHTML.includes(`data-picker-captain-id="${firstLocalId}"`) && !app.innerHTML.includes(`data-picker-captain-id="${firstOutsiderId}"`), '左侧本地槽位弹窗只应列出本地队伍');
+  H.actions.closeTournamentSlotPicker();
+  assert(!H.state.ui.tournamentSlotPicker, '关闭赛程队伍选择弹窗后应清理UI状态');
+  firstRound.matches[0].pairingMode = 'camp_versus';
+
   H.actions.assignTournamentSlot(firstRound.id, firstRound.matches[0].id, 'A', outsiderCaptain.id);
-  assert(!firstRound.matches[0].teamAId, '阵营B队伍不能拖入阵营A槽位');
-  H.actions.assignTournamentSlot(firstRound.id, firstRound.matches[0].id, 'A', localCaptain.id);
-  assert(firstRound.matches[0].status === 'pending_opponent' && !firstRound.matches[0].winnerId, '首轮单边拖入队伍后应等待另一侧队伍，不得自动轮空晋级');
-  assert(H.state.tournament.rounds.length === 1, '首轮单边待补齐时不应生成后续晋级轮次');
-  H.actions.assignTournamentSlot(firstRound.id, firstRound.matches[0].id, 'B', outsiderCaptain.id);
-  assert(firstRound.matches[0].teamAId === localCaptain.id && firstRound.matches[0].teamBId === outsiderCaptain.id, '阵营A/B队伍应能分别拖入对应槽位');
+  assert(firstRound.matches[0].teamAId === firstLocalId, '外地队伍不能拖入阵营对抗左侧本地槽位');
+  H.actions.openTournamentSlotPicker(firstRound.id, firstRound.matches[0].id, 'B');
+  assert(app.innerHTML.includes(`data-picker-captain-id="${firstOutsiderId}"`) && !app.innerHTML.includes(`data-picker-captain-id="${firstLocalId}"`), '右侧外地槽位弹窗只应列出外地队伍');
+  H.actions.closeTournamentSlotPicker();
+  H.actions.openTournamentSlotPicker(firstRound.id, secondMatch.id, 'A');
+  assert(!app.innerHTML.includes(`data-picker-captain-id="${firstLocalId}"`) && app.innerHTML.includes(`data-picker-captain-id="${secondLocalId}"`), '已在其它场次的队伍不应出现在新槽位选择列表中，当前槽位队伍仍应显示');
+  H.actions.closeTournamentSlotPicker();
   firstRound.matches[0].status = 'pending_opponent';
   H.actions.setActiveView('tournament');
-  assert(app.innerHTML.includes('生成阵营对抗框架') && app.innerHTML.includes('阵营A队伍') && app.innerHTML.includes('阵营B队伍'), '赛程页应展示阵营对抗空栏位文案');
-  assert(app.innerHTML.includes('移出') && app.innerHTML.includes('清空本场'), '赛程页已放入队伍后应提供移出和清空本场操作');
+  assert(app.innerHTML.includes('本地队伍') && app.innerHTML.includes('外地队伍'), '赛程页应展示阵营对抗左右槽位文案');
+  assert(app.innerHTML.includes('更换') && app.innerHTML.includes('移出') && app.innerHTML.includes('清空本场'), '赛程页已放入队伍后应提供更换、移出和清空本场操作');
   assert(app.innerHTML.includes('待录分'), '双方都已填入队伍时，即使旧状态仍是待补齐，也应显示待录分');
   assert(!app.innerHTML.includes('确认轮空'), '双方都已填入队伍时，即使旧状态仍是待补齐，也不应显示确认轮空');
+
+  H.actions.setTournamentCampVersus(false);
+  H.actions.generateTournamentSchedule();
+  const randomRound = H.state.tournament.rounds[0];
+  const randomIds = randomRound.matches.flatMap(match => [match.teamAId, match.teamBId]).filter(Boolean);
+  assert(H.state.tournament.pairingMode === 'random', '取消阵营对抗后应生成全随机赛程');
+  assert(new Set(randomIds).size === H.state.captains.length, '全随机赛程应把全部队伍唯一放入首轮');
+  assert(randomRound.matches.every(match => match.pairingMode !== 'camp_versus'), '全随机赛程不应带阵营对抗槽位限制');
+  H.actions.setActiveView('tournament');
+  assert(app.innerHTML.includes('全随机对抗'), '赛程页应显示当前为全随机对抗模式');
 }
 
 function testTournamentManualByeAndReorder() {
@@ -3018,16 +3048,17 @@ function testTournamentManualByeAndReorder() {
   const localCaptains = H.state.captains.filter(captain => H.selectors.captainCamp(captain.id) === 'local');
   const outsiderCaptains = H.state.captains.filter(captain => H.selectors.captainCamp(captain.id) === 'outsider');
 
-  H.actions.assignTournamentSlot(firstRound.id, firstMatch.id, 'A', localCaptains[0].id);
+  H.actions.removeTournamentSlot(firstRound.id, firstMatch.id, 'B');
   assert(firstMatch.status === 'pending_opponent' && !firstMatch.winnerId, '单边队伍必须保持待补齐，不能自动晋级');
   H.actions.setActiveView('tournament');
   assert(app.innerHTML.includes('待补齐') && app.innerHTML.includes('确认轮空') && app.innerHTML.includes('等待阵营B队伍'), '单边待补齐场次应显示确认轮空和等待另一侧文案');
 
   H.actions.confirmTournamentBye(firstRound.id, firstMatch.id);
-  assert(firstMatch.status === 'bye' && firstMatch.byeConfirmed && firstMatch.winnerId === localCaptains[0].id, '点击确认轮空后单边队伍才应晋级');
+  assert(firstMatch.status === 'bye' && firstMatch.byeConfirmed && firstMatch.winnerId === firstMatch.teamAId, '点击确认轮空后单边队伍才应晋级');
   H.actions.removeTournamentSlot(firstRound.id, firstMatch.id, 'A');
   assert(!firstMatch.teamAId && !firstMatch.teamBId && !firstMatch.winnerId && firstMatch.status === 'empty', '移出轮空队伍后应清空本场并回到空场次');
 
+  H.actions.clearTournamentMatch(firstRound.id, secondMatch.id);
   H.actions.assignTournamentSlot(firstRound.id, firstMatch.id, 'A', localCaptains[0].id);
   H.actions.assignTournamentSlot(firstRound.id, firstMatch.id, 'B', outsiderCaptains[0].id);
   H.actions.assignTournamentSlot(firstRound.id, secondMatch.id, 'A', localCaptains[1].id);

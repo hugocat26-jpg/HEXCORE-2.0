@@ -5,6 +5,24 @@
     return Hexcore2.state.players.find(player => player.id === playerId);
   }
 
+  function captainById(captainId) {
+    return Hexcore2.state.captains.find(captain => captain.id === captainId);
+  }
+
+  function captainName(captainId) {
+    const captain = captainById(captainId);
+    return captain ? captain.name : '待定';
+  }
+
+  function isCampVersusTournamentContext(tournament, round, match) {
+    return Boolean(
+      (tournament && tournament.pairingMode === 'camp_versus')
+      || (round && round.pairingMode === 'camp_versus')
+      || (match && match.pairingMode === 'camp_versus')
+      || (round && String(round.name || '').includes('阵营对抗'))
+    );
+  }
+
   function currentCards() {
     const draw = Hexcore2.state.draft.currentDraw;
     if (!draw) return [];
@@ -1206,6 +1224,86 @@
                 <div class="hex-detail-tags">${hex.tags.map(tag => `<i>${escapeHtml(hexcoreTagLabel(tag))}</i>`).join('')}</div>
               </section>
             ` : ''}
+          </div>
+        </section>
+      </div>
+    `;
+  }
+
+  function tournamentSlotPickerModal() {
+    const picker = Hexcore2.state.ui && Hexcore2.state.ui.tournamentSlotPicker;
+    if (!picker) return '';
+    const tournament = Hexcore2.state.tournament || {};
+    const rounds = Array.isArray(tournament.rounds) ? tournament.rounds : [];
+    const roundIndex = rounds.findIndex(round => round.id === picker.roundId);
+    const round = roundIndex >= 0 ? rounds[roundIndex] : null;
+    const match = round && Array.isArray(round.matches)
+      ? round.matches.find(item => item.id === picker.matchId)
+      : null;
+    const side = picker.side === 'B' ? 'B' : 'A';
+    if (!round || !match || roundIndex !== 0 || match.status === 'bye') return '';
+
+    const isCampVersus = isCampVersusTournamentContext(tournament, round, match);
+    const expectedCamp = isCampVersus ? (side === 'A' ? 'local' : 'outsider') : '';
+    const currentTeamId = side === 'A' ? match.teamAId : match.teamBId;
+    const assignedCaptainIds = new Set(
+      (rounds[0] && Array.isArray(rounds[0].matches) ? rounds[0].matches : [])
+        .flatMap(item => [item.teamAId, item.teamBId])
+        .filter(Boolean)
+        .filter(captainId => captainId !== currentTeamId)
+    );
+    const candidates = Hexcore2.state.captains
+      .filter(captain => {
+        if (expectedCamp && Hexcore2.selectors.captainCamp(captain.id) !== expectedCamp) return false;
+        return !assignedCaptainIds.has(captain.id) || captain.id === currentTeamId;
+      })
+      .sort((left, right) => {
+        if (left.id === currentTeamId) return -1;
+        if (right.id === currentTeamId) return 1;
+        return left.name.localeCompare(right.name, 'zh-CN');
+      });
+    const sideLabel = isCampVersus
+      ? (side === 'A' ? '左侧本地队伍' : '右侧外地队伍')
+      : (side === 'A' ? '左侧队伍' : '右侧队伍');
+    const campLabel = expectedCamp ? Hexcore2.selectors.campLabel(expectedCamp) : '任意阵营';
+
+    return `
+      <div class="modal-backdrop tournament-slot-picker-backdrop" role="dialog" aria-modal="true" aria-labelledby="tournament-slot-picker-title" onclick="window.hexcoreUI.closeTournamentSlotPicker()">
+        <section class="form-modal tournament-slot-picker-modal" onclick="event.stopPropagation()">
+          <div class="modal-head">
+            <div>
+              <h2 id="tournament-slot-picker-title">选择赛程队伍</h2>
+              <p>为 ${escapeHtml(match.id.toUpperCase())} 的 ${escapeHtml(sideLabel)} 选择队伍。只显示${escapeHtml(campLabel)}且未在其它场次中的队伍。</p>
+            </div>
+            <button type="button" class="icon-close" onclick="window.hexcoreUI.closeTournamentSlotPicker()" aria-label="关闭">×</button>
+          </div>
+          <div class="tournament-picker-context">
+            <strong>${escapeHtml(match.id.toUpperCase())}</strong>
+            <span>${escapeHtml(sideLabel)} · ${currentTeamId ? `当前：${captainName(currentTeamId)}` : '当前为空'}</span>
+          </div>
+          <div class="tournament-picker-list">
+            ${candidates.length ? candidates.map(captain => {
+              const isCurrent = captain.id === currentTeamId;
+              const camp = Hexcore2.selectors.captainCamp(captain.id);
+              const gold = captain.economy && Number.isFinite(Number(captain.economy.gold))
+                ? Math.max(0, Math.round(Number(captain.economy.gold)))
+                : 0;
+              return `
+                <button type="button" class="tournament-picker-option ${isCurrent ? 'current' : ''}" data-picker-captain-id="${escapeHtml(captain.id)}" ${isCurrent ? 'disabled' : ''} onclick='window.hexcoreUI.selectTournamentSlotCaptain(${safeJsonString(round.id)}, ${safeJsonString(match.id)}, ${safeJsonString(side)}, ${safeJsonString(captain.id)})'>
+                  <strong>${escapeHtml(captain.name)}</strong>
+                  <span>${escapeHtml(Hexcore2.selectors.campLabel(camp))} · 金币 ${gold}</span>
+                  <em>${isCurrent ? '当前槽位' : '选入此槽'}</em>
+                </button>
+              `;
+            }).join('') : `
+              <div class="tournament-picker-empty">
+                <strong>暂无可选队伍</strong>
+                <span>${escapeHtml(campLabel)}队伍已经全部入场，先移出其它槽位再来安排。</span>
+              </div>
+            `}
+          </div>
+          <div class="modal-actions">
+            <button type="button" onclick="window.hexcoreUI.closeTournamentSlotPicker()">取消</button>
           </div>
         </section>
       </div>
@@ -2476,18 +2574,19 @@
 
   function tournamentPage() {
     const tournament = Hexcore2.state.tournament || { status: 'empty', rounds: [], championId: '' };
-    const captainName = captainId => {
-      const captain = Hexcore2.state.captains.find(item => item.id === captainId);
-      return captain ? captain.name : '待定';
-    };
     const completedMatches = tournament.rounds.reduce((sum, round) =>
       sum + round.matches.filter(match => match.status === 'completed' || match.status === 'bye').length, 0);
     const totalMatches = tournament.rounds.reduce((sum, round) => sum + round.matches.length, 0);
     const championName = tournament.championId ? captainName(tournament.championId) : '未产生';
     const statusText = tournament.status === 'completed' ? '已完成' : (tournament.rounds.length ? '进行中' : '未排赛程');
+    const campVersusEnabled = !(Hexcore2.state.ui && Hexcore2.state.ui.tournamentCampVersus === false);
+    const currentPairingLabel = tournament.pairingMode === 'random'
+      ? '全随机对抗'
+      : (tournament.pairingMode === 'camp_versus' ? '阵营对抗' : '待生成');
     const assignedCaptainIds = new Set((tournament.rounds[0] && tournament.rounds[0].matches
       ? tournament.rounds[0].matches.flatMap(match => [match.teamAId, match.teamBId])
       : []).filter(Boolean));
+    const isCampVersusMatch = (round, match) => isCampVersusTournamentContext(tournament, round, match);
     const teamDragCard = (captain, assigned = false) => `
       <button class="tournament-team-chip ${assigned ? 'assigned' : ''}" draggable="true"
         ondragstart='event.dataTransfer.setData("text/plain", ${safeJsonString(captain.id)}); window.hexcoreUI.setTournamentDragCaptain(${safeJsonString(captain.id)})'>
@@ -2496,14 +2595,24 @@
       </button>
     `;
     const tournamentSlot = (round, match, side, teamId, locked = false, scoreDisabled = false) => {
-      const isCampVersus = round.pairingMode === 'camp_versus' && match.pairingMode === 'camp_versus';
-      const campSlotLabel = side === 'A' ? '阵营A队伍' : '阵营B队伍';
-      const teamName = teamId ? captainName(teamId) : (isCampVersus ? campSlotLabel : '拖入队伍');
+      const isCampVersus = isCampVersusMatch(round, match);
+      const sideClass = side === 'A' ? 'side-a' : 'side-b';
+      const campSlotLabel = side === 'A' ? '本地队伍' : '外地队伍';
+      const randomSlotLabel = side === 'A' ? '左侧队伍' : '右侧队伍';
+      const teamName = teamId ? captainName(teamId) : (isCampVersus ? campSlotLabel : randomSlotLabel);
+      const slotLabel = teamId ? '更换' : '选择队伍';
       return `
-        <div class="tournament-slot ${teamId ? 'filled' : 'empty'} ${locked ? 'locked' : ''}"
+        <div class="tournament-slot ${sideClass} ${teamId ? 'filled' : 'empty'} ${locked ? 'locked' : ''}"
           ${locked ? '' : `ondragover="event.preventDefault()" ondrop='event.preventDefault(); window.hexcoreUI.assignTournamentSlot(${safeJsonString(round.id)}, ${safeJsonString(match.id)}, ${safeJsonString(side)}, event.dataTransfer.getData("text/plain"))'`}>
           <div class="slot-team-row">
-            <span class="slot-team" ${teamId && !locked ? `draggable="true" ondragstart='event.dataTransfer.setData("text/plain", ${safeJsonString(teamId)}); window.hexcoreUI.setTournamentDragCaptain(${safeJsonString(teamId)})'` : ''}>${escapeHtml(teamName)}</span>
+            ${locked ? `
+              <span class="slot-team">${escapeHtml(teamName)}</span>
+            ` : `
+              <button type="button" class="slot-select-btn" ${teamId ? `draggable="true" ondragstart='event.dataTransfer.setData("text/plain", ${safeJsonString(teamId)}); window.hexcoreUI.setTournamentDragCaptain(${safeJsonString(teamId)})'` : ''} onclick='window.hexcoreUI.openTournamentSlotPicker(${safeJsonString(round.id)}, ${safeJsonString(match.id)}, ${safeJsonString(side)})'>
+                <strong>${escapeHtml(teamName)}</strong>
+                <small>${escapeHtml(slotLabel)}</small>
+              </button>
+            `}
             ${teamId && !locked ? `<button type="button" class="slot-remove-btn" onclick='event.stopPropagation(); window.hexcoreUI.removeTournamentSlot(${safeJsonString(round.id)}, ${safeJsonString(match.id)}, ${safeJsonString(side)})'>移出</button>` : ''}
           </div>
           <input id="tournament-score-${escapeHtml(round.id)}-${escapeHtml(match.id)}-${side.toLowerCase()}" type="number" min="0" value="${escapeHtml(side === 'A' ? match.scoreA : match.scoreB)}" ${scoreDisabled ? 'disabled' : ''}>
@@ -2553,17 +2662,23 @@
           <div><span>赛程状态</span><strong>${statusText}</strong></div>
           <div><span>已完成场次</span><strong>${completedMatches}/${totalMatches || 0}</strong></div>
           <div><span>冠军队伍</span><strong>${escapeHtml(championName)}</strong></div>
+          <div><span>对抗模式</span><strong>${escapeHtml(currentPairingLabel)}</strong></div>
         </div>
-        <div class="toolbar-row">
-          <button class="primary-btn" onclick="window.hexcoreUI.generateTournamentSchedule()">生成阵营对抗框架</button>
+        <div class="toolbar-row tournament-generate-row">
+          <label class="tournament-mode-toggle">
+            <input id="tournament-camp-versus-toggle" type="checkbox" ${campVersusEnabled ? 'checked' : ''} onchange="window.hexcoreUI.setTournamentCampVersus(this.checked)">
+            <span>阵营对抗</span>
+            <small>勾选：本地队伍在左、外地队伍在右；不勾选：全随机对抗。</small>
+          </label>
+          <button class="primary-btn" onclick="window.hexcoreUI.generateTournamentSchedule()">一键生成赛程</button>
           <button class="danger-btn" onclick="window.hexcoreUI.resetTournamentSchedule()">清空赛程</button>
         </div>
       </section>
       ${tournament.rounds.length ? `
         <section class="data-panel tournament-seed-panel">
           <div>
-            <h2>拖拽排位</h2>
-            <p>拖动队伍到首轮比赛框：阵营A队伍放左侧，阵营B队伍放右侧。录入比分后胜者自动进入下一栏。</p>
+            <h2>排位与手动调整</h2>
+            <p>一键生成后可点击槽位更换队伍，也可以拖动队伍到首轮比赛框。左侧为蓝色，右侧为红色。</p>
           </div>
           <div class="tournament-team-bank">
             ${Hexcore2.state.captains.map(captain => teamDragCard(captain, assignedCaptainIds.has(captain.id))).join('')}
@@ -2650,7 +2765,7 @@
       ` : `
         <section class="data-panel empty-tournament">
           <h2>暂无赛程</h2>
-          <p>点击“生成阵营对抗框架”后，系统会先生成空赛程栏位。裁判拖入阵营A/B队伍、录入比分后，胜者自动晋级到下一栏。</p>
+          <p>点击“一键生成赛程”后，系统会按上方模式自动生成首轮对阵。勾选阵营对抗时本地队伍在左、外地队伍在右；不勾选时全队随机对抗。</p>
         </section>
       `}
     `;
@@ -2875,6 +2990,7 @@
       ${recruitRevealModal()}
       ${economyRevealModal()}
       ${hexDetailModal()}
+      ${tournamentSlotPickerModal()}
       <div id="toast-root" aria-live="polite"></div>
     `;
   }
