@@ -3214,7 +3214,7 @@ function testBandleDefenseFinalBattle() {
 }
 
 function testBandleDefenseDayLayoutStyles() {
-  const css = fs.readFileSync(path.join(root, 'src/styles/main.css'), 'utf8');
+  const css = fs.readFileSync(path.join(root, 'src/styles/main.css'), 'utf8').replace(/\r\n/g, '\n');
   assert(
     css.includes('.bandle-days-grid {\n  display: grid;\n  grid-template-columns: minmax(0, 1fr);'),
     '班德尔保卫战 Day 1 和 Day 2 应上下单列分布，避免并排压缩导致显示不全',
