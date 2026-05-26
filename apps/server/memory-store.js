@@ -8,6 +8,8 @@ class MemoryTournamentStore {
   constructor() {
     this.tournaments = new Map();
     this.subscribers = new Map();
+    this.roomAccess = new Map();
+    this.sessions = new Map();
   }
 
   createTournament(input = {}) {
@@ -24,6 +26,7 @@ class MemoryTournamentStore {
     });
     this.tournaments.set(id, state);
     this.subscribers.set(id, new Set());
+    this.roomAccess.set(id, createRoomAccess(id, input));
     return clone(state);
   }
 
@@ -62,8 +65,74 @@ class MemoryTournamentStore {
       }
     }
   }
+
+  getRoomAccess(id) {
+    const access = this.roomAccess.get(id);
+    return access ? clone(access) : null;
+  }
+
+  joinTournament(id, input = {}) {
+    const access = this.roomAccess.get(id);
+    if (!access) throw new Error(`赛事不存在：${id}`);
+    const code = String(input.code || '').trim();
+    const displayName = String(input.displayName || '未命名用户').trim().slice(0, 40);
+    const binding = bindingFromCode(access, code);
+    if (!binding) throw new Error('房间码无效');
+    const actorId = `user-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const sessionToken = `session-${Math.random().toString(36).slice(2)}-${Date.now()}`;
+    const session = {
+      sessionToken,
+      tournamentId: id,
+      actorId,
+      displayName,
+      role: binding.role,
+      teamId: binding.teamId || '',
+      joinedAt: new Date().toISOString(),
+    };
+    this.sessions.set(sessionToken, session);
+    return clone(session);
+  }
+
+  getSessionBinding(sessionToken, tournamentId) {
+    const session = this.sessions.get(String(sessionToken || ''));
+    if (!session || session.tournamentId !== tournamentId) return null;
+    return {
+      actorId: session.actorId,
+      role: session.role,
+      teamId: session.teamId,
+    };
+  }
+}
+
+function createRoomAccess(id, input = {}) {
+  const teams = Array.isArray(input.teams) && input.teams.length
+    ? input.teams
+    : Array.from({ length: 10 }, (_, index) => ({ teamId: `team-${index + 1}`, name: `队伍${index + 1}` }));
+  return {
+    tournamentId: id,
+    refereeCode: String(input.refereeCode || `${id}-referee`).trim(),
+    viewerCode: String(input.viewerCode || `${id}-viewer`).trim(),
+    displayCode: String(input.displayCode || `${id}-display`).trim(),
+    captainCodes: teams.map((team, index) => ({
+      teamId: String(team.teamId || team.id || `team-${index + 1}`).trim(),
+      teamName: String(team.name || `队伍${index + 1}`).trim().slice(0, 40),
+      code: String(team.code || `${id}-captain-${index + 1}`).trim(),
+    })),
+  };
+}
+
+function bindingFromCode(access, code) {
+  if (!code) return null;
+  if (code === access.refereeCode) return { role: 'referee' };
+  if (code === access.viewerCode) return { role: 'viewer' };
+  if (code === access.displayCode) return { role: 'display' };
+  const captain = access.captainCodes.find(item => item.code === code);
+  if (captain) return { role: 'captain', teamId: captain.teamId };
+  return null;
 }
 
 module.exports = {
   MemoryTournamentStore,
+  bindingFromCode,
+  createRoomAccess,
 };

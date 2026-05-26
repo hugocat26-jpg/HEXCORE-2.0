@@ -3123,9 +3123,27 @@ async function testMultiplayerApiServer() {
       id: 't-api',
       name: 'API 回归赛事',
       actorId: 'referee-1',
+      teams: [{ teamId: 'team-1', name: '测试1队', code: 'captain-code-1' }],
+      viewerCode: 'viewer-code',
     });
     assert(created.status === 201 && created.body.tournament.stateVersion === 1, '创建赛事应写入 TournamentCreated 事件并推进版本');
     assert(created.body.tournament.events[0].type === multiplayerShared.EVENT_TYPES.TOURNAMENT_CREATED, '创建赛事应返回创建事件');
+
+    const room = await requestJson(port, 'GET', '/api/tournaments/t-api/room');
+    assert(room.status === 200 && room.body.room.captainCodes[0].code === 'captain-code-1', '房间信息应包含队长加入码');
+
+    const captainJoin = await requestJson(port, 'POST', '/api/tournaments/t-api/join', {
+      code: 'captain-code-1',
+      displayName: '队长用户',
+    });
+    assert(captainJoin.status === 200 && captainJoin.body.session.role === multiplayerShared.ROLES.CAPTAIN, '队长应能通过队伍码加入房间');
+    assert(captainJoin.body.session.teamId === 'team-1' && captainJoin.body.session.sessionToken, '队长 session 应绑定自己的队伍');
+
+    const viewerJoin = await requestJson(port, 'POST', '/api/tournaments/t-api/join', {
+      code: 'viewer-code',
+      displayName: '观众用户',
+    });
+    assert(viewerJoin.status === 200 && viewerJoin.body.session.role === multiplayerShared.ROLES.VIEWER, '观众应能通过观众码加入房间');
 
     const snapshot = await requestJson(port, 'GET', '/api/tournaments/t-api/snapshot');
     assert(snapshot.status === 200 && snapshot.body.tournament.snapshot.name === 'API 回归赛事', '多人端服务应读取赛事快照');
@@ -3134,13 +3152,10 @@ async function testMultiplayerApiServer() {
     assert(sse.initial.includes('event: snapshot') && sse.initial.includes('"tournamentId":"t-api"'), 'SSE 应先推送当前快照');
 
     const command = await requestJson(port, 'POST', '/api/tournaments/t-api/commands', {
-      roleBinding: { actorId: 'captain-user-1', role: multiplayerShared.ROLES.CAPTAIN, teamId: 'team-1' },
+      sessionToken: captainJoin.body.session.sessionToken,
       command: {
         commandId: 'cmd-api-1',
         type: multiplayerShared.COMMAND_TYPES.PURCHASE_SHOP_CARD,
-        actorId: 'captain-user-1',
-        role: multiplayerShared.ROLES.CAPTAIN,
-        teamId: 'team-1',
         baseVersion: 1,
         payload: { teamId: 'team-1', slotId: 'slot-1' },
       },
@@ -3149,13 +3164,10 @@ async function testMultiplayerApiServer() {
     assert(command.body.tournament.stateVersion === 2, '提交 command 应推进 stateVersion');
 
     const duplicate = await requestJson(port, 'POST', '/api/tournaments/t-api/commands', {
-      roleBinding: { actorId: 'captain-user-1', role: multiplayerShared.ROLES.CAPTAIN, teamId: 'team-1' },
+      sessionToken: captainJoin.body.session.sessionToken,
       command: {
         commandId: 'cmd-api-1',
         type: multiplayerShared.COMMAND_TYPES.PURCHASE_SHOP_CARD,
-        actorId: 'captain-user-1',
-        role: multiplayerShared.ROLES.CAPTAIN,
-        teamId: 'team-1',
         baseVersion: 1,
         payload: { teamId: 'team-1', slotId: 'slot-1' },
       },
@@ -3164,17 +3176,26 @@ async function testMultiplayerApiServer() {
     assert(duplicate.body.event.eventSeq === command.body.event.eventSeq, '重复 command 返回的事件序号应保持一致');
 
     const rejected = await requestJson(port, 'POST', '/api/tournaments/t-api/commands', {
-      roleBinding: { actorId: 'viewer-1', role: multiplayerShared.ROLES.VIEWER },
+      sessionToken: viewerJoin.body.session.sessionToken,
       command: {
         commandId: 'cmd-api-2',
         type: multiplayerShared.COMMAND_TYPES.PURCHASE_SHOP_CARD,
-        actorId: 'viewer-1',
-        role: multiplayerShared.ROLES.VIEWER,
         baseVersion: 2,
         payload: { teamId: 'team-1', slotId: 'slot-1' },
       },
     });
     assert(rejected.status === 400 && /无权执行/.test(rejected.body.error), '观众通过 API 写入应被拒绝');
+
+    const invalidSession = await requestJson(port, 'POST', '/api/tournaments/t-api/commands', {
+      sessionToken: 'session-bad',
+      command: {
+        commandId: 'cmd-api-3',
+        type: multiplayerShared.COMMAND_TYPES.PURCHASE_SHOP_CARD,
+        baseVersion: 2,
+        payload: { teamId: 'team-1', slotId: 'slot-1' },
+      },
+    });
+    assert(invalidSession.status === 400 && /sessionToken/.test(invalidSession.body.error), '无效 sessionToken 不应提交 command');
     sse.req.destroy();
   } finally {
     await closeServer(server);

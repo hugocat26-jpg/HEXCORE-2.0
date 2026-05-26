@@ -71,11 +71,12 @@ function matchTournamentRoute(pathname, suffix) {
 }
 
 function roleBindingFromRequest(body) {
-  const binding = body.roleBinding || {};
+  const binding = body.resolvedRoleBinding || {};
+  if (!binding.actorId || !binding.role) throw new Error('缺少有效 sessionToken 或角色绑定');
   return {
-    actorId: String(binding.actorId || (body.command && body.command.actorId) || '').trim(),
-    role: String(binding.role || (body.command && body.command.role) || ROLES.VIEWER).trim(),
-    teamId: String(binding.teamId || (body.command && body.command.teamId) || '').trim(),
+    actorId: String(binding.actorId).trim(),
+    role: String(binding.role).trim(),
+    teamId: String(binding.teamId || '').trim(),
   };
 }
 
@@ -128,6 +129,25 @@ function createServer(options = {}) {
         return;
       }
 
+      const roomTournamentId = req.method === 'GET' ? matchTournamentRoute(pathname, '/room') : null;
+      if (roomTournamentId) {
+        const access = store.getRoomAccess(roomTournamentId);
+        if (!access) {
+          sendJson(res, 404, { ok: false, error: '赛事不存在' });
+          return;
+        }
+        sendJson(res, 200, { ok: true, room: access });
+        return;
+      }
+
+      const joinTournamentId = req.method === 'POST' ? matchTournamentRoute(pathname, '/join') : null;
+      if (joinTournamentId) {
+        const body = await readJson(req);
+        const session = store.joinTournament(joinTournamentId, body);
+        sendJson(res, 200, { ok: true, session });
+        return;
+      }
+
       const eventTournamentId = req.method === 'GET' ? matchTournamentRoute(pathname, '/events') : null;
       if (eventTournamentId) {
         const state = store.getTournament(eventTournamentId);
@@ -155,13 +175,21 @@ function createServer(options = {}) {
           return;
         }
         const body = await readJson(req);
-        const command = createCommand({ ...body.command, tournamentId: commandTournamentId });
+        const binding = store.getSessionBinding(body.sessionToken, commandTournamentId);
+        if (!binding) throw new Error('sessionToken 无效或已过期');
+        const command = createCommand({
+          ...body.command,
+          tournamentId: commandTournamentId,
+          actorId: binding.actorId,
+          role: binding.role,
+          teamId: binding.teamId || (body.command && body.command.teamId) || '',
+        });
         const eventType = commandEventMap[command.type];
         if (!eventType) throw new Error(`暂不支持 command 类型：${command.type}`);
         const result = acceptCommandAsEvent(
           state,
           command,
-          roleBindingFromRequest(body),
+          roleBindingFromRequest({ ...body, resolvedRoleBinding: binding }),
           eventType,
           command.payload
         );
