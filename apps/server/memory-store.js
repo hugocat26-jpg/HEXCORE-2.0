@@ -1,4 +1,6 @@
+const crypto = require('crypto');
 const { createAuthorityState } = require('../../packages/rules');
+const { ROLES } = require('../../packages/shared');
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
@@ -9,6 +11,7 @@ class MemoryTournamentStore {
     this.tournaments = new Map();
     this.subscribers = new Map();
     this.roomAccess = new Map();
+    this.initialRoomAccess = new Map();
     this.sessions = new Map();
   }
 
@@ -26,7 +29,9 @@ class MemoryTournamentStore {
     });
     this.tournaments.set(id, state);
     this.subscribers.set(id, new Set());
-    this.roomAccess.set(id, createRoomAccess(id, input));
+    const roomAccess = createRoomAccess(id, input);
+    this.roomAccess.set(id, roomAccess.stored);
+    this.initialRoomAccess.set(id, roomAccess.initial);
     return clone(state);
   }
 
@@ -43,32 +48,53 @@ class MemoryTournamentStore {
     return clone(nextState);
   }
 
-  subscribe(id, res) {
+  subscribe(id, res, projectEvent = event => event) {
     if (!this.tournaments.has(id)) throw new Error(`赛事不存在：${id}`);
     const bucket = this.subscribers.get(id) || new Set();
-    bucket.add(res);
+    const subscriber = { res, projectEvent };
+    bucket.add(subscriber);
     this.subscribers.set(id, bucket);
     return () => {
-      bucket.delete(res);
+      bucket.delete(subscriber);
     };
   }
 
   publish(id, event) {
     const bucket = this.subscribers.get(id);
     if (!bucket || !bucket.size) return;
-    const message = `event: ${event.type}\nid: ${event.eventSeq}\ndata: ${JSON.stringify(event)}\n\n`;
-    for (const res of bucket) {
+    for (const subscriber of bucket) {
       try {
-        res.write(message);
+        const projected = subscriber.projectEvent(event);
+        if (!projected) continue;
+        const message = `event: ${projected.type}\nid: ${projected.eventSeq}\ndata: ${JSON.stringify(projected)}\n\n`;
+        subscriber.res.write(message);
       } catch (error) {
-        bucket.delete(res);
+        bucket.delete(subscriber);
       }
     }
   }
 
-  getRoomAccess(id) {
-    const access = this.roomAccess.get(id);
+  consumeInitialRoomAccess(id) {
+    const access = this.initialRoomAccess.get(id);
+    this.initialRoomAccess.delete(id);
     return access ? clone(access) : null;
+  }
+
+  getRoomAccess(id, sessionToken) {
+    const access = this.roomAccess.get(id);
+    if (!access) return null;
+    const session = this.getSession(sessionToken, id);
+    if (!session) {
+      const error = new Error('需要有效裁判或管理员 sessionToken 才能查看房间码管理信息');
+      error.statusCode = 401;
+      throw error;
+    }
+    if (![ROLES.REFEREE, ROLES.TOURNAMENT_ADMIN, ROLES.SUPER_ADMIN].includes(session.role)) {
+      const error = new Error('当前身份无权查看房间码管理信息');
+      error.statusCode = 403;
+      throw error;
+    }
+    return roomAccessSummary(access);
   }
 
   joinTournament(id, input = {}) {
@@ -78,10 +104,10 @@ class MemoryTournamentStore {
     const displayName = String(input.displayName || '未命名用户').trim().slice(0, 40);
     const binding = bindingFromCode(access, code);
     if (!binding) throw new Error('房间码无效');
-    const actorId = `user-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const sessionToken = `session-${Math.random().toString(36).slice(2)}-${Date.now()}`;
+    const actorId = `user-${crypto.randomUUID()}`;
+    const sessionToken = generateSecret('sess');
     const session = {
-      sessionToken,
+      sessionTokenHash: hashSecret(sessionToken),
       tournamentId: id,
       actorId,
       displayName,
@@ -89,12 +115,18 @@ class MemoryTournamentStore {
       teamId: binding.teamId || '',
       joinedAt: new Date().toISOString(),
     };
-    this.sessions.set(sessionToken, session);
+    this.sessions.set(session.sessionTokenHash, session);
+    return clone({ ...session, sessionToken, sessionTokenHash: undefined });
+  }
+
+  getSession(sessionToken, tournamentId) {
+    const session = this.sessions.get(hashSecret(String(sessionToken || '')));
+    if (!session || session.tournamentId !== tournamentId) return null;
     return clone(session);
   }
 
   getSessionBinding(sessionToken, tournamentId) {
-    const session = this.sessions.get(String(sessionToken || ''));
+    const session = this.getSession(sessionToken, tournamentId);
     if (!session || session.tournamentId !== tournamentId) return null;
     return {
       actorId: session.actorId,
@@ -108,31 +140,81 @@ function createRoomAccess(id, input = {}) {
   const teams = Array.isArray(input.teams) && input.teams.length
     ? input.teams
     : Array.from({ length: 10 }, (_, index) => ({ teamId: `team-${index + 1}`, name: `队伍${index + 1}` }));
+  const refereeCode = safeProvidedCode(input.refereeCode) || generateSecret('ref');
+  const viewerCode = safeProvidedCode(input.viewerCode) || generateSecret('view');
+  const displayCode = safeProvidedCode(input.displayCode) || generateSecret('disp');
+  const captainCodes = teams.map((team, index) => ({
+    teamId: String(team.teamId || team.id || `team-${index + 1}`).trim(),
+    teamName: String(team.name || `队伍${index + 1}`).trim().slice(0, 40),
+    code: safeProvidedCode(team.code) || generateSecret(`cap${index + 1}`),
+  }));
   return {
-    tournamentId: id,
-    refereeCode: String(input.refereeCode || `${id}-referee`).trim(),
-    viewerCode: String(input.viewerCode || `${id}-viewer`).trim(),
-    displayCode: String(input.displayCode || `${id}-display`).trim(),
-    captainCodes: teams.map((team, index) => ({
-      teamId: String(team.teamId || team.id || `team-${index + 1}`).trim(),
-      teamName: String(team.name || `队伍${index + 1}`).trim().slice(0, 40),
-      code: String(team.code || `${id}-captain-${index + 1}`).trim(),
-    })),
+    initial: {
+      tournamentId: id,
+      refereeCode,
+      viewerCode,
+      displayCode,
+      captainCodes,
+    },
+    stored: {
+      tournamentId: id,
+      refereeCodeHash: hashSecret(refereeCode),
+      viewerCodeHash: hashSecret(viewerCode),
+      displayCodeHash: hashSecret(displayCode),
+      captainCodes: captainCodes.map(item => ({
+        teamId: item.teamId,
+        teamName: item.teamName,
+        codeHash: hashSecret(item.code),
+      })),
+      createdAt: new Date().toISOString(),
+    },
   };
 }
 
 function bindingFromCode(access, code) {
   if (!code) return null;
-  if (code === access.refereeCode) return { role: 'referee' };
-  if (code === access.viewerCode) return { role: 'viewer' };
-  if (code === access.displayCode) return { role: 'display' };
-  const captain = access.captainCodes.find(item => item.code === code);
-  if (captain) return { role: 'captain', teamId: captain.teamId };
+  const codeHash = hashSecret(code);
+  if (codeHash === access.refereeCodeHash) return { role: ROLES.REFEREE };
+  if (codeHash === access.viewerCodeHash) return { role: ROLES.VIEWER };
+  if (codeHash === access.displayCodeHash) return { role: ROLES.DISPLAY };
+  const captain = access.captainCodes.find(item => item.codeHash === codeHash);
+  if (captain) return { role: ROLES.CAPTAIN, teamId: captain.teamId };
   return null;
+}
+
+function generateSecret(prefix) {
+  return `${prefix}_${crypto.randomBytes(24).toString('base64url')}`;
+}
+
+function hashSecret(secret) {
+  return crypto.createHash('sha256').update(String(secret || ''), 'utf8').digest('hex');
+}
+
+function safeProvidedCode(value) {
+  const text = String(value || '').trim();
+  return text ? text.slice(0, 120) : '';
+}
+
+function roomAccessSummary(access) {
+  return clone({
+    tournamentId: access.tournamentId,
+    refereeCode: { issued: Boolean(access.refereeCodeHash) },
+    viewerCode: { issued: Boolean(access.viewerCodeHash) },
+    displayCode: { issued: Boolean(access.displayCodeHash) },
+    captainCodes: access.captainCodes.map(item => ({
+      teamId: item.teamId,
+      teamName: item.teamName,
+      codeIssued: Boolean(item.codeHash),
+    })),
+    createdAt: access.createdAt,
+  });
 }
 
 module.exports = {
   MemoryTournamentStore,
   bindingFromCode,
   createRoomAccess,
+  generateSecret,
+  hashSecret,
+  roomAccessSummary,
 };

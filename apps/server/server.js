@@ -2,9 +2,13 @@ const http = require('http');
 const { URL } = require('url');
 const { MemoryTournamentStore } = require('./memory-store');
 const {
+  createReadOnlyProjection,
+  normalizeProjectionView,
+  projectEvent,
+} = require('./projections');
+const {
   COMMAND_TYPES,
   EVENT_TYPES,
-  ROLES,
   RULES_VERSION,
   createCommand,
 } = require('../../packages/shared');
@@ -80,17 +84,18 @@ function roleBindingFromRequest(body) {
   };
 }
 
+function statusFromError(error) {
+  return Number.isInteger(error && error.statusCode) ? error.statusCode : 400;
+}
+
+function sessionTokenFromRequest(req, parsed, body = {}) {
+  const auth = String(req.headers.authorization || '').trim();
+  if (auth.toLowerCase().startsWith('bearer ')) return auth.slice(7).trim();
+  return String(body.sessionToken || parsed.searchParams.get('sessionToken') || '').trim();
+}
+
 function publicSnapshot(state) {
-  return {
-    tournamentId: state.tournamentId,
-    rulesVersion: state.rulesVersion,
-    schemaVersion: state.schemaVersion,
-    stateVersion: state.stateVersion,
-    eventSeq: state.eventSeq,
-    paused: state.paused,
-    snapshot: state.snapshot,
-    events: state.events.slice(-20),
-  };
+  return createReadOnlyProjection(state, 'public');
 }
 
 function createServer(options = {}) {
@@ -114,7 +119,11 @@ function createServer(options = {}) {
           payload: { name: state.snapshot.name, rulesVersion: state.rulesVersion },
         });
         store.replaceTournament(state.tournamentId, next);
-        sendJson(res, 201, { ok: true, tournament: publicSnapshot(next) });
+        sendJson(res, 201, {
+          ok: true,
+          tournament: publicSnapshot(next),
+          room: store.consumeInitialRoomAccess(state.tournamentId),
+        });
         return;
       }
 
@@ -129,9 +138,21 @@ function createServer(options = {}) {
         return;
       }
 
+      const projectionTournamentId = req.method === 'GET' ? matchTournamentRoute(pathname, '/projection') : null;
+      if (projectionTournamentId) {
+        const state = store.getTournament(projectionTournamentId);
+        if (!state) {
+          sendJson(res, 404, { ok: false, error: '赛事不存在' });
+          return;
+        }
+        const view = normalizeProjectionView(parsed.searchParams.get('view') || 'public');
+        sendJson(res, 200, { ok: true, tournament: createReadOnlyProjection(state, view) });
+        return;
+      }
+
       const roomTournamentId = req.method === 'GET' ? matchTournamentRoute(pathname, '/room') : null;
       if (roomTournamentId) {
-        const access = store.getRoomAccess(roomTournamentId);
+        const access = store.getRoomAccess(roomTournamentId, sessionTokenFromRequest(req, parsed));
         if (!access) {
           sendJson(res, 404, { ok: false, error: '赛事不存在' });
           return;
@@ -155,14 +176,15 @@ function createServer(options = {}) {
           sendJson(res, 404, { ok: false, error: '赛事不存在' });
           return;
         }
+        const view = normalizeProjectionView(parsed.searchParams.get('view') || 'public');
         res.writeHead(200, {
           'Content-Type': 'text/event-stream; charset=utf-8',
           'Cache-Control': 'no-store',
           Connection: 'keep-alive',
           'X-Content-Type-Options': 'nosniff',
         });
-        res.write(`event: snapshot\ndata: ${JSON.stringify(publicSnapshot(state))}\n\n`);
-        const unsubscribe = store.subscribe(eventTournamentId, res);
+        res.write(`event: snapshot\ndata: ${JSON.stringify(createReadOnlyProjection(state, view))}\n\n`);
+        const unsubscribe = store.subscribe(eventTournamentId, res, event => projectEvent(event, view));
         req.on('close', unsubscribe);
         return;
       }
@@ -205,7 +227,7 @@ function createServer(options = {}) {
 
       sendJson(res, 404, { ok: false, error: 'not found' });
     } catch (error) {
-      sendJson(res, 400, { ok: false, error: error && error.message ? error.message : String(error) });
+      sendJson(res, statusFromError(error), { ok: false, error: error && error.message ? error.message : String(error) });
     }
   });
 }
@@ -220,5 +242,6 @@ if (require.main === module) {
 module.exports = {
   commandEventMap,
   createServer,
+  createReadOnlyProjection,
   publicSnapshot,
 };

@@ -3128,22 +3128,35 @@ async function testMultiplayerApiServer() {
     });
     assert(created.status === 201 && created.body.tournament.stateVersion === 1, '创建赛事应写入 TournamentCreated 事件并推进版本');
     assert(created.body.tournament.events[0].type === multiplayerShared.EVENT_TYPES.TOURNAMENT_CREATED, '创建赛事应返回创建事件');
+    assert(created.body.room && created.body.room.captainCodes[0].code === 'captain-code-1', '创建赛事响应应一次性返回初始房间码');
+    assert(!created.body.tournament.events[0].payload.refereeCode && !created.body.tournament.snapshot.refereeCode, '公开快照和事件不应包含房间明文码');
 
-    const room = await requestJson(port, 'GET', '/api/tournaments/t-api/room');
-    assert(room.status === 200 && room.body.room.captainCodes[0].code === 'captain-code-1', '房间信息应包含队长加入码');
+    const anonymousRoom = await requestJson(port, 'GET', '/api/tournaments/t-api/room');
+    assert(anonymousRoom.status === 401 && /sessionToken/.test(anonymousRoom.body.error), '匿名用户不应读取房间码管理信息');
 
     const captainJoin = await requestJson(port, 'POST', '/api/tournaments/t-api/join', {
-      code: 'captain-code-1',
+      code: created.body.room.captainCodes[0].code,
       displayName: '队长用户',
     });
     assert(captainJoin.status === 200 && captainJoin.body.session.role === multiplayerShared.ROLES.CAPTAIN, '队长应能通过队伍码加入房间');
     assert(captainJoin.body.session.teamId === 'team-1' && captainJoin.body.session.sessionToken, '队长 session 应绑定自己的队伍');
+    assert(!captainJoin.body.session.sessionTokenHash && !/^session-/.test(captainJoin.body.session.sessionToken), '客户端不应收到 session 摘要，sessionToken 不应使用可预测旧格式');
 
     const viewerJoin = await requestJson(port, 'POST', '/api/tournaments/t-api/join', {
-      code: 'viewer-code',
+      code: created.body.room.viewerCode,
       displayName: '观众用户',
     });
     assert(viewerJoin.status === 200 && viewerJoin.body.session.role === multiplayerShared.ROLES.VIEWER, '观众应能通过观众码加入房间');
+
+    const refereeJoin = await requestJson(port, 'POST', '/api/tournaments/t-api/join', {
+      code: created.body.room.refereeCode,
+      displayName: '裁判用户',
+    });
+    assert(refereeJoin.status === 200 && refereeJoin.body.session.role === multiplayerShared.ROLES.REFEREE, '裁判应能通过创建时返回的裁判码加入房间');
+
+    const room = await requestJson(port, 'GET', `/api/tournaments/t-api/room?sessionToken=${encodeURIComponent(refereeJoin.body.session.sessionToken)}`);
+    assert(room.status === 200 && room.body.room.captainCodes[0].codeIssued === true, '裁判 session 应能读取房间码管理摘要');
+    assert(!room.body.room.refereeCodeHash && !room.body.room.refereeCode.code && !room.body.room.captainCodes[0].code, '房间码管理摘要不应返回明文码或摘要');
 
     const snapshot = await requestJson(port, 'GET', '/api/tournaments/t-api/snapshot');
     assert(snapshot.status === 200 && snapshot.body.tournament.snapshot.name === 'API 回归赛事', '多人端服务应读取赛事快照');
@@ -3196,6 +3209,44 @@ async function testMultiplayerApiServer() {
       },
     });
     assert(invalidSession.status === 400 && /sessionToken/.test(invalidSession.body.error), '无效 sessionToken 不应提交 command');
+
+    const importedSecret = await requestJson(port, 'POST', '/api/tournaments/t-api/commands', {
+      sessionToken: refereeJoin.body.session.sessionToken,
+      command: {
+        commandId: 'cmd-api-secret',
+        type: multiplayerShared.COMMAND_TYPES.IMPORT_STATE,
+        baseVersion: 2,
+        payload: {
+          checksum: 'checksum-public-projection',
+          sourceVersion: 'legacy-local',
+          refereeCode: 'should-not-leak',
+          realPlayerId: 'hidden-player',
+          randomSeed: 'hidden-seed',
+          summary: '公开摘要',
+        },
+      },
+    });
+    assert(importedSecret.status === 200 && importedSecret.body.tournament.stateVersion === 3, '裁判导入命令应能推进公开投影测试状态');
+    const viewerProjection = await requestJson(port, 'GET', '/api/tournaments/t-api/projection?view=viewer');
+    const projectionText = JSON.stringify(viewerProjection.body);
+    assert(viewerProjection.status === 200 && viewerProjection.body.tournament.view === 'viewer', '观众投影接口应返回 viewer 视图');
+    assert(projectionText.includes('公开摘要'), '观众投影应保留允许公开的摘要字段');
+    assert(!projectionText.includes('should-not-leak') && !projectionText.includes('hidden-player') && !projectionText.includes('hidden-seed'), '观众投影不应泄漏房间码、真实暗牌或内部随机字段');
+    const badProjection = await requestJson(port, 'GET', '/api/tournaments/t-api/projection?view=referee');
+    assert(badProjection.status === 400 && /未知只读投影视图/.test(badProjection.body.error), '只读投影接口不应接受裁判视图参数');
+
+    const riskCreated = await requestJson(port, 'POST', '/api/tournaments', {
+      id: 'risk-demo',
+      name: '旧攻击路径回归',
+    });
+    const leakedRoom = await requestJson(port, 'GET', '/api/tournaments/risk-demo/room');
+    assert(leakedRoom.status === 401 && !leakedRoom.body.room, '旧攻击路径第一步应失败：匿名用户不能读取 refereeCode');
+    const guessedRefereeJoin = await requestJson(port, 'POST', '/api/tournaments/risk-demo/join', {
+      code: 'risk-demo-referee',
+      displayName: '猜码用户',
+    });
+    assert(guessedRefereeJoin.status === 400 && /房间码无效/.test(guessedRefereeJoin.body.error), '旧攻击路径第二步应失败：默认裁判码不再可预测');
+    assert(riskCreated.body.room.refereeCode && riskCreated.body.room.refereeCode !== 'risk-demo-referee', '创建赛事返回的裁判码应为随机码而非旧默认格式');
     sse.req.destroy();
   } finally {
     await closeServer(server);
