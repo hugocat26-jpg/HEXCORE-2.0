@@ -5,6 +5,7 @@ const vm = require('vm');
 const zlib = require('zlib');
 const staticServer = require('./serve.js');
 const multiplayerServer = require('./serve-multiplayer.js');
+const multiplayerSync = require('./sync-multiplayer-copy.js');
 const { analyzeTaskDoc, runTaskLoop } = require('./task-loop-runner.js');
 
 const root = path.resolve(__dirname, '..');
@@ -2955,6 +2956,18 @@ function testMultiplayerCopyIsolation() {
   assert(multiplayerServer.resolveRequestPath('/docs/06_开发计划.md') === null, '多人端服务不应暴露根目录文档');
   assert(multiplayerServer.resolveRequestPath('/..%2F..%2Fpackage.json') === null, '多人端服务应拒绝穿越到项目根目录');
   assert(multiplayerServer.resolveRequestPath('/%E0%A4%A') === null, '多人端服务应拒绝非法URL编码');
+  assert(multiplayerSync.versionedTarget === localAppRoot, '多人端同步目标应固定为仓库内 apps/multiplayer');
+  const syncPlan = multiplayerSync.syncMultiplayerCopy({ dryRun: true });
+  assert(syncPlan.sourcePath === externalAppRoot, '多人端同步来源默认应是本机多人端工作副本');
+  assert(syncPlan.targetPath === localAppRoot, '多人端同步 dry-run 应指向版本管理副本');
+  assert(syncPlan.dryRun === true, '多人端同步 dry-run 不应执行文件复制');
+  let rejectedRefereeRepo = false;
+  try {
+    multiplayerSync.assertSafePaths(path.resolve('E:\\only_why\\HEXCORE2.0\\hex-core2.0'), localAppRoot);
+  } catch (error) {
+    rejectedRefereeRepo = true;
+  }
+  assert(rejectedRefereeRepo, '多人端同步脚本应拒绝把裁判端仓库当作同步来源');
 }
 
 function testRuleTemplateSaveAndLoad() {
