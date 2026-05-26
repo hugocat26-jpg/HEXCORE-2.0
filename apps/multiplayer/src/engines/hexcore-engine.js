@@ -892,7 +892,9 @@
 
     activate(hexcoreId, options = {}) {
       const state = Hexcore2.state;
-      const captain = currentCaptain();
+      const captain = options.sourceCaptainId
+        ? state.captains.find(item => item.id === options.sourceCaptainId)
+        : currentCaptain();
       if (!captain) return logFail('当前没有可操作队长');
       const hexcore = (state.hexcoreAssignments[captain.id] || []).find(item => item.id === hexcoreId);
       if (!hexcore || hexcore.mode === 'passive') return logFail('请选择可手动执行的新海克斯');

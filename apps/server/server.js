@@ -25,6 +25,7 @@ const commandEventMap = {
   [COMMAND_TYPES.OPEN_SHOP]: EVENT_TYPES.SHOP_OPENED,
   [COMMAND_TYPES.REFRESH_SHOP]: EVENT_TYPES.SHOP_REFRESHED,
   [COMMAND_TYPES.PURCHASE_SHOP_CARD]: EVENT_TYPES.SHOP_CARD_PURCHASED,
+  [COMMAND_TYPES.RENAME_TEAM]: EVENT_TYPES.TEAM_RENAMED,
   [COMMAND_TYPES.USE_HEXCORE]: EVENT_TYPES.HEXCORE_USED,
   [COMMAND_TYPES.SKIP_TURN]: EVENT_TYPES.TURN_SKIPPED,
   [COMMAND_TYPES.PAUSE_TOURNAMENT]: EVENT_TYPES.TOURNAMENT_PAUSED,
@@ -38,6 +39,9 @@ function sendJson(res, status, body) {
     'Content-Type': 'application/json; charset=utf-8',
     'Cache-Control': 'no-store',
     'X-Content-Type-Options': 'nosniff',
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type,Authorization',
   });
   res.end(JSON.stringify(body));
 }
@@ -105,6 +109,18 @@ function createServer(options = {}) {
       const parsed = new URL(req.url, `http://${host}:${port}`);
       const pathname = parsed.pathname;
 
+      if (req.method === 'OPTIONS') {
+        res.writeHead(204, {
+          'Cache-Control': 'no-store',
+          'X-Content-Type-Options': 'nosniff',
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
+          'Access-Control-Allow-Headers': 'Content-Type,Authorization',
+        });
+        res.end();
+        return;
+      }
+
       if (req.method === 'GET' && pathname === '/health') {
         sendJson(res, 200, { ok: true, service: 'hexcore-multiplayer-server', rulesVersion: RULES_VERSION });
         return;
@@ -165,7 +181,8 @@ function createServer(options = {}) {
       if (joinTournamentId) {
         const body = await readJson(req);
         const session = store.joinTournament(joinTournamentId, body);
-        sendJson(res, 200, { ok: true, session });
+        const state = store.getTournament(joinTournamentId);
+        sendJson(res, 200, { ok: true, session, tournament: publicSnapshot(state) });
         return;
       }
 
@@ -182,6 +199,7 @@ function createServer(options = {}) {
           'Cache-Control': 'no-store',
           Connection: 'keep-alive',
           'X-Content-Type-Options': 'nosniff',
+          'Access-Control-Allow-Origin': '*',
         });
         res.write(`event: snapshot\ndata: ${JSON.stringify(createReadOnlyProjection(state, view))}\n\n`);
         const unsubscribe = store.subscribe(eventTournamentId, res, event => projectEvent(event, view));

@@ -25,6 +25,8 @@ class MemoryTournamentStore {
       snapshot: {
         name: String(input.name || 'HEXCORE 多人测试赛事').trim().slice(0, 80),
         createdAt: new Date().toISOString(),
+        currentTeamId: teamIdFromInput(input),
+        teams: normalizeTeams(input),
       },
     });
     this.tournaments.set(id, state);
@@ -136,13 +138,29 @@ class MemoryTournamentStore {
   }
 }
 
-function createRoomAccess(id, input = {}) {
+function normalizeTeams(input = {}) {
   const teams = Array.isArray(input.teams) && input.teams.length
     ? input.teams
     : Array.from({ length: 10 }, (_, index) => ({ teamId: `team-${index + 1}`, name: `队伍${index + 1}` }));
+  return teams.map((team, index) => ({
+    teamId: String(team.teamId || team.id || `team-${index + 1}`).trim(),
+    name: String(team.name || `队伍${index + 1}`).trim().slice(0, 40),
+    renameUsed: Boolean(team.renameUsed),
+  }));
+}
+
+function teamIdFromInput(input = {}) {
+  if (input.currentTeamId) return String(input.currentTeamId).trim();
+  const teams = normalizeTeams(input);
+  return teams[0] ? teams[0].teamId : '';
+}
+
+function createRoomAccess(id, input = {}) {
+  const teams = Array.isArray(input.teams) && input.teams.length
+    ? input.teams
+    : normalizeTeams(input);
   const refereeCode = safeProvidedCode(input.refereeCode) || generateSecret('ref');
   const viewerCode = safeProvidedCode(input.viewerCode) || generateSecret('view');
-  const displayCode = safeProvidedCode(input.displayCode) || generateSecret('disp');
   const captainCodes = teams.map((team, index) => ({
     teamId: String(team.teamId || team.id || `team-${index + 1}`).trim(),
     teamName: String(team.name || `队伍${index + 1}`).trim().slice(0, 40),
@@ -153,14 +171,12 @@ function createRoomAccess(id, input = {}) {
       tournamentId: id,
       refereeCode,
       viewerCode,
-      displayCode,
       captainCodes,
     },
     stored: {
       tournamentId: id,
       refereeCodeHash: hashSecret(refereeCode),
       viewerCodeHash: hashSecret(viewerCode),
-      displayCodeHash: hashSecret(displayCode),
       captainCodes: captainCodes.map(item => ({
         teamId: item.teamId,
         teamName: item.teamName,
@@ -176,7 +192,6 @@ function bindingFromCode(access, code) {
   const codeHash = hashSecret(code);
   if (codeHash === access.refereeCodeHash) return { role: ROLES.REFEREE };
   if (codeHash === access.viewerCodeHash) return { role: ROLES.VIEWER };
-  if (codeHash === access.displayCodeHash) return { role: ROLES.DISPLAY };
   const captain = access.captainCodes.find(item => item.codeHash === codeHash);
   if (captain) return { role: ROLES.CAPTAIN, teamId: captain.teamId };
   return null;
@@ -200,7 +215,6 @@ function roomAccessSummary(access) {
     tournamentId: access.tournamentId,
     refereeCode: { issued: Boolean(access.refereeCodeHash) },
     viewerCode: { issued: Boolean(access.viewerCodeHash) },
-    displayCode: { issued: Boolean(access.displayCodeHash) },
     captainCodes: access.captainCodes.map(item => ({
       teamId: item.teamId,
       teamName: item.teamName,

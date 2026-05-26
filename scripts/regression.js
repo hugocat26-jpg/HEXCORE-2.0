@@ -98,7 +98,7 @@ function createHarness(options = {}) {
       setItem(_key, value) { storedState = value; },
       removeItem() { storedState = ''; },
     },
-    location: { protocol: 'http:', reload() {} },
+    location: { protocol: 'http:', search: options.locationSearch || '', reload() {} },
     confirm() { return true; },
     prompt(message, defaultValue) { return defaultValue || '测试输入'; },
   };
@@ -3019,7 +3019,19 @@ function testMultiplayerCopyIsolation() {
 }
 
 function testMultiplayerSharedRulePreflight() {
-  const state = multiplayerRules.createAuthorityState({ tournamentId: 'tournament-test' });
+  const state = multiplayerRules.createAuthorityState({
+    tournamentId: 'tournament-test',
+    snapshot: {
+      currentTeamId: 'team-1',
+      teams: [
+        { teamId: 'team-1', name: '测试1队', renameUsed: false },
+        { teamId: 'team-2', name: '测试2队', renameUsed: false },
+      ],
+      hexcoreActionWindows: [
+        { teamId: 'team-2', hexcoreId: 'charged-cannon', active: true },
+      ],
+    },
+  });
   const command = multiplayerShared.createCommand({
     commandId: 'cmd-001',
     tournamentId: 'tournament-test',
@@ -3039,6 +3051,24 @@ function testMultiplayerSharedRulePreflight() {
   );
   assert(accepted.state.stateVersion === 1, '多人端规则包追加事件后应推进 stateVersion');
   assert(accepted.event.sourceCommandId === command.commandId, '多人端事件应记录来源 commandId');
+  const openShopCommand = multiplayerShared.createCommand({
+    commandId: 'cmd-open-shop-1',
+    tournamentId: 'tournament-test',
+    type: multiplayerShared.COMMAND_TYPES.OPEN_SHOP,
+    actorId: 'captain-user-1',
+    role: multiplayerShared.ROLES.CAPTAIN,
+    teamId: 'team-1',
+    baseVersion: 0,
+    payload: { teamId: 'team-1' },
+  });
+  assert(
+    multiplayerRules.preflightCommand(
+      state,
+      openShopCommand,
+      { actorId: 'captain-user-1', role: multiplayerShared.ROLES.CAPTAIN, teamId: 'team-1' }
+    ).ok,
+    '队长本人回合应可提交开店 command'
+  );
   const duplicate = multiplayerRules.acceptCommandAsEvent(
     accepted.state,
     command,
@@ -3110,6 +3140,82 @@ function testMultiplayerSharedRulePreflight() {
     viewerRejected = /无权执行/.test(error.message);
   }
   assert(viewerRejected, '观众角色不应创建写入型 command');
+
+  const renameCommand = multiplayerShared.createCommand({
+    commandId: 'cmd-rename-1',
+    tournamentId: 'tournament-test',
+    type: multiplayerShared.COMMAND_TYPES.RENAME_TEAM,
+    actorId: 'captain-user-1',
+    role: multiplayerShared.ROLES.CAPTAIN,
+    teamId: 'team-1',
+    baseVersion: 0,
+    payload: { teamId: 'team-1', name: '新队名' },
+  });
+  const renamed = multiplayerRules.acceptCommandAsEvent(
+    state,
+    renameCommand,
+    { actorId: 'captain-user-1', role: multiplayerShared.ROLES.CAPTAIN, teamId: 'team-1' },
+    multiplayerShared.EVENT_TYPES.TEAM_RENAMED,
+    { teamId: 'team-1', name: '新队名' }
+  );
+  assert(renamed.state.snapshot.teams[0].name === '新队名' && renamed.state.snapshot.teams[0].renameUsed === true, '队长首次改名应更新队名并消耗一次改名权');
+
+  let renameAgainRejected = false;
+  try {
+    multiplayerRules.preflightCommand(renamed.state, multiplayerShared.createCommand({
+      ...renameCommand,
+      commandId: 'cmd-rename-2',
+      baseVersion: 1,
+      payload: { teamId: 'team-1', name: '第二次改名' },
+    }), { actorId: 'captain-user-1', role: multiplayerShared.ROLES.CAPTAIN, teamId: 'team-1' });
+  } catch (error) {
+    renameAgainRejected = /改名权/.test(error.message);
+  }
+  assert(renameAgainRejected, '队长仅应拥有一次主动改名权');
+
+  let longNameRejected = false;
+  try {
+    multiplayerShared.createCommand({
+      ...renameCommand,
+      commandId: 'cmd-rename-long',
+      payload: { teamId: 'team-1', name: '超过十二个字符的超长队伍名称' },
+    });
+  } catch (error) {
+    longNameRejected = /队伍名称/.test(error.message);
+  }
+  assert(longNameRejected, '队伍名称应限制为 1-12 个字符');
+
+  let offTurnRejected = false;
+  try {
+    multiplayerRules.preflightCommand(state, multiplayerShared.createCommand({
+      ...command,
+      commandId: 'cmd-off-turn',
+      actorId: 'captain-user-2',
+      teamId: 'team-2',
+      baseVersion: 0,
+      payload: { teamId: 'team-2', slotId: 'slot-1' },
+    }), { actorId: 'captain-user-2', role: multiplayerShared.ROLES.CAPTAIN, teamId: 'team-2' });
+  } catch (error) {
+    offTurnRejected = /自己回合/.test(error.message);
+  }
+  assert(offTurnRejected, '队长非自己回合不应执行普通操作');
+
+  const offTurnHexcore = multiplayerShared.createCommand({
+    commandId: 'cmd-off-turn-hexcore',
+    tournamentId: 'tournament-test',
+    type: multiplayerShared.COMMAND_TYPES.USE_HEXCORE,
+    actorId: 'captain-user-2',
+    role: multiplayerShared.ROLES.CAPTAIN,
+    teamId: 'team-2',
+    baseVersion: 0,
+    payload: { teamId: 'team-2', hexcoreId: 'charged-cannon' },
+  });
+  const hexcorePreflight = multiplayerRules.preflightCommand(
+    state,
+    offTurnHexcore,
+    { actorId: 'captain-user-2', role: multiplayerShared.ROLES.CAPTAIN, teamId: 'team-2' }
+  );
+  assert(hexcorePreflight.ok && !hexcorePreflight.duplicate, '队长非自己回合仅在海克斯允许窗口可执行对应海克斯操作');
 }
 
 async function testMultiplayerApiServer() {
@@ -3129,6 +3235,7 @@ async function testMultiplayerApiServer() {
     assert(created.status === 201 && created.body.tournament.stateVersion === 1, '创建赛事应写入 TournamentCreated 事件并推进版本');
     assert(created.body.tournament.events[0].type === multiplayerShared.EVENT_TYPES.TOURNAMENT_CREATED, '创建赛事应返回创建事件');
     assert(created.body.room && created.body.room.captainCodes[0].code === 'captain-code-1', '创建赛事响应应一次性返回初始房间码');
+    assert(!created.body.room.displayCode, '多人端当前不提供大屏端房间码');
     assert(!created.body.tournament.events[0].payload.refereeCode && !created.body.tournament.snapshot.refereeCode, '公开快照和事件不应包含房间明文码');
 
     const anonymousRoom = await requestJson(port, 'GET', '/api/tournaments/t-api/room');
@@ -3140,6 +3247,7 @@ async function testMultiplayerApiServer() {
     });
     assert(captainJoin.status === 200 && captainJoin.body.session.role === multiplayerShared.ROLES.CAPTAIN, '队长应能通过队伍码加入房间');
     assert(captainJoin.body.session.teamId === 'team-1' && captainJoin.body.session.sessionToken, '队长 session 应绑定自己的队伍');
+    assert(captainJoin.body.tournament && captainJoin.body.tournament.stateVersion === 1, '加入房间应返回当前公开快照，供前端初始化 stateVersion');
     assert(!captainJoin.body.session.sessionTokenHash && !/^session-/.test(captainJoin.body.session.sessionToken), '客户端不应收到 session 摘要，sessionToken 不应使用可预测旧格式');
 
     const viewerJoin = await requestJson(port, 'POST', '/api/tournaments/t-api/join', {
@@ -3157,6 +3265,7 @@ async function testMultiplayerApiServer() {
     const room = await requestJson(port, 'GET', `/api/tournaments/t-api/room?sessionToken=${encodeURIComponent(refereeJoin.body.session.sessionToken)}`);
     assert(room.status === 200 && room.body.room.captainCodes[0].codeIssued === true, '裁判 session 应能读取房间码管理摘要');
     assert(!room.body.room.refereeCodeHash && !room.body.room.refereeCode.code && !room.body.room.captainCodes[0].code, '房间码管理摘要不应返回明文码或摘要');
+    assert(!room.body.room.displayCode, '房间码管理摘要不应保留大屏端入口');
 
     const snapshot = await requestJson(port, 'GET', '/api/tournaments/t-api/snapshot');
     assert(snapshot.status === 200 && snapshot.body.tournament.snapshot.name === 'API 回归赛事', '多人端服务应读取赛事快照');
@@ -3176,6 +3285,18 @@ async function testMultiplayerApiServer() {
     assert(command.status === 200 && command.body.event.type === multiplayerShared.EVENT_TYPES.SHOP_CARD_PURCHASED, '提交 command 应生成对应事件');
     assert(command.body.tournament.stateVersion === 2, '提交 command 应推进 stateVersion');
 
+    const openShop = await requestJson(port, 'POST', '/api/tournaments/t-api/commands', {
+      sessionToken: captainJoin.body.session.sessionToken,
+      command: {
+        commandId: 'cmd-api-open-shop',
+        type: multiplayerShared.COMMAND_TYPES.OPEN_SHOP,
+        baseVersion: 2,
+        payload: { teamId: 'team-1' },
+      },
+    });
+    assert(openShop.status === 200 && openShop.body.event.type === multiplayerShared.EVENT_TYPES.SHOP_OPENED, '队长本人回合应能通过 API 提交开店 command');
+    assert(openShop.body.tournament.stateVersion === 3, '开店 command 应推进 stateVersion');
+
     const duplicate = await requestJson(port, 'POST', '/api/tournaments/t-api/commands', {
       sessionToken: captainJoin.body.session.sessionToken,
       command: {
@@ -3193,7 +3314,7 @@ async function testMultiplayerApiServer() {
       command: {
         commandId: 'cmd-api-2',
         type: multiplayerShared.COMMAND_TYPES.PURCHASE_SHOP_CARD,
-        baseVersion: 2,
+        baseVersion: 3,
         payload: { teamId: 'team-1', slotId: 'slot-1' },
       },
     });
@@ -3204,7 +3325,7 @@ async function testMultiplayerApiServer() {
       command: {
         commandId: 'cmd-api-3',
         type: multiplayerShared.COMMAND_TYPES.PURCHASE_SHOP_CARD,
-        baseVersion: 2,
+        baseVersion: 3,
         payload: { teamId: 'team-1', slotId: 'slot-1' },
       },
     });
@@ -3215,7 +3336,7 @@ async function testMultiplayerApiServer() {
       command: {
         commandId: 'cmd-api-secret',
         type: multiplayerShared.COMMAND_TYPES.IMPORT_STATE,
-        baseVersion: 2,
+        baseVersion: 3,
         payload: {
           checksum: 'checksum-public-projection',
           sourceVersion: 'legacy-local',
@@ -3226,10 +3347,11 @@ async function testMultiplayerApiServer() {
         },
       },
     });
-    assert(importedSecret.status === 200 && importedSecret.body.tournament.stateVersion === 3, '裁判导入命令应能推进公开投影测试状态');
+    assert(importedSecret.status === 200 && importedSecret.body.tournament.stateVersion === 4, '裁判导入命令应能推进公开投影测试状态');
     const viewerProjection = await requestJson(port, 'GET', '/api/tournaments/t-api/projection?view=viewer');
     const projectionText = JSON.stringify(viewerProjection.body);
     assert(viewerProjection.status === 200 && viewerProjection.body.tournament.view === 'viewer', '观众投影接口应返回 viewer 视图');
+    assert(viewerProjection.body.tournament.perspective && viewerProjection.body.tournament.perspective.teamId === 'team-1', '观众投影应使用当前回合队长视角');
     assert(projectionText.includes('公开摘要'), '观众投影应保留允许公开的摘要字段');
     assert(!projectionText.includes('should-not-leak') && !projectionText.includes('hidden-player') && !projectionText.includes('hidden-seed'), '观众投影不应泄漏房间码、真实暗牌或内部随机字段');
     const badProjection = await requestJson(port, 'GET', '/api/tournaments/t-api/projection?view=referee');
@@ -3771,6 +3893,234 @@ function testHexcorePngIconAssets() {
   assert(app.innerHTML.includes('assets/hex-icons/camp-scout.png'), '海克斯库应使用本地 PNG 路径渲染图标');
 }
 
+function testMultiplayerCaptainUiReusesRefereeScreensWithScopedAccess() {
+  const ui = fs.readFileSync(path.join(root, 'apps/multiplayer/src/ui/referee-console.js'), 'utf8');
+  const main = fs.readFileSync(path.join(root, 'apps/multiplayer/src/main.js'), 'utf8');
+  assert(
+    ui.includes('clientRole()') && ui.includes('isCaptainClient()') && ui.includes('clientTeamId()'),
+    '多人队长端应通过客户端角色和队伍绑定裁剪裁判端页面，而不是新建另一套 UI',
+  );
+  assert(
+    ui.includes("['draft', 'draft', '实时抽选']")
+    && ui.includes("['team', 'teams', '队伍总览']")
+    && ui.includes("['hex', 'hexcores', '海克斯图录']")
+    && ui.includes("['trophy', 'tournament', '我的赛程']"),
+    '队长端导航应只保留实时抽选、队伍总览、海克斯图录和我的赛程',
+  );
+  assert(
+    ui.includes('captainCanOperateCurrentTurn()')
+    && ui.includes('非你的回合，仅可查看')
+    && ui.includes('当前绑定：${escapeHtml(boundName)}')
+    && ui.includes('本人回合可完成海克斯选择、金币商店抽选和本队信息维护')
+    && !ui.includes('当前页面直接复用裁判端画面')
+    && ui.includes("isCaptainClient() ? '' : workflowGatePanel()")
+    && ui.includes("canBuy ? `onclick=\"window.hexcoreUI.buyCard")
+    && ui.includes("isCaptainClient() ? '' : '<button class=\"export-btn\"")
+    && !ui.includes("captainAllowedView(view) && view === 'logs'"),
+    '队长端实时抽选应按本人回合开放按钮，说明区只介绍队长端，并移除流程门禁、撤回、日志导出等裁判专属入口',
+  );
+  assert(
+    ui.includes("['draft', 'teams', 'hexcores', 'tournament', 'rules'].includes(view)")
+    && ui.includes('captainRulesPage()')
+    && ui.includes('完整规则')
+    && ui.includes('队长端只读查看完整规则')
+    && ui.includes("if (isCaptainClient()) return captainRulesPage()"),
+    '规则摘要的完整规则按钮在队长端应打开只读完整规则页，不能无反应或暴露规则编辑',
+  );
+  assert(
+    ui.includes('captainsForTeamsPage()')
+    && ui.includes('captain-readonly-team')
+    && ui.includes('captain-own-team')
+    && ui.includes('只有自己的队伍名称可编辑')
+    && ui.includes('captainClientReadonlyNotice'),
+    '队伍页应复用裁判端队伍卡，队长端可查看全部队伍但只能编辑自己队伍',
+  );
+  assert(
+    ui.includes('captainHexcoreCatalogPage()')
+    && ui.includes('海克斯图录')
+    && ui.includes('captain-hex-catalog')
+    && !ui.includes('captain-hex-catalog" onclick'),
+    '海克斯页在队长端应只显示图录和详情，不提供抽取、移除或兜底分配操作',
+  );
+  assert(
+    ui.includes('captainTournamentPage()')
+    && ui.includes('matchesForClientCaptain')
+    && ui.includes('只显示自己队伍相关场次'),
+    '赛程页应裁剪为队长自己的赛程，不显示全局排赛和比分保存入口',
+  );
+  assert(
+    ui.includes('captainHexcoreDraftPanel()')
+    && ui.includes('队长海克斯选择')
+    && ui.includes('window.hexcoreUI.drawHexcoreForCaptain(${safeJsonString(own.id)})')
+    && ui.includes('window.hexcoreUI.refreshHexcoreSlot')
+    && ui.includes('window.hexcoreUI.selectHexcoreFromDraw(${safeJsonString(own.id)}'),
+    '队长端实时抽选页应开放本人海克斯抽取、刷新候选和选择入口',
+  );
+  assert(
+    main.includes('captainClientCanActOn(captainId, actionLabel)')
+    && main.includes('队长端无权操作其它队伍')
+    && main.includes('captainClientCanUseHexcoreSession(actionLabel)')
+    && main.includes('队长端不可执行裁判海克斯动作'),
+    '队长端海克斯动作不能只靠隐藏按钮，应在动作函数中拦截越权调用',
+  );
+  assert(
+    main.includes("captainClientCanOperateCurrentTurn('跳过失败')")
+    && main.includes("captainClientCanOperateCurrentTurn('开店失败')")
+    && main.includes("captainClientCanOperateCurrentTurn('刷新失败')")
+    && main.includes("captainClientCanOperateCurrentTurn('购买失败')")
+    && main.includes('skipCaptainClientGuard')
+    && main.includes('this.nextCaptain({ skipSnapshot: true, skipCaptainClientGuard: true })'),
+    '队长端本人回合商店动作应先校验回合权限，跳过本轮再允许内部推进到下一位',
+  );
+  assert(
+    ui.includes('captainCanUseHexcoreFor(captainId)')
+    && ui.includes('captainHexcoreActionAttr')
+    && ui.includes('队长端仅可发动自己的海克斯')
+    && ui.includes('const visibleEligibleOwners = isCaptainClient()')
+    && ui.includes('targetContextForCaptain(captain)')
+    && ui.includes('captainOwnHexcorePanel()')
+    && ui.includes('picker.captainId')
+    && main.includes('hexTargetPicker = { hexcoreId, captainId: ownerId }')
+    && main.includes("captainClientCanUseOwnedHexcore(id, '海克斯执行失败')")
+    && main.includes("captainClientCanUseOwnedHexcore(hexcoreId, '海克斯执行失败')"),
+    '队长端可发动海克斯窗口应只开放本人海克斯，目标选择面板必须绑定海克斯持有者，不能操作当前视角队长或其它队长的海克斯',
+  );
+}
+
+function testMultiplayerViewerUiIsReadonlyCurrentCaptainPerspective() {
+  const ui = fs.readFileSync(path.join(root, 'apps/multiplayer/src/ui/referee-console.js'), 'utf8');
+  const main = fs.readFileSync(path.join(root, 'apps/multiplayer/src/main.js'), 'utf8');
+  assert(
+    ui.includes("role === 'viewer' ? 'viewer'")
+    && ui.includes('isViewerClient()')
+    && ui.includes('isReadonlyClient()'),
+    '观众端应有独立 viewer 角色识别，并统一走只读客户端判断',
+  );
+  assert(
+    ui.includes("['draft', 'draft', '实时抽选']")
+    && ui.includes("['team', 'teams', '队伍总览']")
+    && ui.includes("['hex', 'hexcores', '海克斯图录']")
+    && ui.includes('viewerAllowedView(view)')
+    && !ui.includes("['trophy', 'tournament', '观众赛程']"),
+    '观众端导航应只保留实时抽选、队伍总览和海克斯图录，不提供赛程管理或裁判入口',
+  );
+  assert(
+    ui.includes('viewerReadonlyNotice()')
+    && ui.includes('观众端只读')
+    && ui.includes('当前回合队长视角')
+    && ui.includes("isReadonlyClient() ? '' : (isCaptainClient() ? '' : workflowGatePanel())")
+    && ui.includes("isReadonlyClient() ? '' : (isCaptainClient() ? '' : '<button class=\"export-btn\"")
+    && ui.includes("isReadonlyClient() ? '观众端' : (isCaptainClient() ? '队长端' : '裁判代执行')"),
+    '观众端实时抽选页应显示当前回合队长视角说明，并隐藏流程门禁、日志导出和裁判模式文案',
+  );
+  assert(
+    ui.includes('readonlyShopReason()')
+    && ui.includes('观众端只读，无法操作')
+    && ui.includes('const canBuy = Boolean(captain && roundState && !isReadonlyClient()')
+    && ui.includes("isReadonlyClient() ? '' : refereeControls()"),
+    '观众端商店卡、开店刷新购买和流程按钮都应为只读，不允许写操作入口',
+  );
+  assert(
+    main.includes('rejectViewerClient(actionLabel)')
+    && main.includes('观众端只读，无法操作'),
+    '观众端写操作不能只靠隐藏按钮，动作函数也应拒绝 viewer 调用',
+  );
+}
+
+function testMultiplayerJoinGateAndCors() {
+  const ui = fs.readFileSync(path.join(root, 'apps/multiplayer/src/ui/referee-console.js'), 'utf8');
+  const main = fs.readFileSync(path.join(root, 'apps/multiplayer/src/main.js'), 'utf8');
+  const server = fs.readFileSync(path.join(root, 'apps/server/server.js'), 'utf8');
+  const css = fs.readFileSync(path.join(root, 'apps/multiplayer/src/styles/main.css'), 'utf8');
+  assert(
+    ui.includes('joinGatePage()')
+    && ui.includes("classList.toggle('join-gate-root', shouldShowJoinGate())")
+    && ui.includes('多人房间')
+    && ui.includes('加入已有赛事')
+    && ui.includes('join-tournament-id')
+    && ui.includes('join-room-code')
+    && ui.includes('window.hexcoreUI.joinRoom()')
+    && ui.includes('shouldShowJoinGate()')
+    && ui.includes('裁判创建赛事')
+    && ui.includes('create-tournament-id')
+    && ui.includes('create-tournament-name')
+    && ui.includes('createdRoomPanel()')
+    && ui.includes('window.hexcoreUI.enterCreatedRefereeRoom()')
+    && ui.includes('房间码明文只显示一次'),
+    '多人端无角色会话时应显示房间加入页，而不是直接暴露裁判控制台',
+  );
+  assert(
+    main.includes('MULTIPLAYER_SESSION_KEY')
+    && main.includes('joinRoom()')
+    && main.includes('/api/tournaments/${encodeURIComponent(tournamentId)}/join')
+    && main.includes('session.sessionToken')
+    && main.includes("role=viewer")
+    && main.includes("role=captain&teamId=")
+    && main.includes('createTournamentRoom()')
+    && main.includes('enterCreatedRefereeRoom()')
+    && main.includes('/api/tournaments')
+    && main.includes('persistJoinedSession(apiBase, tournamentId, payload)')
+    && main.includes('房间码明文只显示一次'),
+    '加入房间应调用服务端 join 接口，保存 sessionToken，并按返回角色进入对应端',
+  );
+  assert(
+    server.includes('Access-Control-Allow-Origin')
+    && server.includes('Access-Control-Allow-Headers')
+    && server.includes("req.method === 'OPTIONS'"),
+    '多人端 API 应允许本地前端跨端口提交 join 请求，并处理 OPTIONS 预检',
+  );
+  assert(
+    css.includes('.join-gate-page')
+    && css.includes('#app.join-gate-root')
+    && css.includes('#app:has(.join-gate-page)')
+    && css.includes('min-width: 0 !important')
+    && css.includes('grid-column: 1 / -1')
+    && css.includes('place-items: center')
+    && css.includes('.join-gate-panel')
+    && css.includes('width: min(980px, calc(100vw - 64px))')
+    && css.includes('.join-gate-grid')
+    && css.includes('.created-room-panel')
+    && css.includes('.room-code-row')
+    && css.includes('@media (max-width: 760px)'),
+    '加入页应脱离主控制台侧边栏栅格，居中显示完整表单，不能被压成窄列逐字换行',
+  );
+}
+
+function testMultiplayerClientSubmitsAuthoritativeCommands() {
+  const main = fs.readFileSync(path.join(root, 'apps/multiplayer/src/main.js'), 'utf8');
+  assert(
+    main.includes('function multiplayerSession()')
+    && main.includes('async function submitRoomCommand(type, payload = {}, options = {})')
+    && main.includes('/api/tournaments/${encodeURIComponent(session.tournamentId)}/commands')
+    && main.includes('session.sessionToken')
+    && main.includes('baseVersion: Number(session.stateVersion || 0)')
+    && main.includes('commandId: `${type}-${Date.now()}-${Math.random().toString(16).slice(2)}`'),
+    '多人端前端应有统一 command 提交桥，使用 sessionToken 和 stateVersion 调用服务端 commands',
+  );
+  assert(
+    main.includes("await submitRoomCommand('OpenShop'")
+    && main.includes("await submitRoomCommand('RefreshShop'")
+    && main.includes("await submitRoomCommand('PurchaseShopCard'")
+    && main.includes("await submitRoomCommand('SkipTurn'")
+    && main.includes("await submitRoomCommand('RenameTeam'"),
+    '开店、刷新、购买、跳过和改名应在有房间 session 时先提交服务端 command，再执行本地 UI 过渡动作',
+  );
+  assert(
+    main.includes('syncSessionFromTournament(responsePayload.tournament)')
+    && main.includes('状态版本过期')
+    && main.includes('sessionStorage'),
+    'command 成功后应同步服务端 stateVersion，版本过期时保留明确提示',
+  );
+  assert(
+    main.includes('function applyRoomProjection(tournament)')
+    && main.includes('connectRoomEventStream()')
+    && main.includes('new global.EventSource')
+    && main.includes('eventSource.addEventListener')
+    && main.includes('applyRoomProjection(responsePayload.tournament)'),
+    '多人端应在 command 成功和 SSE 快照/事件到达时应用服务端公开投影，避免长期只依赖本地状态',
+  );
+}
+
 async function run() {
   const tests = [
     testDefaultEmptySetup,
@@ -3825,6 +4175,10 @@ async function run() {
     testHexcoreLibraryResponsiveStyles,
     testThemeSafeModalsAndScrollbars,
     testHexcorePngIconAssets,
+    testMultiplayerCaptainUiReusesRefereeScreensWithScopedAccess,
+    testMultiplayerViewerUiIsReadonlyCurrentCaptainPerspective,
+    testMultiplayerJoinGateAndCors,
+    testMultiplayerClientSubmitsAuthoritativeCommands,
   ];
 
   for (const test of tests) {

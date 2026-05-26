@@ -7,7 +7,9 @@ const SNAPSHOT_PUBLIC_FIELDS = [
   'status',
   'currentRound',
   'currentPhase',
+  'currentTeamId',
   'currentTeamName',
+  'teams',
   'championTeamId',
   'championTeamName',
 ];
@@ -33,7 +35,7 @@ const EVENT_PUBLIC_PAYLOAD_FIELDS = [
 const VIEW_TYPES = Object.freeze({
   PUBLIC: 'public',
   VIEWER: 'viewer',
-  DISPLAY: 'display',
+  CAPTAIN: 'captain',
 });
 
 function clone(value) {
@@ -53,20 +55,31 @@ function pickFields(source, fields) {
 function normalizeProjectionView(view) {
   const normalized = String(view || VIEW_TYPES.PUBLIC).trim().toLowerCase();
   if (normalized === ROLES.VIEWER || normalized === VIEW_TYPES.VIEWER) return VIEW_TYPES.VIEWER;
-  if (normalized === ROLES.DISPLAY || normalized === VIEW_TYPES.DISPLAY) return VIEW_TYPES.DISPLAY;
+  if (normalized === ROLES.CAPTAIN || normalized === VIEW_TYPES.CAPTAIN) return VIEW_TYPES.CAPTAIN;
   if (normalized === VIEW_TYPES.PUBLIC) return VIEW_TYPES.PUBLIC;
   throw new Error('未知只读投影视图');
 }
 
-function projectSnapshotData(snapshot = {}, view = VIEW_TYPES.PUBLIC) {
+function publicTeams(snapshot = {}) {
+  return Array.isArray(snapshot.teams) ? snapshot.teams.map(team => ({
+    teamId: team.teamId || team.id || '',
+    name: team.name || '',
+  })) : [];
+}
+
+function resolvePerspectiveTeamId(snapshot = {}, requestedTeamId = '') {
+  const currentTeamId = String(snapshot.currentTeamId || '').trim();
+  const teamId = String(requestedTeamId || '').trim();
+  return teamId || currentTeamId;
+}
+
+function projectSnapshotData(snapshot = {}, view = VIEW_TYPES.PUBLIC, options = {}) {
   const publicSnapshot = pickFields(snapshot, SNAPSHOT_PUBLIC_FIELDS);
-  if (view === VIEW_TYPES.DISPLAY) {
-    return {
-      ...publicSnapshot,
-      displayTitle: snapshot.displayTitle || snapshot.championTeamName || snapshot.name || 'HEXCORE 2.0',
-    };
-  }
-  return publicSnapshot;
+  return {
+    ...publicSnapshot,
+    teams: publicTeams(snapshot),
+    perspectiveTeamId: resolvePerspectiveTeamId(snapshot, options.teamId),
+  };
 }
 
 function projectEvent(event, view = VIEW_TYPES.PUBLIC) {
@@ -82,17 +95,25 @@ function projectEvent(event, view = VIEW_TYPES.PUBLIC) {
   };
 }
 
-function createReadOnlyProjection(state, viewInput = VIEW_TYPES.PUBLIC) {
+function createReadOnlyProjection(state, viewInput = VIEW_TYPES.PUBLIC, options = {}) {
   const view = normalizeProjectionView(viewInput);
+  const perspectiveTeamId = resolvePerspectiveTeamId(state.snapshot || {}, options.teamId);
   return {
     view,
+    role: view === VIEW_TYPES.CAPTAIN ? ROLES.CAPTAIN : ROLES.VIEWER,
+    readonly: true,
+    canSubmitCommands: false,
+    perspective: {
+      teamId: perspectiveTeamId,
+      source: options.teamId ? 'session-team' : 'current-turn',
+    },
     tournamentId: state.tournamentId,
     rulesVersion: state.rulesVersion,
     schemaVersion: state.schemaVersion,
     stateVersion: state.stateVersion,
     eventSeq: state.eventSeq,
     paused: state.paused,
-    snapshot: projectSnapshotData(state.snapshot || {}, view),
+    snapshot: projectSnapshotData(state.snapshot || {}, view, { teamId: perspectiveTeamId }),
     events: state.events.slice(-20).map(event => projectEvent(event, view)),
   };
 }

@@ -8,7 +8,6 @@ const ROLES = Object.freeze({
   SUPERVISOR: 'supervisor',
   CAPTAIN: 'captain',
   VIEWER: 'viewer',
-  DISPLAY: 'display',
 });
 
 const COMMAND_TYPES = Object.freeze({
@@ -20,6 +19,7 @@ const COMMAND_TYPES = Object.freeze({
   OPEN_SHOP: 'OpenShop',
   REFRESH_SHOP: 'RefreshShop',
   PURCHASE_SHOP_CARD: 'PurchaseShopCard',
+  RENAME_TEAM: 'RenameTeam',
   USE_HEXCORE: 'UseHexcore',
   SKIP_TURN: 'SkipTurn',
   PAUSE_TOURNAMENT: 'PauseTournament',
@@ -37,6 +37,7 @@ const EVENT_TYPES = Object.freeze({
   SHOP_OPENED: 'ShopOpened',
   SHOP_REFRESHED: 'ShopRefreshed',
   SHOP_CARD_PURCHASED: 'ShopCardPurchased',
+  TEAM_RENAMED: 'TeamRenamed',
   HEXCORE_USED: 'HexcoreUsed',
   TURN_SKIPPED: 'TurnSkipped',
   TOURNAMENT_PAUSED: 'TournamentPaused',
@@ -61,6 +62,7 @@ const ROLE_COMMANDS = Object.freeze({
     COMMAND_TYPES.OPEN_SHOP,
     COMMAND_TYPES.REFRESH_SHOP,
     COMMAND_TYPES.PURCHASE_SHOP_CARD,
+    COMMAND_TYPES.RENAME_TEAM,
     COMMAND_TYPES.USE_HEXCORE,
     COMMAND_TYPES.SKIP_TURN,
     COMMAND_TYPES.PAUSE_TOURNAMENT,
@@ -73,13 +75,14 @@ const ROLE_COMMANDS = Object.freeze({
     COMMAND_TYPES.START_HEXCORE_DRAW,
     COMMAND_TYPES.REFRESH_HEXCORE_CANDIDATE,
     COMMAND_TYPES.PICK_HEXCORE,
+    COMMAND_TYPES.OPEN_SHOP,
     COMMAND_TYPES.REFRESH_SHOP,
     COMMAND_TYPES.PURCHASE_SHOP_CARD,
+    COMMAND_TYPES.RENAME_TEAM,
     COMMAND_TYPES.USE_HEXCORE,
     COMMAND_TYPES.SKIP_TURN,
   ],
   [ROLES.VIEWER]: [],
-  [ROLES.DISPLAY]: [],
 });
 
 const REQUIRED_PAYLOAD_FIELDS = Object.freeze({
@@ -91,6 +94,7 @@ const REQUIRED_PAYLOAD_FIELDS = Object.freeze({
   [COMMAND_TYPES.OPEN_SHOP]: ['teamId'],
   [COMMAND_TYPES.REFRESH_SHOP]: ['teamId'],
   [COMMAND_TYPES.PURCHASE_SHOP_CARD]: ['teamId', 'slotId'],
+  [COMMAND_TYPES.RENAME_TEAM]: ['teamId', 'name'],
   [COMMAND_TYPES.USE_HEXCORE]: ['teamId', 'hexcoreId'],
   [COMMAND_TYPES.SKIP_TURN]: ['teamId'],
   [COMMAND_TYPES.PAUSE_TOURNAMENT]: ['reason'],
@@ -137,6 +141,13 @@ function validatePayloadFields(commandType, payload) {
   const missing = required.filter(field => !hasOwn(payload, field) || payload[field] === '');
   if (missing.length) {
     throw new Error(`${commandType} 缺少 payload 字段：${missing.join(', ')}`);
+  }
+  if (commandType === COMMAND_TYPES.RENAME_TEAM) {
+    const name = safeText(payload.name, '', 40);
+    if (name.length < 1 || name.length > 12) {
+      throw new Error('队伍名称必须是 1-12 个字符');
+    }
+    payload.name = name;
   }
   return true;
 }

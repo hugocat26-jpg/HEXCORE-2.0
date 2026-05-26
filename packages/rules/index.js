@@ -1,4 +1,5 @@
 const {
+  COMMAND_TYPES,
   EVENT_TYPES,
   ROLES,
   RULES_VERSION,
@@ -60,6 +61,46 @@ function assertCommandTargetsOwnTeam(command, binding) {
   return true;
 }
 
+function commandTeamId(command) {
+  return command.teamId || (command.payload && command.payload.teamId) || '';
+}
+
+function isCaptainTurnCommandAllowed(state, command, binding) {
+  if (binding.role !== ROLES.CAPTAIN) return true;
+  if (command.type === COMMAND_TYPES.RENAME_TEAM) return true;
+  const teamId = commandTeamId(command);
+  if (!teamId) return true;
+  const currentTeamId = String((state.snapshot && state.snapshot.currentTeamId) || '').trim();
+  if (currentTeamId && currentTeamId === teamId) return true;
+  if (command.type === COMMAND_TYPES.USE_HEXCORE) {
+    const hexcoreId = String((command.payload && command.payload.hexcoreId) || '').trim();
+    const windows = Array.isArray(state.snapshot && state.snapshot.hexcoreActionWindows)
+      ? state.snapshot.hexcoreActionWindows
+      : [];
+    return windows.some(window => {
+      return window
+        && window.active !== false
+        && String(window.teamId || '').trim() === teamId
+        && String(window.hexcoreId || '').trim() === hexcoreId;
+    });
+  }
+  return false;
+}
+
+function assertCaptainTurnWindow(state, command, binding) {
+  if (isCaptainTurnCommandAllowed(state, command, binding)) return true;
+  throw new Error('队长非自己回合不可进行普通操作');
+}
+
+function assertRenameAvailable(state, command, binding) {
+  if (binding.role !== ROLES.CAPTAIN || command.type !== COMMAND_TYPES.RENAME_TEAM) return true;
+  const teamId = commandTeamId(command);
+  const teams = Array.isArray(state.snapshot && state.snapshot.teams) ? state.snapshot.teams : [];
+  const team = teams.find(item => String(item.teamId || item.id || '').trim() === teamId);
+  if (team && team.renameUsed) throw new Error('队长仅拥有一次主动改名权');
+  return true;
+}
+
 function preflightCommand(state, command, roleBinding) {
   assertAuthorityState(state);
   validateCommand(command);
@@ -71,6 +112,8 @@ function preflightCommand(state, command, roleBinding) {
     throw new Error('角色绑定与 command.role 不一致');
   }
   assertCommandTargetsOwnTeam(command, binding);
+  assertCaptainTurnWindow(state, command, binding);
+  assertRenameAvailable(state, command, binding);
   if (state.paused && command.role === ROLES.CAPTAIN) {
     throw new Error('赛事已暂停，队长端暂不可操作');
   }
@@ -87,6 +130,20 @@ function preflightCommand(state, command, roleBinding) {
   return { ok: true, duplicate: false };
 }
 
+function applyEventToSnapshot(snapshot, event) {
+  const next = clone(snapshot || {});
+  if (event.type === EVENT_TYPES.TEAM_RENAMED) {
+    const teamId = String((event.payload && event.payload.teamId) || '').trim();
+    const name = String((event.payload && event.payload.name) || '').trim().slice(0, 12);
+    next.teams = Array.isArray(next.teams) ? next.teams.map(team => {
+      const currentId = String(team.teamId || team.id || '').trim();
+      if (currentId !== teamId) return team;
+      return { ...team, name, renameUsed: true };
+    }) : [];
+  }
+  return next;
+}
+
 function appendEvent(state, eventInput) {
   assertAuthorityState(state);
   const next = clone(state);
@@ -99,6 +156,7 @@ function appendEvent(state, eventInput) {
   next.eventSeq = event.eventSeq;
   next.stateVersion = event.stateVersion;
   next.events.push(event);
+  next.snapshot = applyEventToSnapshot(next.snapshot, event);
   if (event.sourceCommandId) {
     next.processedCommands[event.sourceCommandId] = event;
   }
