@@ -5,6 +5,8 @@ const vm = require('vm');
 const zlib = require('zlib');
 const staticServer = require('./serve.js');
 const multiplayerServer = require('./serve-multiplayer.js');
+const multiplayerShared = require('../packages/shared');
+const multiplayerRules = require('../packages/rules');
 const { analyzeTaskDoc, runTaskLoop } = require('./task-loop-runner.js');
 
 const root = path.resolve(__dirname, '..');
@@ -2955,6 +2957,100 @@ function testMultiplayerCopyIsolation() {
   assert(multiplayerServer.resolveRequestPath('/%E0%A4%A') === null, '多人端服务应拒绝非法URL编码');
 }
 
+function testMultiplayerSharedRulePreflight() {
+  const state = multiplayerRules.createAuthorityState({ tournamentId: 'tournament-test' });
+  const command = multiplayerShared.createCommand({
+    commandId: 'cmd-001',
+    tournamentId: 'tournament-test',
+    type: multiplayerShared.COMMAND_TYPES.PURCHASE_SHOP_CARD,
+    actorId: 'captain-user-1',
+    role: multiplayerShared.ROLES.CAPTAIN,
+    teamId: 'team-1',
+    baseVersion: 0,
+    payload: { teamId: 'team-1', slotId: 'slot-1' },
+  });
+  const accepted = multiplayerRules.acceptCommandAsEvent(
+    state,
+    command,
+    { actorId: 'captain-user-1', role: multiplayerShared.ROLES.CAPTAIN, teamId: 'team-1' },
+    multiplayerShared.EVENT_TYPES.SHOP_CARD_PURCHASED,
+    { teamId: 'team-1', slotId: 'slot-1' }
+  );
+  assert(accepted.state.stateVersion === 1, '多人端规则包追加事件后应推进 stateVersion');
+  assert(accepted.event.sourceCommandId === command.commandId, '多人端事件应记录来源 commandId');
+  const duplicate = multiplayerRules.acceptCommandAsEvent(
+    accepted.state,
+    command,
+    { actorId: 'captain-user-1', role: multiplayerShared.ROLES.CAPTAIN, teamId: 'team-1' },
+    multiplayerShared.EVENT_TYPES.SHOP_CARD_PURCHASED,
+    { teamId: 'team-1', slotId: 'slot-1' }
+  );
+  assert(duplicate.duplicate === true && duplicate.event.eventSeq === accepted.event.eventSeq, '重复 command 应幂等返回首次事件');
+
+  let staleRejected = false;
+  try {
+    multiplayerRules.preflightCommand(accepted.state, multiplayerShared.createCommand({
+      ...command,
+      commandId: 'cmd-002',
+      baseVersion: 0,
+    }), { actorId: 'captain-user-1', role: multiplayerShared.ROLES.CAPTAIN, teamId: 'team-1' });
+  } catch (error) {
+    staleRejected = /状态版本过期/.test(error.message);
+  }
+  assert(staleRejected, '多人端规则包应拒绝过期 stateVersion 的 command');
+
+  let crossTeamRejected = false;
+  try {
+    multiplayerRules.preflightCommand(state, multiplayerShared.createCommand({
+      ...command,
+      commandId: 'cmd-003',
+      teamId: 'team-2',
+      payload: { teamId: 'team-2', slotId: 'slot-1' },
+    }), { actorId: 'captain-user-1', role: multiplayerShared.ROLES.CAPTAIN, teamId: 'team-1' });
+  } catch (error) {
+    crossTeamRejected = /自己的队伍/.test(error.message);
+  }
+  assert(crossTeamRejected, '队长端 command 不应操作其它队伍');
+
+  let forgedRoleRejected = false;
+  try {
+    multiplayerRules.acceptCommandAsEvent(
+      state,
+      multiplayerShared.createCommand({
+        commandId: 'cmd-004',
+        tournamentId: 'tournament-test',
+        type: multiplayerShared.COMMAND_TYPES.FORCE_REFEREE_RULING,
+        actorId: 'captain-user-1',
+        role: multiplayerShared.ROLES.REFEREE,
+        baseVersion: 0,
+        payload: { reason: '伪造裁判权限', patchSummary: 'bad' },
+      }),
+      { actorId: 'captain-user-1', role: multiplayerShared.ROLES.CAPTAIN, teamId: 'team-1' },
+      multiplayerShared.EVENT_TYPES.REFEREE_RULING_FORCED,
+      { reason: 'bad' }
+    );
+  } catch (error) {
+    forgedRoleRejected = /角色绑定/.test(error.message);
+  }
+  assert(forgedRoleRejected, '服务端预检应拒绝客户端自报裁判角色');
+
+  let viewerRejected = false;
+  try {
+    multiplayerShared.createCommand({
+      commandId: 'cmd-005',
+      tournamentId: 'tournament-test',
+      type: multiplayerShared.COMMAND_TYPES.PURCHASE_SHOP_CARD,
+      actorId: 'viewer-1',
+      role: multiplayerShared.ROLES.VIEWER,
+      baseVersion: 0,
+      payload: { teamId: 'team-1', slotId: 'slot-1' },
+    });
+  } catch (error) {
+    viewerRejected = /无权执行/.test(error.message);
+  }
+  assert(viewerRejected, '观众角色不应创建写入型 command');
+}
+
 function testRuleTemplateSaveAndLoad() {
   const { H, app } = createHarness();
   H.actions.setActiveView('rules');
@@ -3509,6 +3605,7 @@ async function run() {
     testHexcoreGlobalUniquePool,
     testUiNavigationAndSecurity,
     testMultiplayerCopyIsolation,
+    testMultiplayerSharedRulePreflight,
     testRuleTemplateSaveAndLoad,
     testEventClickLocatesTargets,
     testRecoverDraftState,
