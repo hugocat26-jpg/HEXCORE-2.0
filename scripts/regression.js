@@ -1044,7 +1044,7 @@ function testSystemIntegrityCheck() {
   H.actions.setActiveView('settings');
   H.actions.runSystemCheck();
 
-  assert(H.meta.version === '2.0.2' && app.innerHTML.includes('HEXCORE 2.0 v2.0.2 裁判端'), '系统设置页应展示统一项目版本号');
+  assert(H.meta.version === '2.0.3' && app.innerHTML.includes('HEXCORE 2.0 v2.0.3 裁判端'), '系统设置页应展示统一项目版本号');
   assert(H.state.ui.systemCheckResult && !H.state.ui.systemCheckResult.ok, '状态检查应保存可视化结果');
   assert(H.state.ui.systemCheckResult.issues.some(issue => issue.type === '重复归属'), '状态检查应识别重复归属');
   assert(H.state.ui.systemCheckResult.issues.some(issue => issue.type === '跨阵营'), '状态检查应识别跨阵营');
@@ -3153,6 +3153,66 @@ function testTournamentReportsIncompleteTeamsBeforeMissingCamps() {
   assert(event.body.includes('当前已有 10 支队伍') && event.body.includes('队伍已指定队长选手') && event.body.includes('补齐队伍人员'), '赛程生成失败应提示队伍人员不齐，而不是误报没有阵营队伍');
 }
 
+function testBandleDefenseScheduleAndScoring() {
+  const { H, app, elements } = createReadyHarness();
+  H.actions.generateBandleDefenseSchedule();
+  assert(H.state.tournament.type === 'bandle_defense', '班德尔保卫战应使用独立赛制类型');
+  assert(H.state.tournament.rounds.length === 2, '班德尔保卫战应生成两天赛程');
+  assert(H.state.tournament.rounds.every(round => round.matches.length === 25), '每天应生成 25 场 5x5 全交叉比赛');
+  assert(H.state.tournament.rounds.every(round => round.matches.every(match =>
+    H.selectors.captainCamp(match.teamAId) === 'local'
+    && H.selectors.captainCamp(match.teamBId) === 'outsider'
+  )), '班德尔保卫战必须全部为本地队伍 vs 外地队伍');
+
+  const firstMatch = H.state.tournament.rounds[0].matches[0];
+  elements[`bandle-score-day1-${firstMatch.id}-a`] = { value: '2' };
+  elements[`bandle-score-day1-${firstMatch.id}-b`] = { value: '1' };
+  elements[`bandle-yordle-day1-${firstMatch.id}`] = { value: '3' };
+  H.actions.saveBandleDefenseScore('day1', firstMatch.id);
+  assert(firstMatch.status === 'completed' && firstMatch.winnerId === firstMatch.teamAId, '保存班德尔比分后应产生单场胜者');
+  assert(firstMatch.bandlePoints === 2.5 && firstMatch.invaderPoints === 0, '班德尔胜场 +1 且约德尔 3 人应额外 +1.5');
+
+  H.state.tournament.rounds.forEach(round => {
+    round.matches.forEach(match => {
+      if (match.status === 'completed') return;
+      elements[`bandle-score-${round.id}-${match.id}-a`] = { value: '2' };
+      elements[`bandle-score-${round.id}-${match.id}-b`] = { value: '0' };
+      elements[`bandle-yordle-${round.id}-${match.id}`] = { value: '0' };
+      H.actions.saveBandleDefenseScore(round.id, match.id);
+    });
+  });
+  assert(H.state.tournament.status === 'completed' && H.state.tournament.winnerCamp === 'bandle', '50 场完成且分差大于 5 时应直接产生班德尔获胜阵营');
+  assert(H.state.tournament.winnerReason === 'points', '直接获胜应记录为积分决胜');
+  H.actions.setActiveView('tournament');
+  assert(app.innerHTML.includes('班德尔保卫战') && app.innerHTML.includes('班德尔守住了家园'), '赛程页应渲染班德尔保卫战和阵营胜利展示');
+}
+
+function testBandleDefenseFinalBattle() {
+  const { H, app, elements } = createReadyHarness();
+  H.actions.generateBandleDefenseSchedule();
+  H.state.tournament.rounds.forEach(round => {
+    round.matches.forEach((match, index) => {
+      const bandleWins = index % 2 === 0;
+      elements[`bandle-score-${round.id}-${match.id}-a`] = { value: bandleWins ? '2' : '0' };
+      elements[`bandle-score-${round.id}-${match.id}-b`] = { value: bandleWins ? '0' : '2' };
+      elements[`bandle-yordle-${round.id}-${match.id}`] = { value: '0' };
+      H.actions.saveBandleDefenseScore(round.id, match.id);
+    });
+  });
+  assert(H.state.tournament.status === 'running' && H.state.tournament.finalBattle.enabled, '50 场后分差不超过 5 应开启隐藏大决战');
+  assert(H.state.tournament.finalBattle.games.length === 5, '隐藏大决战应生成 BO5 五局录分位');
+  [0, 1, 2].forEach(index => {
+    elements[`bandle-final-${index}-a`] = { value: '2' };
+    elements[`bandle-final-${index}-b`] = { value: '1' };
+    H.actions.saveBandleFinalBattleGame(index);
+  });
+  assert(H.state.tournament.status === 'completed' && H.state.tournament.winnerCamp === 'bandle', 'BO5 先赢 3 局后应产生最终获胜阵营');
+  assert(H.state.tournament.winnerReason === 'final_battle', 'BO5 获胜应记录为隐藏大决战决胜');
+  assert(H.state.tournament.finalBandlePoints === 36 && H.state.tournament.finalInvaderPoints === 24, 'BO5 胜方应在原积分基础上 +10');
+  H.actions.setActiveView('tournament');
+  assert(app.innerHTML.includes('隐藏大决战') && app.innerHTML.includes('最强约德尔人'), '赛程页应展示隐藏大决战 BO5 区域');
+}
+
 function testPostTaskIncompleteRetryLimit() {
   const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hexcore-post-task-'));
   const stateFile = path.join(stateDir, 'state.json');
@@ -3425,6 +3485,8 @@ async function run() {
     testTournamentScheduleRandomizesEntrants,
     testTournamentManualByeAndReorder,
     testTournamentReportsIncompleteTeamsBeforeMissingCamps,
+    testBandleDefenseScheduleAndScoring,
+    testBandleDefenseFinalBattle,
     testPostTaskIncompleteRetryLimit,
     testPostTaskExtractsOpenTableNextAction,
     testPostTaskIgnoresCompletedAcceptanceLanguage,

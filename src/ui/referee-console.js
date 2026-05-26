@@ -2618,6 +2618,169 @@
       ? tournament.rounds[0].matches.flatMap(match => [match.teamAId, match.teamBId])
       : []).filter(Boolean));
     const isCampVersusMatch = (round, match) => isCampVersusTournamentContext(tournament, round, match);
+    const bandleMatches = tournament.type === 'bandle_defense'
+      ? tournament.rounds.flatMap(round => round.matches || [])
+      : [];
+    const bandleCompletedMatches = bandleMatches.filter(match => match.status === 'completed').length;
+    const bandlePoints = bandleMatches.reduce((sum, match) => sum + (Number(match.bandlePoints) || 0), 0);
+    const invaderPoints = bandleMatches.reduce((sum, match) => sum + (Number(match.invaderPoints) || 0), 0);
+    const bandleGap = Math.abs(bandlePoints - invaderPoints);
+    const finalBattle = tournament.finalBattle || {};
+    const finalBonus = Number(finalBattle.bonusPoints) || 10;
+    const finalBandlePoints = tournament.status === 'completed'
+      ? Number(tournament.finalBandlePoints || bandlePoints)
+      : bandlePoints;
+    const finalInvaderPoints = tournament.status === 'completed'
+      ? Number(tournament.finalInvaderPoints || invaderPoints)
+      : invaderPoints;
+    const contribution = {};
+    if (tournament.type === 'bandle_defense') {
+      Hexcore2.state.captains.forEach(captain => {
+        contribution[captain.id] = { wins: 0, points: 0, yordlePoints: 0 };
+      });
+      bandleMatches.forEach(match => {
+        if (match.status !== 'completed') return;
+        if (match.winnerId && contribution[match.winnerId]) contribution[match.winnerId].wins += 1;
+        if (contribution[match.teamAId]) {
+          contribution[match.teamAId].points += Number(match.bandlePoints) || 0;
+          contribution[match.teamAId].yordlePoints += (Number(match.yordleCount) || 0) * 0.5;
+        }
+        if (contribution[match.teamBId]) contribution[match.teamBId].points += Number(match.invaderPoints) || 0;
+      });
+    }
+    const topByCamp = camp => Hexcore2.state.captains
+      .filter(captain => Hexcore2.selectors.captainCamp(captain.id) === camp)
+      .sort((a, b) => {
+        const left = contribution[a.id] || {};
+        const right = contribution[b.id] || {};
+        return (right.points || 0) - (left.points || 0)
+          || (right.wins || 0) - (left.wins || 0)
+          || Hexcore2.state.draft.baseOrder.indexOf(a.id) - Hexcore2.state.draft.baseOrder.indexOf(b.id);
+      });
+    const bandleDefenseMatchCard = (round, match) => {
+      const scoreA = match.scoreA === '' ? '' : match.scoreA;
+      const scoreB = match.scoreB === '' ? '' : match.scoreB;
+      const winnerLabel = match.winnerId
+        ? (match.winnerId === match.teamAId ? '班德尔胜' : '入侵者胜')
+        : '待录分';
+      return `
+        <article class="bandle-match-card ${match.status === 'completed' ? 'completed' : ''}">
+          <div class="bandle-match-head">
+            <strong>${escapeHtml(match.id.toUpperCase())}</strong>
+            <span>${escapeHtml(winnerLabel)}</span>
+          </div>
+          <div class="bandle-match-teams">
+            <span class="bandle-team-name">${escapeHtml(captainName(match.teamAId))}</span>
+            <em>vs</em>
+            <span class="invader-team-name">${escapeHtml(captainName(match.teamBId))}</span>
+          </div>
+          <div class="bandle-score-editor">
+            <input id="bandle-score-${escapeHtml(round.id)}-${escapeHtml(match.id)}-a" type="number" min="0" value="${escapeHtml(scoreA)}" aria-label="班德尔比分">
+            <span>:</span>
+            <input id="bandle-score-${escapeHtml(round.id)}-${escapeHtml(match.id)}-b" type="number" min="0" value="${escapeHtml(scoreB)}" aria-label="入侵者比分">
+          </div>
+          <label class="yordle-count-field">
+            <span>约德尔登场</span>
+            <input id="bandle-yordle-${escapeHtml(round.id)}-${escapeHtml(match.id)}" type="number" min="0" max="5" value="${escapeHtml(match.yordleCount || 0)}">
+          </label>
+          <div class="bandle-point-row">
+            <span>班德尔 +${escapeHtml(match.bandlePoints || 0)}</span>
+            <span>入侵者 +${escapeHtml(match.invaderPoints || 0)}</span>
+          </div>
+          <button class="subtle-btn" onclick='window.hexcoreUI.saveBandleDefenseScore(${safeJsonString(round.id)}, ${safeJsonString(match.id)})'>保存</button>
+        </article>
+      `;
+    };
+    const bandleDefensePage = () => `
+      ${pageHeader('赛程', 'S7 班德尔保卫战：两天 5x5 全交叉阵营积分赛，分差不超过 5 时触发隐藏 BO5。')}
+      <section class="data-panel tournament-control-panel bandle-control-panel">
+        <div class="metrics-grid tournament-metrics-grid">
+          <div><span>赛制</span><strong>班德尔保卫战</strong></div>
+          <div><span>已完成</span><strong>${bandleCompletedMatches}/${bandleMatches.length || 50}</strong></div>
+          <div><span>班德尔积分</span><strong>${escapeHtml(bandlePoints)}</strong></div>
+          <div><span>入侵者积分</span><strong>${escapeHtml(invaderPoints)}</strong></div>
+          <div><span>当前分差</span><strong>${escapeHtml(bandleGap)}</strong></div>
+        </div>
+        <div class="toolbar-row tournament-generate-row">
+          <div class="bandle-rule-note">
+            <strong>每日 25 场，两天共 50 场</strong>
+            <span>本地队伍视为班德尔，外地队伍视为入侵者；胜场 +1，约德尔每登场 1 人班德尔 +0.5。</span>
+          </div>
+          <div class="tournament-generate-actions">
+            <button class="primary-btn" onclick="window.hexcoreUI.generateBandleDefenseSchedule()">重新生成保卫战</button>
+            <button class="danger-btn" onclick="window.hexcoreUI.resetTournamentSchedule()">清空赛程</button>
+          </div>
+        </div>
+      </section>
+      ${tournament.status === 'completed' ? `
+        <section class="data-panel bandle-victory-showcase ${tournament.winnerCamp === 'bandle' ? 'bandle-win' : 'invader-win'}">
+          <div class="champion-crown-mark">${tournament.winnerCamp === 'bandle' ? '守住' : '攻破'}</div>
+          <div class="champion-copy">
+            <span>S7 班德尔保卫战最终阵营</span>
+            <h2>${tournament.winnerCamp === 'bandle' ? '班德尔守住了家园' : '入侵者攻破了防线'}</h2>
+            <p>${tournament.winnerReason === 'final_battle' ? `隐藏大决战胜方 +${finalBonus}` : '两日积分直接决胜'} · 最终 ${escapeHtml(finalBandlePoints)} : ${escapeHtml(finalInvaderPoints)}</p>
+          </div>
+        </section>
+      ` : ''}
+      <section class="data-panel bandle-scoreboard">
+        <div>
+          <h2>阵营积分</h2>
+          <div class="bandle-score-total">
+            <strong>班德尔 ${escapeHtml(bandlePoints)}</strong>
+            <span>vs</span>
+            <strong>入侵者 ${escapeHtml(invaderPoints)}</strong>
+          </div>
+          <p>${bandleCompletedMatches < bandleMatches.length
+            ? `还剩 ${bandleMatches.length - bandleCompletedMatches} 场，继续录分。`
+            : (bandleGap > 5 ? '分差大于 5，积分高阵营直接获胜。' : '分差不超过 5，隐藏大决战已开启。')}</p>
+        </div>
+        <div class="bandle-contribution-grid">
+          <div>
+            <h3>最强约德尔人候选</h3>
+            ${topByCamp('local').slice(0, 5).map(captain => `<span>${escapeHtml(captain.name)} · ${escapeHtml((contribution[captain.id] || {}).points || 0)} 分 · ${escapeHtml((contribution[captain.id] || {}).wins || 0)} 胜</span>`).join('')}
+          </div>
+          <div>
+            <h3>最强侵略者候选</h3>
+            ${topByCamp('outsider').slice(0, 5).map(captain => `<span>${escapeHtml(captain.name)} · ${escapeHtml((contribution[captain.id] || {}).points || 0)} 分 · ${escapeHtml((contribution[captain.id] || {}).wins || 0)} 胜</span>`).join('')}
+          </div>
+        </div>
+      </section>
+      <section class="bandle-days-grid">
+        ${tournament.rounds.map(round => `
+          <div class="data-panel bandle-day-panel">
+            <div class="section-title-row">
+              <h2>${escapeHtml(round.name)}</h2>
+              <span>5 支班德尔队伍分别迎战 5 支入侵者队伍。</span>
+            </div>
+            <div class="bandle-matrix">
+              ${(round.matches || []).map(match => bandleDefenseMatchCard(round, match)).join('')}
+            </div>
+          </div>
+        `).join('')}
+      </section>
+      ${finalBattle.enabled ? `
+        <section class="data-panel bandle-final-panel">
+          <div class="section-title-row">
+            <h2>隐藏大决战 BO5</h2>
+            <span>${escapeHtml(captainName(finalBattle.bandleTeamId))} vs ${escapeHtml(captainName(finalBattle.invaderTeamId))}，先赢 3 局阵营 +${escapeHtml(finalBonus)}。</span>
+          </div>
+          <div class="bandle-final-games">
+            ${(finalBattle.games || []).map((game, index) => `
+              <article class="bandle-final-game ${game.status === 'completed' ? 'completed' : ''}">
+                <strong>第 ${index + 1} 局</strong>
+                <div class="bandle-score-editor">
+                  <input id="bandle-final-${index}-a" type="number" min="0" value="${escapeHtml(game.bandleScore === '' ? '' : game.bandleScore)}">
+                  <span>:</span>
+                  <input id="bandle-final-${index}-b" type="number" min="0" value="${escapeHtml(game.invaderScore === '' ? '' : game.invaderScore)}">
+                </div>
+                <span>${game.winnerCamp ? (game.winnerCamp === 'bandle' ? '约德尔拿下' : '侵略者拿下') : '待录分'}</span>
+                <button class="subtle-btn" ${finalBattle.winnerCamp ? 'disabled' : ''} onclick="window.hexcoreUI.saveBandleFinalBattleGame(${index})">保存</button>
+              </article>
+            `).join('')}
+          </div>
+        </section>
+      ` : ''}
+    `;
     const teamDragCard = (captain, assigned = false) => `
       <button class="tournament-team-chip ${assigned ? 'assigned' : ''}" draggable="true"
         ondragstart='event.dataTransfer.setData("text/plain", ${safeJsonString(captain.id)}); window.hexcoreUI.setTournamentDragCaptain(${safeJsonString(captain.id)})'>
@@ -2685,6 +2848,8 @@
       `;
     };
 
+    if (tournament.type === 'bandle_defense') return bandleDefensePage();
+
     return `
       ${pageHeader('赛程', '为金币商店组队结束后的队伍安排淘汰赛赛程，录入比分后系统自动晋级胜者。')}
       <section class="data-panel tournament-control-panel">
@@ -2703,6 +2868,7 @@
           </label>
           <div class="tournament-generate-actions">
             <button class="primary-btn" onclick="window.hexcoreUI.generateTournamentSchedule()">一键生成赛程</button>
+            <button class="primary-btn" onclick="window.hexcoreUI.generateBandleDefenseSchedule()">生成班德尔保卫战</button>
             <button class="danger-btn" onclick="window.hexcoreUI.resetTournamentSchedule()">清空赛程</button>
           </div>
         </div>
@@ -2814,7 +2980,7 @@
       ` : `
         <section class="data-panel empty-tournament">
           <h2>暂无赛程</h2>
-          <p>点击“一键生成赛程”后，系统会按上方模式自动生成首轮对阵。勾选阵营对抗时本地队伍在左、外地队伍在右；不勾选时全队随机对抗。</p>
+          <p>点击“一键生成赛程”后，系统会按上方模式自动生成首轮对阵；点击“生成班德尔保卫战”会创建两天 5x5 全交叉阵营积分赛。</p>
         </section>
       `}
     `;

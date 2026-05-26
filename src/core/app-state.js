@@ -588,13 +588,22 @@
     const captainIds = new Set(captains.map(captain => captain.id));
     const source = tournament && typeof tournament === 'object' ? tournament : {};
     const rounds = Array.isArray(source.rounds) ? source.rounds : [];
+    const type = ['elimination', 'bandle_defense'].includes(source.type) ? source.type : 'elimination';
+    const finalBattleSource = source.finalBattle && typeof source.finalBattle === 'object' ? source.finalBattle : {};
+    const normalizeCamp = value => ['bandle', 'invader', ''].includes(value) ? value : '';
     return {
       status: ['empty', 'running', 'completed'].includes(source.status) ? source.status : 'empty',
+      type,
       championId: captainIds.has(source.championId) ? source.championId : '',
+      winnerCamp: normalizeCamp(source.winnerCamp || ''),
+      winnerReason: String(source.winnerReason || '').slice(0, 40),
+      finalBandlePoints: Math.max(0, Number(source.finalBandlePoints) || 0),
+      finalInvaderPoints: Math.max(0, Number(source.finalInvaderPoints) || 0),
       pairingMode: ['camp_versus', 'random'].includes(source.pairingMode) ? source.pairingMode : '',
       rounds: rounds.slice(0, 8).map((round, roundIndex) => ({
         id: String(round.id || `r${roundIndex + 1}`).slice(0, 24),
         name: String(round.name || `第 ${roundIndex + 1} 轮`).slice(0, 32),
+        day: Math.max(0, Number(round.day) || 0),
         pairingMode: ['camp_versus', 'random'].includes(round.pairingMode) ? round.pairingMode : '',
         matches: (Array.isArray(round.matches) ? round.matches : []).slice(0, 32).map((match, matchIndex) => ({
           id: String(match.id || `r${roundIndex + 1}m${matchIndex + 1}`).slice(0, 32),
@@ -608,8 +617,25 @@
           pairingMode: ['camp_versus', 'random'].includes(match.pairingMode) ? match.pairingMode : '',
           expectedCampA: ['local', 'outsider'].includes(match.expectedCampA) ? match.expectedCampA : '',
           expectedCampB: ['local', 'outsider'].includes(match.expectedCampB) ? match.expectedCampB : '',
+          yordleCount: Math.max(0, Math.min(5, Number(match.yordleCount) || 0)),
+          bandlePoints: Math.max(0, Number(match.bandlePoints) || 0),
+          invaderPoints: Math.max(0, Number(match.invaderPoints) || 0),
         })),
       })),
+      finalBattle: {
+        enabled: Boolean(finalBattleSource.enabled),
+        bandleTeamId: captainIds.has(finalBattleSource.bandleTeamId) ? finalBattleSource.bandleTeamId : '',
+        invaderTeamId: captainIds.has(finalBattleSource.invaderTeamId) ? finalBattleSource.invaderTeamId : '',
+        winnerCamp: normalizeCamp(finalBattleSource.winnerCamp || ''),
+        bonusPoints: Math.max(0, Number(finalBattleSource.bonusPoints) || 10),
+        games: (Array.isArray(finalBattleSource.games) ? finalBattleSource.games : []).slice(0, 5).map((game, index) => ({
+          id: String(game.id || `bo5g${index + 1}`).slice(0, 24),
+          bandleScore: game.bandleScore === '' || game.bandleScore === undefined ? '' : Math.max(0, Number(game.bandleScore) || 0),
+          invaderScore: game.invaderScore === '' || game.invaderScore === undefined ? '' : Math.max(0, Number(game.invaderScore) || 0),
+          winnerCamp: normalizeCamp(game.winnerCamp || ''),
+          status: game.status === 'completed' ? 'completed' : 'pending',
+        })),
+      },
     };
   }
 
@@ -662,6 +688,7 @@
     events: [],
     tournament: {
       status: 'empty',
+      type: 'elimination',
       championId: '',
       rounds: [],
     },

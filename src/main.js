@@ -740,6 +740,10 @@
 
   function recomputeTournamentAdvancement() {
     const tournament = Hexcore2.state.tournament || { status: 'empty', championId: '', rounds: [] };
+    if (tournament.type === 'bandle_defense') {
+      recomputeBandleDefenseTournament(tournament);
+      return;
+    }
     if (!tournament.rounds.length) {
       tournament.status = 'empty';
       tournament.championId = '';
@@ -773,6 +777,149 @@
       tournament.rounds[roundIndex + 1] = buildTournamentRound(roundIndex + 2, winners, oldNextRound);
     }
     Hexcore2.state.tournament = tournament;
+  }
+
+  function bandleDefenseSummary(tournament = Hexcore2.state.tournament) {
+    const matches = (tournament.rounds || []).flatMap(round => round.matches || []);
+    const completedMatches = matches.filter(match => match.status === 'completed').length;
+    const bandlePoints = matches.reduce((sum, match) => sum + (Number(match.bandlePoints) || 0), 0);
+    const invaderPoints = matches.reduce((sum, match) => sum + (Number(match.invaderPoints) || 0), 0);
+    const finalBattle = tournament.finalBattle || {};
+    const bonus = Number(finalBattle.bonusPoints) || 10;
+    const finalBattleCompleted = finalBattle.enabled && finalBattle.winnerCamp;
+    return {
+      totalMatches: matches.length,
+      completedMatches,
+      bandlePoints,
+      invaderPoints,
+      gap: Math.abs(bandlePoints - invaderPoints),
+      finalBandlePoints: bandlePoints + (finalBattleCompleted && finalBattle.winnerCamp === 'bandle' ? bonus : 0),
+      finalInvaderPoints: invaderPoints + (finalBattleCompleted && finalBattle.winnerCamp === 'invader' ? bonus : 0),
+    };
+  }
+
+  function bandleDefenseContribution(tournament = Hexcore2.state.tournament) {
+    const result = {};
+    Hexcore2.state.captains.forEach(captain => {
+      result[captain.id] = { wins: 0, points: 0, yordlePoints: 0 };
+    });
+    (tournament.rounds || []).forEach(round => {
+      (round.matches || []).forEach(match => {
+        if (match.status !== 'completed') return;
+        if (match.winnerId && result[match.winnerId]) result[match.winnerId].wins += 1;
+        if (result[match.teamAId]) {
+          result[match.teamAId].points += Number(match.bandlePoints) || 0;
+          result[match.teamAId].yordlePoints += (Number(match.yordleCount) || 0) * 0.5;
+        }
+        if (result[match.teamBId]) result[match.teamBId].points += Number(match.invaderPoints) || 0;
+      });
+    });
+    return result;
+  }
+
+  function strongestCaptainByCamp(camp, tournament = Hexcore2.state.tournament) {
+    const contribution = bandleDefenseContribution(tournament);
+    return [...Hexcore2.state.captains]
+      .filter(captain => Hexcore2.selectors.captainCamp(captain.id) === camp)
+      .sort((a, b) => {
+        const left = contribution[a.id] || {};
+        const right = contribution[b.id] || {};
+        return (right.points || 0) - (left.points || 0)
+          || (right.wins || 0) - (left.wins || 0)
+          || Hexcore2.state.draft.baseOrder.indexOf(a.id) - Hexcore2.state.draft.baseOrder.indexOf(b.id);
+      })[0];
+  }
+
+  function ensureBandleFinalBattle(tournament) {
+    tournament.finalBattle = tournament.finalBattle || {};
+    tournament.finalBattle.enabled = true;
+    tournament.finalBattle.bonusPoints = Number(tournament.finalBattle.bonusPoints) || 10;
+    if (!Array.isArray(tournament.finalBattle.games) || tournament.finalBattle.games.length !== 5) {
+      tournament.finalBattle.games = Array.from({ length: 5 }, (_, index) => ({
+        id: `bo5g${index + 1}`,
+        bandleScore: '',
+        invaderScore: '',
+        winnerCamp: '',
+        status: 'pending',
+      }));
+    }
+    const bestBandle = strongestCaptainByCamp('local', tournament);
+    const bestInvader = strongestCaptainByCamp('outsider', tournament);
+    if (!tournament.finalBattle.bandleTeamId && bestBandle) tournament.finalBattle.bandleTeamId = bestBandle.id;
+    if (!tournament.finalBattle.invaderTeamId && bestInvader) tournament.finalBattle.invaderTeamId = bestInvader.id;
+  }
+
+  function recomputeBandleDefenseTournament(tournament) {
+    if (!tournament.rounds.length) {
+      tournament.status = 'empty';
+      tournament.winnerCamp = '';
+      tournament.winnerReason = '';
+      Hexcore2.state.tournament = tournament;
+      return;
+    }
+    const summary = bandleDefenseSummary(tournament);
+    tournament.championId = '';
+    tournament.status = 'running';
+    tournament.winnerCamp = '';
+    tournament.winnerReason = '';
+    tournament.finalBandlePoints = summary.bandlePoints;
+    tournament.finalInvaderPoints = summary.invaderPoints;
+    if (summary.completedMatches < summary.totalMatches) {
+      if (tournament.finalBattle) tournament.finalBattle.enabled = false;
+      Hexcore2.state.tournament = tournament;
+      return;
+    }
+    if (summary.gap > 5) {
+      tournament.status = 'completed';
+      tournament.winnerCamp = summary.bandlePoints > summary.invaderPoints ? 'bandle' : 'invader';
+      tournament.winnerReason = 'points';
+      tournament.finalBandlePoints = summary.bandlePoints;
+      tournament.finalInvaderPoints = summary.invaderPoints;
+      if (tournament.finalBattle) tournament.finalBattle.enabled = false;
+      Hexcore2.state.tournament = tournament;
+      return;
+    }
+    ensureBandleFinalBattle(tournament);
+    const wins = (tournament.finalBattle.games || []).reduce((acc, game) => {
+      if (game.status === 'completed' && game.winnerCamp) acc[game.winnerCamp] += 1;
+      return acc;
+    }, { bandle: 0, invader: 0 });
+    tournament.finalBattle.winnerCamp = wins.bandle >= 3 ? 'bandle' : (wins.invader >= 3 ? 'invader' : '');
+    if (tournament.finalBattle.winnerCamp) {
+      const finalSummary = bandleDefenseSummary(tournament);
+      tournament.status = 'completed';
+      tournament.winnerCamp = tournament.finalBattle.winnerCamp;
+      tournament.winnerReason = 'final_battle';
+      tournament.finalBandlePoints = finalSummary.finalBandlePoints;
+      tournament.finalInvaderPoints = finalSummary.finalInvaderPoints;
+    }
+    Hexcore2.state.tournament = tournament;
+  }
+
+  function buildBandleDefenseRounds(localIds, outsiderIds) {
+    return [1, 2].map(day => ({
+      id: `day${day}`,
+      name: `Day ${day}`,
+      day,
+      pairingMode: 'camp_versus',
+      matches: localIds.flatMap((localId, localIndex) =>
+        outsiderIds.map((outsiderId, outsiderIndex) => ({
+          id: `d${day}m${localIndex + 1}${outsiderIndex + 1}`,
+          teamAId: localId,
+          teamBId: outsiderId,
+          scoreA: '',
+          scoreB: '',
+          winnerId: '',
+          status: 'pending',
+          pairingMode: 'camp_versus',
+          expectedCampA: 'local',
+          expectedCampB: 'outsider',
+          yordleCount: 0,
+          bandlePoints: 0,
+          invaderPoints: 0,
+        }))
+      ),
+    }));
   }
 
   function findNextHexcoreCaptain(currentCaptainId) {
@@ -3352,6 +3499,64 @@
       renderAndPersist();
     },
 
+    generateBandleDefenseSchedule() {
+      const orderedEntrants = Hexcore2.state.draft.baseOrder
+        .filter(id => Hexcore2.state.captains.some(captain => captain.id === id));
+      const assignedCaptainCount = orderedEntrants.filter(id => Boolean(Hexcore2.selectors.captainPlayer(id))).length;
+      const localIds = orderedEntrants.filter(id => Hexcore2.selectors.captainCamp(id) === 'local');
+      const outsiderIds = orderedEntrants.filter(id => Hexcore2.selectors.captainCamp(id) === 'outsider');
+      if (assignedCaptainCount < orderedEntrants.length) {
+        Hexcore2.eventStore.append(
+          '生成班德尔赛程失败',
+          `当前已有 ${orderedEntrants.length} 支队伍，但只有 ${assignedCaptainCount} 支队伍已指定队长选手。请先补齐队伍人员并设置队长。`,
+          'warn'
+        );
+        Hexcore2.ui.render();
+        return;
+      }
+      if (localIds.length !== 5 || outsiderIds.length !== 5) {
+        Hexcore2.eventStore.append('生成班德尔赛程失败', `班德尔保卫战需要本地 5 队、外地 5 队，当前本地 ${localIds.length} 队、外地 ${outsiderIds.length} 队。`, 'warn');
+        Hexcore2.ui.render();
+        return;
+      }
+      if (Hexcore2.state.tournament && Hexcore2.state.tournament.rounds && Hexcore2.state.tournament.rounds.length) {
+        const confirmed = typeof confirm === 'function'
+          ? confirm('当前已有赛程，生成班德尔保卫战会清空现有比分和晋级结果。确认继续？')
+          : true;
+        if (!confirmed) return;
+      }
+
+      snapshot('生成班德尔保卫战赛程前');
+      Hexcore2.state.tournament = {
+        status: 'running',
+        type: 'bandle_defense',
+        championId: '',
+        winnerCamp: '',
+        winnerReason: '',
+        finalBandlePoints: 0,
+        finalInvaderPoints: 0,
+        pairingMode: 'camp_versus',
+        rounds: buildBandleDefenseRounds(localIds, outsiderIds),
+        finalBattle: {
+          enabled: false,
+          bandleTeamId: '',
+          invaderTeamId: '',
+          winnerCamp: '',
+          bonusPoints: 10,
+          games: Array.from({ length: 5 }, (_, index) => ({
+            id: `bo5g${index + 1}`,
+            bandleScore: '',
+            invaderScore: '',
+            winnerCamp: '',
+            status: 'pending',
+          })),
+        },
+      };
+      recomputeBandleDefenseTournament(Hexcore2.state.tournament);
+      Hexcore2.eventStore.append('班德尔保卫战赛程', '已生成两日 5x5 全交叉阵营积分赛，共 50 场。', 'success');
+      renderAndPersist();
+    },
+
     setTournamentCampVersus(enabled) {
       Hexcore2.state.ui = Hexcore2.state.ui || {};
       Hexcore2.state.ui.tournamentCampVersus = Boolean(enabled);
@@ -3360,6 +3565,10 @@
 
     saveTournamentScore(roundId, matchId) {
       const tournament = Hexcore2.state.tournament || {};
+      if (tournament.type === 'bandle_defense') {
+        this.saveBandleDefenseScore(roundId, matchId);
+        return;
+      }
       const round = (tournament.rounds || []).find(item => item.id === roundId);
       const match = round && round.matches.find(item => item.id === matchId);
       if (!round || !match || !match.teamAId || !match.teamBId) {
@@ -3394,6 +3603,89 @@
         `${captainName(match.teamAId)} ${scoreA}:${scoreB} ${captainName(match.teamBId)}，${captainName(match.winnerId)} 自动晋级`,
         Hexcore2.state.tournament.status === 'completed' ? 'success' : 'info'
       );
+      renderAndPersist();
+    },
+
+    saveBandleDefenseScore(roundId, matchId) {
+      const tournament = Hexcore2.state.tournament || {};
+      const round = (tournament.rounds || []).find(item => item.id === roundId);
+      const match = round && round.matches.find(item => item.id === matchId);
+      if (!round || !match || tournament.type !== 'bandle_defense' || !match.teamAId || !match.teamBId) {
+        Hexcore2.eventStore.append('保存班德尔比分失败', '目标场次无效', 'warn');
+        Hexcore2.ui.render();
+        return;
+      }
+      const inputA = document.getElementById(`bandle-score-${roundId}-${matchId}-a`);
+      const inputB = document.getElementById(`bandle-score-${roundId}-${matchId}-b`);
+      const yordleInput = document.getElementById(`bandle-yordle-${roundId}-${matchId}`);
+      const scoreA = Number(inputA && inputA.value);
+      const scoreB = Number(inputB && inputB.value);
+      const yordleCount = Number(yordleInput && yordleInput.value);
+      if (!Number.isInteger(scoreA) || !Number.isInteger(scoreB) || scoreA < 0 || scoreB < 0) {
+        Hexcore2.eventStore.append('保存班德尔比分失败', '比分必须是非负整数', 'warn');
+        Hexcore2.ui.render();
+        return;
+      }
+      if (scoreA === scoreB) {
+        Hexcore2.eventStore.append('保存班德尔比分失败', '阵营积分赛仍需分出胜负，请录入胜负结果', 'warn');
+        Hexcore2.ui.render();
+        return;
+      }
+      if (!Number.isInteger(yordleCount) || yordleCount < 0 || yordleCount > 5) {
+        Hexcore2.eventStore.append('保存班德尔比分失败', '约德尔登场人数必须是 0-5 的整数', 'warn');
+        Hexcore2.ui.render();
+        return;
+      }
+
+      snapshot(`保存班德尔保卫战比分前：${match.id}`);
+      match.scoreA = scoreA;
+      match.scoreB = scoreB;
+      match.yordleCount = yordleCount;
+      match.winnerId = scoreA > scoreB ? match.teamAId : match.teamBId;
+      match.bandlePoints = (scoreA > scoreB ? 1 : 0) + yordleCount * 0.5;
+      match.invaderPoints = scoreB > scoreA ? 1 : 0;
+      match.status = 'completed';
+      recomputeBandleDefenseTournament(tournament);
+      Hexcore2.eventStore.append(
+        '班德尔保卫战比分',
+        `${captainName(match.teamAId)} ${scoreA}:${scoreB} ${captainName(match.teamBId)}，班德尔 +${match.bandlePoints}，入侵者 +${match.invaderPoints}`,
+        tournament.status === 'completed' ? 'success' : 'info'
+      );
+      renderAndPersist();
+    },
+
+    saveBandleFinalBattleGame(gameIndex) {
+      const tournament = Hexcore2.state.tournament || {};
+      const finalBattle = tournament.finalBattle || {};
+      const index = Number(gameIndex);
+      const game = Array.isArray(finalBattle.games) ? finalBattle.games[index] : null;
+      if (tournament.type !== 'bandle_defense' || !finalBattle.enabled || !game) {
+        Hexcore2.eventStore.append('保存隐藏决战失败', '隐藏大决战尚未开启', 'warn');
+        Hexcore2.ui.render();
+        return;
+      }
+      if (finalBattle.winnerCamp) {
+        Hexcore2.eventStore.append('保存隐藏决战失败', '隐藏大决战已分出胜负', 'warn');
+        Hexcore2.ui.render();
+        return;
+      }
+      const inputA = document.getElementById(`bandle-final-${index}-a`);
+      const inputB = document.getElementById(`bandle-final-${index}-b`);
+      const bandleScore = Number(inputA && inputA.value);
+      const invaderScore = Number(inputB && inputB.value);
+      if (!Number.isInteger(bandleScore) || !Number.isInteger(invaderScore) || bandleScore < 0 || invaderScore < 0 || bandleScore === invaderScore) {
+        Hexcore2.eventStore.append('保存隐藏决战失败', 'BO5 单局比分必须是非负整数且不能相同', 'warn');
+        Hexcore2.ui.render();
+        return;
+      }
+
+      snapshot(`保存隐藏大决战第${index + 1}局前`);
+      game.bandleScore = bandleScore;
+      game.invaderScore = invaderScore;
+      game.winnerCamp = bandleScore > invaderScore ? 'bandle' : 'invader';
+      game.status = 'completed';
+      recomputeBandleDefenseTournament(tournament);
+      Hexcore2.eventStore.append('隐藏大决战', `第 ${index + 1} 局已保存，${game.winnerCamp === 'bandle' ? '最强约德尔人' : '最强侵略者'} 拿下一局`, 'warn');
       renderAndPersist();
     },
 

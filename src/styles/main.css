@@ -6066,6 +6066,200 @@ h2 span {
   white-space: nowrap;
 }
 
+.bandle-control-panel {
+  border-color: rgba(250, 204, 21, 0.28);
+}
+
+.bandle-rule-note {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 260px;
+  color: var(--muted);
+}
+
+.bandle-rule-note strong {
+  color: var(--accent);
+}
+
+.bandle-scoreboard,
+.bandle-victory-showcase,
+.bandle-final-panel {
+  margin-top: 14px;
+}
+
+.bandle-victory-showcase {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 18px;
+  align-items: center;
+  border-color: rgba(250, 204, 21, 0.42);
+  background: linear-gradient(135deg, rgba(250, 204, 21, 0.14), rgba(34, 211, 238, 0.08));
+}
+
+.bandle-victory-showcase.invader-win {
+  border-color: rgba(248, 113, 113, 0.42);
+  background: linear-gradient(135deg, rgba(248, 113, 113, 0.14), rgba(34, 211, 238, 0.06));
+}
+
+.bandle-score-total {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 10px 0;
+  font-size: 20px;
+}
+
+.bandle-score-total strong:first-child,
+.bandle-team-name {
+  color: #67e8f9;
+}
+
+.bandle-score-total strong:last-child,
+.invader-team-name {
+  color: #fca5a5;
+}
+
+.bandle-contribution-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.bandle-contribution-grid > div {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(7, 18, 28, 0.45);
+}
+
+.bandle-contribution-grid h3 {
+  margin: 0 0 4px;
+  font-size: 15px;
+  color: var(--text);
+}
+
+.bandle-contribution-grid span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.bandle-days-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.bandle-day-panel {
+  min-width: 0;
+}
+
+.bandle-matrix {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(160px, 1fr));
+  gap: 10px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.bandle-match-card,
+.bandle-final-game {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 160px;
+  padding: 10px;
+  border: 1px solid rgba(34, 211, 238, 0.22);
+  border-radius: 8px;
+  background: rgba(5, 15, 24, 0.72);
+}
+
+.bandle-match-card.completed,
+.bandle-final-game.completed {
+  border-color: rgba(34, 197, 94, 0.45);
+  background: rgba(20, 83, 45, 0.18);
+}
+
+.bandle-match-head,
+.bandle-match-teams,
+.bandle-point-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.bandle-match-head strong {
+  color: var(--text);
+}
+
+.bandle-match-head span,
+.bandle-point-row span,
+.yordle-count-field span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.bandle-match-teams {
+  align-items: flex-start;
+  min-height: 42px;
+  font-weight: 800;
+}
+
+.bandle-match-teams span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.bandle-match-teams em {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-style: normal;
+  font-size: 12px;
+}
+
+.bandle-score-editor {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+}
+
+.bandle-score-editor input,
+.yordle-count-field input {
+  width: 100%;
+  min-height: 34px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: rgba(1, 10, 18, 0.85);
+  color: var(--text);
+  font-weight: 900;
+  text-align: center;
+}
+
+.yordle-count-field {
+  display: grid;
+  grid-template-columns: auto 56px;
+  align-items: center;
+  gap: 8px;
+}
+
+.bandle-final-games {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(150px, 1fr));
+  gap: 10px;
+}
+
+.bandle-final-game span {
+  min-height: 18px;
+  color: var(--muted);
+}
+
 @media (max-width: 900px) {
   .tournament-metrics-grid {
     grid-template-columns: repeat(2, minmax(132px, 1fr));
