@@ -2939,15 +2939,18 @@ function testUiNavigationAndSecurity() {
 }
 
 function testMultiplayerCopyIsolation() {
-  const appRoot = path.join(root, 'apps', 'multiplayer');
-  assert(fs.existsSync(path.join(appRoot, 'index.html')), '多人端副本应包含独立 index.html');
-  assert(fs.existsSync(path.join(appRoot, 'src', 'main.js')), '多人端副本应包含独立 src/main.js');
-  assert(fs.existsSync(path.join(appRoot, 'assets', 'brand', 'hexcore-brand.png')), '多人端副本应包含独立静态资产');
-  const html = fs.readFileSync(path.join(appRoot, 'index.html'), 'utf8');
+  const localAppRoot = path.join(root, 'apps', 'multiplayer');
+  const externalAppRoot = path.resolve('E:\\only_why\\HEXCORE2.0\\multiplayer');
+  const servedAppRoot = fs.existsSync(externalAppRoot) ? externalAppRoot : localAppRoot;
+  assert(fs.existsSync(path.join(localAppRoot, 'index.html')), '多人端版本管理副本应包含独立 index.html');
+  assert(fs.existsSync(path.join(localAppRoot, 'src', 'main.js')), '多人端版本管理副本应包含独立 src/main.js');
+  assert(fs.existsSync(path.join(localAppRoot, 'assets', 'brand', 'hexcore-brand.png')), '多人端版本管理副本应包含独立静态资产');
+  assert(multiplayerServer.appRoot === servedAppRoot, '多人端服务应优先使用本机指定副本，不存在时回退到版本管理副本');
+  const html = fs.readFileSync(path.join(servedAppRoot, 'index.html'), 'utf8');
   assert(html.includes('src/core/sample-data.js') && html.includes('src/main.js'), '多人端副本首页应从副本内 src 加载脚本');
-  assert(multiplayerServer.resolveRequestPath('/') === path.join(appRoot, 'index.html'), '多人端服务应解析副本首页');
-  assert(multiplayerServer.resolveRequestPath('/src/main.js') === path.join(appRoot, 'src', 'main.js'), '多人端服务应解析副本内源码');
-  assert(multiplayerServer.resolveRequestPath('/assets/hex-icons/camp-scout.png') === path.join(appRoot, 'assets', 'hex-icons', 'camp-scout.png'), '多人端服务应解析副本内资产');
+  assert(multiplayerServer.resolveRequestPath('/') === path.join(servedAppRoot, 'index.html'), '多人端服务应解析副本首页');
+  assert(multiplayerServer.resolveRequestPath('/src/main.js') === path.join(servedAppRoot, 'src', 'main.js'), '多人端服务应解析副本内源码');
+  assert(multiplayerServer.resolveRequestPath('/assets/hex-icons/camp-scout.png') === path.join(servedAppRoot, 'assets', 'hex-icons', 'camp-scout.png'), '多人端服务应解析副本内资产');
   assert(multiplayerServer.resolveRequestPath('/scripts/serve.js') === null, '多人端服务不应暴露根目录脚本');
   assert(multiplayerServer.resolveRequestPath('/docs/06_开发计划.md') === null, '多人端服务不应暴露根目录文档');
   assert(multiplayerServer.resolveRequestPath('/..%2F..%2Fpackage.json') === null, '多人端服务应拒绝穿越到项目根目录');

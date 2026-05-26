@@ -2,6 +2,14 @@
 
 本目录是多人实时系统的隔离开发副本。后续多人端改动优先在这里推进，根目录裁判端继续保持客户发布版稳定。
 
+本机同时维护一份便于直接开发和查看的多人端工作副本：
+
+```text
+E:\only_why\HEXCORE2.0\multiplayer
+```
+
+该目录不覆盖 `E:\only_why\HEXCORE2.0\hex-core2.0` 裁判端仓库。需要迁移或同步多人端页面时，以 GitHub 分支中的本目录作为版本管理来源，再同步到上述本机工作副本。
+
 当前副本来源于 `HEXCORE 2.0 v2.0.4` 裁判端：
 
 - `index.html`
@@ -19,6 +27,8 @@ npm run start:multiplayer
 ```text
 http://127.0.0.1:4186/
 ```
+
+启动脚本会优先服务 `E:\only_why\HEXCORE2.0\multiplayer`；如果该本机副本不存在，则回退到仓库内 `apps/multiplayer/`。
 
 开发约束：
 
