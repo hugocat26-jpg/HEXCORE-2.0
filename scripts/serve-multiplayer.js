@@ -4,10 +4,9 @@ const path = require('path');
 
 const root = path.resolve(__dirname, '..');
 const localAppRoot = path.resolve(root, 'apps', 'multiplayer');
-const defaultExternalAppRoot = path.resolve('E:\\only_why\\HEXCORE2.0\\multiplayer');
 const configuredAppRoot = process.env.MULTIPLAYER_APP_ROOT
   ? path.resolve(process.env.MULTIPLAYER_APP_ROOT)
-  : defaultExternalAppRoot;
+  : localAppRoot;
 const appRoot = fs.existsSync(configuredAppRoot) ? configuredAppRoot : localAppRoot;
 const host = process.env.HOST || '127.0.0.1';
 const port = Number(process.env.PORT || 4186);

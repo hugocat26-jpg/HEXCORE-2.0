@@ -5,7 +5,6 @@ const vm = require('vm');
 const zlib = require('zlib');
 const staticServer = require('./serve.js');
 const multiplayerServer = require('./serve-multiplayer.js');
-const multiplayerSync = require('./sync-multiplayer-copy.js');
 const { analyzeTaskDoc, runTaskLoop } = require('./task-loop-runner.js');
 
 const root = path.resolve(__dirname, '..');
@@ -2941,33 +2940,19 @@ function testUiNavigationAndSecurity() {
 
 function testMultiplayerCopyIsolation() {
   const localAppRoot = path.join(root, 'apps', 'multiplayer');
-  const externalAppRoot = path.resolve('E:\\only_why\\HEXCORE2.0\\multiplayer');
-  const servedAppRoot = fs.existsSync(externalAppRoot) ? externalAppRoot : localAppRoot;
   assert(fs.existsSync(path.join(localAppRoot, 'index.html')), '多人端版本管理副本应包含独立 index.html');
   assert(fs.existsSync(path.join(localAppRoot, 'src', 'main.js')), '多人端版本管理副本应包含独立 src/main.js');
   assert(fs.existsSync(path.join(localAppRoot, 'assets', 'brand', 'hexcore-brand.png')), '多人端版本管理副本应包含独立静态资产');
-  assert(multiplayerServer.appRoot === servedAppRoot, '多人端服务应优先使用本机指定副本，不存在时回退到版本管理副本');
-  const html = fs.readFileSync(path.join(servedAppRoot, 'index.html'), 'utf8');
+  assert(multiplayerServer.appRoot === localAppRoot, '多人端服务默认应使用当前 worktree 内的 apps/multiplayer');
+  const html = fs.readFileSync(path.join(localAppRoot, 'index.html'), 'utf8');
   assert(html.includes('src/core/sample-data.js') && html.includes('src/main.js'), '多人端副本首页应从副本内 src 加载脚本');
-  assert(multiplayerServer.resolveRequestPath('/') === path.join(servedAppRoot, 'index.html'), '多人端服务应解析副本首页');
-  assert(multiplayerServer.resolveRequestPath('/src/main.js') === path.join(servedAppRoot, 'src', 'main.js'), '多人端服务应解析副本内源码');
-  assert(multiplayerServer.resolveRequestPath('/assets/hex-icons/camp-scout.png') === path.join(servedAppRoot, 'assets', 'hex-icons', 'camp-scout.png'), '多人端服务应解析副本内资产');
+  assert(multiplayerServer.resolveRequestPath('/') === path.join(localAppRoot, 'index.html'), '多人端服务应解析副本首页');
+  assert(multiplayerServer.resolveRequestPath('/src/main.js') === path.join(localAppRoot, 'src', 'main.js'), '多人端服务应解析副本内源码');
+  assert(multiplayerServer.resolveRequestPath('/assets/hex-icons/camp-scout.png') === path.join(localAppRoot, 'assets', 'hex-icons', 'camp-scout.png'), '多人端服务应解析副本内资产');
   assert(multiplayerServer.resolveRequestPath('/scripts/serve.js') === null, '多人端服务不应暴露根目录脚本');
   assert(multiplayerServer.resolveRequestPath('/docs/06_开发计划.md') === null, '多人端服务不应暴露根目录文档');
   assert(multiplayerServer.resolveRequestPath('/..%2F..%2Fpackage.json') === null, '多人端服务应拒绝穿越到项目根目录');
   assert(multiplayerServer.resolveRequestPath('/%E0%A4%A') === null, '多人端服务应拒绝非法URL编码');
-  assert(multiplayerSync.versionedTarget === localAppRoot, '多人端同步目标应固定为仓库内 apps/multiplayer');
-  const syncPlan = multiplayerSync.syncMultiplayerCopy({ dryRun: true });
-  assert(syncPlan.sourcePath === externalAppRoot, '多人端同步来源默认应是本机多人端工作副本');
-  assert(syncPlan.targetPath === localAppRoot, '多人端同步 dry-run 应指向版本管理副本');
-  assert(syncPlan.dryRun === true, '多人端同步 dry-run 不应执行文件复制');
-  let rejectedRefereeRepo = false;
-  try {
-    multiplayerSync.assertSafePaths(path.resolve('E:\\only_why\\HEXCORE2.0\\hex-core2.0'), localAppRoot);
-  } catch (error) {
-    rejectedRefereeRepo = true;
-  }
-  assert(rejectedRefereeRepo, '多人端同步脚本应拒绝把裁判端仓库当作同步来源');
 }
 
 function testRuleTemplateSaveAndLoad() {

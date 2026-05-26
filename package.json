@@ -6,7 +6,6 @@
   "scripts": {
     "start": "node scripts/serve.js",
     "start:multiplayer": "node scripts/serve-multiplayer.js",
-    "sync:multiplayer": "node scripts/sync-multiplayer-copy.js",
     "serve": "node scripts/serve.js",
     "test": "node scripts/regression.js",
     "post-task": "node scripts/post-task-hook.js"
