@@ -4,6 +4,7 @@ const path = require('path');
 const vm = require('vm');
 const zlib = require('zlib');
 const staticServer = require('./serve.js');
+const multiplayerServer = require('./serve-multiplayer.js');
 const { analyzeTaskDoc, runTaskLoop } = require('./task-loop-runner.js');
 
 const root = path.resolve(__dirname, '..');
@@ -2937,6 +2938,22 @@ function testUiNavigationAndSecurity() {
   assert(staticServer.resolveRequestPath('/%E0%A4%A') === null, '静态服务应拒绝非法URL编码');
 }
 
+function testMultiplayerCopyIsolation() {
+  const appRoot = path.join(root, 'apps', 'multiplayer');
+  assert(fs.existsSync(path.join(appRoot, 'index.html')), '多人端副本应包含独立 index.html');
+  assert(fs.existsSync(path.join(appRoot, 'src', 'main.js')), '多人端副本应包含独立 src/main.js');
+  assert(fs.existsSync(path.join(appRoot, 'assets', 'brand', 'hexcore-brand.png')), '多人端副本应包含独立静态资产');
+  const html = fs.readFileSync(path.join(appRoot, 'index.html'), 'utf8');
+  assert(html.includes('src/core/sample-data.js') && html.includes('src/main.js'), '多人端副本首页应从副本内 src 加载脚本');
+  assert(multiplayerServer.resolveRequestPath('/') === path.join(appRoot, 'index.html'), '多人端服务应解析副本首页');
+  assert(multiplayerServer.resolveRequestPath('/src/main.js') === path.join(appRoot, 'src', 'main.js'), '多人端服务应解析副本内源码');
+  assert(multiplayerServer.resolveRequestPath('/assets/hex-icons/camp-scout.png') === path.join(appRoot, 'assets', 'hex-icons', 'camp-scout.png'), '多人端服务应解析副本内资产');
+  assert(multiplayerServer.resolveRequestPath('/scripts/serve.js') === null, '多人端服务不应暴露根目录脚本');
+  assert(multiplayerServer.resolveRequestPath('/docs/06_开发计划.md') === null, '多人端服务不应暴露根目录文档');
+  assert(multiplayerServer.resolveRequestPath('/..%2F..%2Fpackage.json') === null, '多人端服务应拒绝穿越到项目根目录');
+  assert(multiplayerServer.resolveRequestPath('/%E0%A4%A') === null, '多人端服务应拒绝非法URL编码');
+}
+
 function testRuleTemplateSaveAndLoad() {
   const { H, app } = createHarness();
   H.actions.setActiveView('rules');
@@ -3490,6 +3507,7 @@ async function run() {
     testHexTargetPickerExplainsInvalidTargets,
     testHexcoreGlobalUniquePool,
     testUiNavigationAndSecurity,
+    testMultiplayerCopyIsolation,
     testRuleTemplateSaveAndLoad,
     testEventClickLocatesTargets,
     testRecoverDraftState,
