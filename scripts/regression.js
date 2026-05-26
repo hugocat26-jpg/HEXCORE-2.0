@@ -1,10 +1,12 @@
 const fs = require('fs');
+const http = require('http');
 const os = require('os');
 const path = require('path');
 const vm = require('vm');
 const zlib = require('zlib');
 const staticServer = require('./serve.js');
 const multiplayerServer = require('./serve-multiplayer.js');
+const multiplayerApiServer = require('../apps/server/server.js');
 const multiplayerShared = require('../packages/shared');
 const multiplayerRules = require('../packages/rules');
 const { analyzeTaskDoc, runTaskLoop } = require('./task-loop-runner.js');
@@ -223,6 +225,65 @@ function createReadyHarness() {
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
+}
+
+function listen(server) {
+  return new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      server.off('error', reject);
+      resolve(server.address().port);
+    });
+  });
+}
+
+function closeServer(server) {
+  return new Promise(resolve => server.close(resolve));
+}
+
+function requestJson(port, method, pathname, body) {
+  return new Promise((resolve, reject) => {
+    const payload = body === undefined ? '' : JSON.stringify(body);
+    const req = http.request({
+      hostname: '127.0.0.1',
+      port,
+      path: pathname,
+      method,
+      headers: payload ? {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(payload),
+      } : {},
+    }, res => {
+      let data = '';
+      res.on('data', chunk => { data += chunk; });
+      res.on('end', () => {
+        try {
+          resolve({ status: res.statusCode, body: data ? JSON.parse(data) : {} });
+        } catch (error) {
+          reject(error);
+        }
+      });
+    });
+    req.on('error', reject);
+    if (payload) req.write(payload);
+    req.end();
+  });
+}
+
+function subscribeSse(port, pathname) {
+  return new Promise((resolve, reject) => {
+    const req = http.request({ hostname: '127.0.0.1', port, path: pathname, method: 'GET' }, res => {
+      let buffer = '';
+      res.on('data', chunk => {
+        buffer += chunk.toString('utf8');
+        if (buffer.includes('event: snapshot')) {
+          resolve({ req, res, initial: buffer });
+        }
+      });
+    });
+    req.on('error', reject);
+    req.end();
+  });
 }
 
 function pngCornerAlphas(filePath) {
@@ -3051,6 +3112,75 @@ function testMultiplayerSharedRulePreflight() {
   assert(viewerRejected, '观众角色不应创建写入型 command');
 }
 
+async function testMultiplayerApiServer() {
+  const server = multiplayerApiServer.createServer();
+  const port = await listen(server);
+  try {
+    const health = await requestJson(port, 'GET', '/health');
+    assert(health.status === 200 && health.body.ok && health.body.rulesVersion === multiplayerShared.RULES_VERSION, '多人端服务应提供健康检查和规则版本');
+
+    const created = await requestJson(port, 'POST', '/api/tournaments', {
+      id: 't-api',
+      name: 'API 回归赛事',
+      actorId: 'referee-1',
+    });
+    assert(created.status === 201 && created.body.tournament.stateVersion === 1, '创建赛事应写入 TournamentCreated 事件并推进版本');
+    assert(created.body.tournament.events[0].type === multiplayerShared.EVENT_TYPES.TOURNAMENT_CREATED, '创建赛事应返回创建事件');
+
+    const snapshot = await requestJson(port, 'GET', '/api/tournaments/t-api/snapshot');
+    assert(snapshot.status === 200 && snapshot.body.tournament.snapshot.name === 'API 回归赛事', '多人端服务应读取赛事快照');
+
+    const sse = await subscribeSse(port, '/api/tournaments/t-api/events');
+    assert(sse.initial.includes('event: snapshot') && sse.initial.includes('"tournamentId":"t-api"'), 'SSE 应先推送当前快照');
+
+    const command = await requestJson(port, 'POST', '/api/tournaments/t-api/commands', {
+      roleBinding: { actorId: 'captain-user-1', role: multiplayerShared.ROLES.CAPTAIN, teamId: 'team-1' },
+      command: {
+        commandId: 'cmd-api-1',
+        type: multiplayerShared.COMMAND_TYPES.PURCHASE_SHOP_CARD,
+        actorId: 'captain-user-1',
+        role: multiplayerShared.ROLES.CAPTAIN,
+        teamId: 'team-1',
+        baseVersion: 1,
+        payload: { teamId: 'team-1', slotId: 'slot-1' },
+      },
+    });
+    assert(command.status === 200 && command.body.event.type === multiplayerShared.EVENT_TYPES.SHOP_CARD_PURCHASED, '提交 command 应生成对应事件');
+    assert(command.body.tournament.stateVersion === 2, '提交 command 应推进 stateVersion');
+
+    const duplicate = await requestJson(port, 'POST', '/api/tournaments/t-api/commands', {
+      roleBinding: { actorId: 'captain-user-1', role: multiplayerShared.ROLES.CAPTAIN, teamId: 'team-1' },
+      command: {
+        commandId: 'cmd-api-1',
+        type: multiplayerShared.COMMAND_TYPES.PURCHASE_SHOP_CARD,
+        actorId: 'captain-user-1',
+        role: multiplayerShared.ROLES.CAPTAIN,
+        teamId: 'team-1',
+        baseVersion: 1,
+        payload: { teamId: 'team-1', slotId: 'slot-1' },
+      },
+    });
+    assert(duplicate.status === 200 && duplicate.body.duplicate === true, '重复 command 应通过 API 幂等返回');
+    assert(duplicate.body.event.eventSeq === command.body.event.eventSeq, '重复 command 返回的事件序号应保持一致');
+
+    const rejected = await requestJson(port, 'POST', '/api/tournaments/t-api/commands', {
+      roleBinding: { actorId: 'viewer-1', role: multiplayerShared.ROLES.VIEWER },
+      command: {
+        commandId: 'cmd-api-2',
+        type: multiplayerShared.COMMAND_TYPES.PURCHASE_SHOP_CARD,
+        actorId: 'viewer-1',
+        role: multiplayerShared.ROLES.VIEWER,
+        baseVersion: 2,
+        payload: { teamId: 'team-1', slotId: 'slot-1' },
+      },
+    });
+    assert(rejected.status === 400 && /无权执行/.test(rejected.body.error), '观众通过 API 写入应被拒绝');
+    sse.req.destroy();
+  } finally {
+    await closeServer(server);
+  }
+}
+
 function testRuleTemplateSaveAndLoad() {
   const { H, app } = createHarness();
   H.actions.setActiveView('rules');
@@ -3606,6 +3736,7 @@ async function run() {
     testUiNavigationAndSecurity,
     testMultiplayerCopyIsolation,
     testMultiplayerSharedRulePreflight,
+    testMultiplayerApiServer,
     testRuleTemplateSaveAndLoad,
     testEventClickLocatesTargets,
     testRecoverDraftState,
