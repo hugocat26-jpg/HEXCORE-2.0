@@ -1044,7 +1044,7 @@ function testSystemIntegrityCheck() {
   H.actions.setActiveView('settings');
   H.actions.runSystemCheck();
 
-  assert(H.meta.version === '2.0.3' && app.innerHTML.includes('HEXCORE 2.0 v2.0.3 裁判端'), '系统设置页应展示统一项目版本号');
+  assert(H.meta.version === '2.0.4' && app.innerHTML.includes('HEXCORE 2.0 v2.0.4 裁判端'), '系统设置页应展示统一项目版本号');
   assert(H.state.ui.systemCheckResult && !H.state.ui.systemCheckResult.ok, '状态检查应保存可视化结果');
   assert(H.state.ui.systemCheckResult.issues.some(issue => issue.type === '重复归属'), '状态检查应识别重复归属');
   assert(H.state.ui.systemCheckResult.issues.some(issue => issue.type === '跨阵营'), '状态检查应识别跨阵营');
@@ -3213,6 +3213,18 @@ function testBandleDefenseFinalBattle() {
   assert(app.innerHTML.includes('隐藏大决战') && app.innerHTML.includes('最强约德尔人'), '赛程页应展示隐藏大决战 BO5 区域');
 }
 
+function testBandleDefenseDayLayoutStyles() {
+  const css = fs.readFileSync(path.join(root, 'src/styles/main.css'), 'utf8');
+  assert(
+    css.includes('.bandle-days-grid {\n  display: grid;\n  grid-template-columns: minmax(0, 1fr);'),
+    '班德尔保卫战 Day 1 和 Day 2 应上下单列分布，避免并排压缩导致显示不全',
+  );
+  assert(
+    css.includes('.bandle-matrix {\n  display: grid;\n  grid-template-columns: repeat(5, minmax(160px, 1fr));'),
+    '每个 Day 内部仍应保持 5 列对阵矩阵',
+  );
+}
+
 function testPostTaskIncompleteRetryLimit() {
   const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hexcore-post-task-'));
   const stateFile = path.join(stateDir, 'state.json');
@@ -3487,6 +3499,7 @@ async function run() {
     testTournamentReportsIncompleteTeamsBeforeMissingCamps,
     testBandleDefenseScheduleAndScoring,
     testBandleDefenseFinalBattle,
+    testBandleDefenseDayLayoutStyles,
     testPostTaskIncompleteRetryLimit,
     testPostTaskExtractsOpenTableNextAction,
     testPostTaskIgnoresCompletedAcceptanceLanguage,

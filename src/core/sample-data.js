@@ -2,7 +2,7 @@
   const Hexcore2 = global.Hexcore2 || (global.Hexcore2 = {});
   Hexcore2.meta = {
     product: 'HEXCORE 2.0',
-    version: '2.0.3',
+    version: '2.0.4',
     releaseDate: '2026-05-26',
   };
 
