@@ -128,7 +128,7 @@ function projectionOptionsFromRequest(req, parsed, store, tournamentId, view) {
 }
 
 function createServer(options = {}) {
-  const store = options.store || new MemoryTournamentStore();
+  const store = options.store || new MemoryTournamentStore({ dataFile: options.dataFile || process.env.HEXCORE_DATA_FILE || '' });
   const startedAtMs = Date.now();
   const startedAt = new Date(startedAtMs).toISOString();
   return http.createServer(async (req, res) => {

@@ -1,4 +1,6 @@
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 const { createAuthorityState } = require('../../packages/rules');
 const { ROLES } = require('../../packages/shared');
 
@@ -7,12 +9,14 @@ function clone(value) {
 }
 
 class MemoryTournamentStore {
-  constructor() {
+  constructor(options = {}) {
+    this.dataFile = options.dataFile || process.env.HEXCORE_DATA_FILE || '';
     this.tournaments = new Map();
     this.subscribers = new Map();
     this.roomAccess = new Map();
     this.initialRoomAccess = new Map();
     this.sessions = new Map();
+    this.loadFromDisk();
   }
 
   createTournament(input = {}) {
@@ -40,6 +44,7 @@ class MemoryTournamentStore {
     const roomAccess = createRoomAccess(id, input);
     this.roomAccess.set(id, roomAccess.stored);
     this.initialRoomAccess.set(id, roomAccess.initial);
+    this.persistToDisk();
     return clone(state);
   }
 
@@ -51,6 +56,7 @@ class MemoryTournamentStore {
   replaceTournament(id, nextState) {
     if (!this.tournaments.has(id)) throw new Error(`赛事不存在：${id}`);
     this.tournaments.set(id, clone(nextState));
+    this.persistToDisk();
     const event = nextState.events[nextState.events.length - 1] || null;
     if (event) this.publish(id, event);
     return clone(nextState);
@@ -119,7 +125,7 @@ class MemoryTournamentStore {
   publicStats() {
     const subscriberCount = Array.from(this.subscribers.values()).reduce((sum, bucket) => sum + bucket.size, 0);
     return {
-      storage: 'memory',
+      storage: this.dataFile ? 'memory+file' : 'memory',
       tournamentCount: this.tournaments.size,
       roomCount: this.roomAccess.size,
       subscriberCount,
@@ -145,6 +151,7 @@ class MemoryTournamentStore {
       joinedAt: new Date().toISOString(),
     };
     this.sessions.set(session.sessionTokenHash, session);
+    this.persistToDisk();
     return clone({ ...session, sessionToken, sessionTokenHash: undefined });
   }
 
@@ -178,6 +185,45 @@ class MemoryTournamentStore {
     }
     return session;
   }
+
+  loadFromDisk() {
+    if (!this.dataFile) return;
+    try {
+      if (!fs.existsSync(this.dataFile)) return;
+      const parsed = JSON.parse(fs.readFileSync(this.dataFile, 'utf8'));
+      if (!parsed || parsed.storeVersion !== 'hexcore-memory-store-v1') return;
+      this.tournaments = mapFromEntries(parsed.tournaments);
+      this.roomAccess = mapFromEntries(parsed.roomAccess);
+      this.sessions = mapFromEntries(parsed.sessions);
+      this.initialRoomAccess = new Map();
+    } catch (error) {
+      throw new Error(`读取多人端持久化文件失败：${error.message}`);
+    }
+  }
+
+  persistToDisk() {
+    if (!this.dataFile) return;
+    const payload = {
+      storeVersion: 'hexcore-memory-store-v1',
+      savedAt: new Date().toISOString(),
+      tournaments: entriesFromMap(this.tournaments),
+      roomAccess: entriesFromMap(this.roomAccess),
+      sessions: entriesFromMap(this.sessions),
+    };
+    const target = path.resolve(this.dataFile);
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    const tmp = `${target}.${process.pid}.${Date.now()}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(payload, null, 2), 'utf8');
+    fs.renameSync(tmp, target);
+  }
+}
+
+function entriesFromMap(map) {
+  return Array.from((map || new Map()).entries()).map(([key, value]) => [key, clone(value)]);
+}
+
+function mapFromEntries(entries) {
+  return new Map((Array.isArray(entries) ? entries : []).map(([key, value]) => [String(key), clone(value)]));
 }
 
 function normalizeTeams(input = {}) {

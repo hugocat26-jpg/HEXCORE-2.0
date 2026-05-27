@@ -3333,6 +3333,59 @@ async function testMultiplayerApiServer() {
       '多人端服务应提供健康检查、规则版本和基础运行状态'
     );
 
+    const durableFile = path.join(os.tmpdir(), `hexcore-store-${Date.now()}-${Math.random().toString(16).slice(2)}.json`);
+    let durableServer = multiplayerApiServer.createServer({ dataFile: durableFile });
+    let durablePort = await listen(durableServer);
+    const durableCreated = await requestJson(durablePort, 'POST', '/api/tournaments', {
+      id: 't-durable',
+      name: '持久化回归赛事',
+      actorId: 'referee-durable',
+      teams: [{ teamId: 'durable-team', name: '持久队', code: 'durable-captain-code', camp: 'local' }],
+      refereeCode: 'durable-referee-code',
+    });
+    const durableCaptainJoin = await requestJson(durablePort, 'POST', '/api/tournaments/t-durable/join', {
+      code: durableCreated.body.room.captainCodes[0].code,
+      displayName: '持久队长',
+    });
+    const durableRefereeJoin = await requestJson(durablePort, 'POST', '/api/tournaments/t-durable/join', {
+      code: durableCreated.body.room.refereeCode,
+      displayName: '持久裁判',
+    });
+    await new Promise(resolve => durableServer.close(resolve));
+    durableServer = multiplayerApiServer.createServer({ dataFile: durableFile });
+    durablePort = await listen(durableServer);
+    const durableHealth = await requestJson(durablePort, 'GET', '/health');
+    const durableSnapshot = await requestJson(durablePort, 'GET', '/api/tournaments/t-durable/snapshot');
+    const durableRoom = await requestJson(durablePort, 'GET', `/api/tournaments/t-durable/room?sessionToken=${encodeURIComponent(durableRefereeJoin.body.session.sessionToken)}`);
+    const durableRename = await requestJson(durablePort, 'POST', '/api/tournaments/t-durable/commands', {
+      sessionToken: durableCaptainJoin.body.session.sessionToken,
+      command: {
+        commandId: 'cmd-api-durable-rename',
+        type: multiplayerShared.COMMAND_TYPES.RENAME_TEAM,
+        baseVersion: 1,
+        payload: { teamId: 'durable-team', name: '持久新名' },
+      },
+    });
+    const durableRejoin = await requestJson(durablePort, 'POST', '/api/tournaments/t-durable/join', {
+      code: durableCreated.body.room.captainCodes[0].code,
+      displayName: '重启后队长',
+    });
+    await new Promise(resolve => durableServer.close(resolve));
+    try { fs.unlinkSync(durableFile); } catch (error) {}
+    assert(
+      durableCreated.status === 201
+      && durableCaptainJoin.status === 200
+      && durableRefereeJoin.status === 200
+      && durableHealth.body.runtime.storage === 'memory+file'
+      && durableSnapshot.status === 200
+      && durableSnapshot.body.tournament.snapshot.name === '持久化回归赛事'
+      && durableRoom.status === 200
+      && durableRename.status === 200
+      && durableRename.body.tournament.snapshot.teams[0].name === '持久新名'
+      && durableRejoin.status === 200,
+      '多人端文件持久化应在服务重启后恢复赛事、房间凭据摘要和 session，并继续接受 command'
+    );
+
     const created = await requestJson(port, 'POST', '/api/tournaments', {
       id: 't-api',
       name: 'API 回归赛事',
