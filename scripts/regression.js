@@ -3377,6 +3377,8 @@ async function testMultiplayerApiServer() {
       && durableCaptainJoin.status === 200
       && durableRefereeJoin.status === 200
       && durableHealth.body.runtime.storage === 'memory+file'
+      && durableCreated.body.tournament.tournamentId === 't-durable'
+      && !durableCreated.body.tournament.snapshot.tournamentId
       && durableSnapshot.status === 200
       && durableSnapshot.body.tournament.snapshot.name === '持久化回归赛事'
       && durableRoom.status === 200
@@ -3384,6 +3386,57 @@ async function testMultiplayerApiServer() {
       && durableRename.body.tournament.snapshot.teams[0].name === '持久新名'
       && durableRejoin.status === 200,
       '多人端文件持久化应在服务重启后恢复赛事、房间凭据摘要和 session，并继续接受 command'
+    );
+
+    const sqliteFile = path.join(os.tmpdir(), `hexcore-store-${Date.now()}-${Math.random().toString(16).slice(2)}.sqlite`);
+    let sqliteServer = multiplayerApiServer.createServer({ sqliteFile });
+    let sqlitePort = await listen(sqliteServer);
+    const sqliteCreated = await requestJson(sqlitePort, 'POST', '/api/tournaments', {
+      id: 't-sqlite',
+      name: '数据库回归赛事',
+      actorId: 'referee-sqlite',
+      teams: [{ teamId: 'sqlite-team', name: '数据库队', code: 'sqlite-captain-code', camp: 'local' }],
+      refereeCode: 'sqlite-referee-code',
+    });
+    const sqliteCaptainJoin = await requestJson(sqlitePort, 'POST', '/api/tournaments/t-sqlite/join', {
+      code: sqliteCreated.body.room.captainCodes[0].code,
+      displayName: '数据库队长',
+    });
+    const sqliteRefereeJoin = await requestJson(sqlitePort, 'POST', '/api/tournaments/t-sqlite/join', {
+      code: sqliteCreated.body.room.refereeCode,
+      displayName: '数据库裁判',
+    });
+    await new Promise(resolve => sqliteServer.close(resolve));
+    sqliteServer = multiplayerApiServer.createServer({ sqliteFile });
+    sqlitePort = await listen(sqliteServer);
+    const sqliteHealth = await requestJson(sqlitePort, 'GET', '/health');
+    const sqliteRoom = await requestJson(sqlitePort, 'GET', `/api/tournaments/t-sqlite/room?sessionToken=${encodeURIComponent(sqliteRefereeJoin.body.session.sessionToken)}`);
+    const sqliteExport = await requestJson(sqlitePort, 'GET', '/api/tournaments/t-sqlite/export', null, {
+      headers: { Authorization: `Bearer ${sqliteRefereeJoin.body.session.sessionToken}` },
+    });
+    const sqliteRename = await requestJson(sqlitePort, 'POST', '/api/tournaments/t-sqlite/commands', {
+      sessionToken: sqliteCaptainJoin.body.session.sessionToken,
+      command: {
+        commandId: 'cmd-api-sqlite-rename',
+        type: multiplayerShared.COMMAND_TYPES.RENAME_TEAM,
+        baseVersion: 1,
+        payload: { teamId: 'sqlite-team', name: '数据库新名' },
+      },
+    });
+    await new Promise(resolve => sqliteServer.close(resolve));
+    try { fs.unlinkSync(sqliteFile); } catch (error) {}
+    assert(
+      sqliteCreated.status === 201
+      && sqliteCaptainJoin.status === 200
+      && sqliteRefereeJoin.status === 200
+      && sqliteHealth.body.runtime.storage === 'memory+sqlite'
+      && !sqliteHealth.body.runtime.sqliteFile
+      && sqliteRoom.status === 200
+      && sqliteExport.status === 200
+      && sqliteExport.body.backup.storage === 'memory+sqlite'
+      && sqliteRename.status === 200
+      && sqliteRename.body.tournament.snapshot.teams[0].name === '数据库新名',
+      '多人端 SQLite 数据库存储应在服务重启后恢复赛事、房间凭据摘要和 session，并导出正确存储类型'
     );
 
     const created = await requestJson(port, 'POST', '/api/tournaments', {
@@ -5495,6 +5548,8 @@ function testMultiplayerJoinGateAndCors() {
     css.includes('.join-gate-page')
     && css.includes('#app.join-gate-root')
     && css.includes('#app:has(.join-gate-page)')
+    && css.includes('html:has(#app.join-gate-root)')
+    && css.includes('body:has(.join-gate-page)')
     && css.includes('min-width: 0 !important')
     && css.includes('grid-column: 1 / -1')
     && css.includes('place-items: center')
@@ -5504,6 +5559,7 @@ function testMultiplayerJoinGateAndCors() {
     && css.includes('.created-room-panel')
     && css.includes('.room-code-row')
     && css.includes('.multiplayer-return-btn')
+    && css.includes('max-width: 100%')
     && css.includes('@media (max-width: 760px)'),
     '加入页应脱离主控制台侧边栏栅格，居中显示完整表单，不能被压成窄列逐字换行',
   );

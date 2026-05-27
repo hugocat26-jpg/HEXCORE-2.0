@@ -110,6 +110,16 @@ function publicSnapshot(state) {
   return createReadOnlyProjection(state, 'public');
 }
 
+function createTournamentStore(options = {}) {
+  if (options.store) return options.store;
+  const sqliteFile = String(options.sqliteFile || process.env.HEXCORE_SQLITE_FILE || '').trim();
+  if (sqliteFile) {
+    const { SqliteTournamentStore } = require('./sqlite-store');
+    return new SqliteTournamentStore({ sqliteFile });
+  }
+  return new MemoryTournamentStore({ dataFile: options.dataFile || process.env.HEXCORE_DATA_FILE || '' });
+}
+
 function projectionOptionsFromRequest(req, parsed, store, tournamentId, view) {
   if (view !== 'captain') return {};
   const sessionToken = sessionTokenFromRequest(req, parsed);
@@ -128,10 +138,10 @@ function projectionOptionsFromRequest(req, parsed, store, tournamentId, view) {
 }
 
 function createServer(options = {}) {
-  const store = options.store || new MemoryTournamentStore({ dataFile: options.dataFile || process.env.HEXCORE_DATA_FILE || '' });
+  const store = createTournamentStore(options);
   const startedAtMs = Date.now();
   const startedAt = new Date(startedAtMs).toISOString();
-  return http.createServer(async (req, res) => {
+  const server = http.createServer(async (req, res) => {
     try {
       const parsed = new URL(req.url, `http://${host}:${port}`);
       const pathname = parsed.pathname;
@@ -307,6 +317,10 @@ function createServer(options = {}) {
       sendJson(res, statusFromError(error), { ok: false, error: error && error.message ? error.message : String(error) });
     }
   });
+  if (store && typeof store.close === 'function') {
+    server.on('close', () => store.close());
+  }
+  return server;
 }
 
 if (require.main === module) {
@@ -318,6 +332,7 @@ if (require.main === module) {
 
 module.exports = {
   commandEventMap,
+  createTournamentStore,
   createServer,
   createReadOnlyProjection,
   publicSnapshot,

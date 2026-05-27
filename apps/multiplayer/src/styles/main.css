@@ -233,6 +233,14 @@ select:focus-visible {
   min-width: 0;
 }
 
+html:has(#app.join-gate-root),
+body:has(#app.join-gate-root),
+html:has(.join-gate-page),
+body:has(.join-gate-page) {
+  min-width: 0;
+  overflow-x: hidden;
+}
+
 .launch-warning {
   grid-column: 1 / -1;
   min-height: 100vh;
@@ -8949,6 +8957,6 @@ h2 span {
 
 #app.join-gate-root .join-gate-page,
 #app:has(.join-gate-page) .join-gate-page {
-  width: 100vw;
-  max-width: 100vw;
+  width: 100%;
+  max-width: 100%;
 }

@@ -27,6 +27,7 @@ class MemoryTournamentStore {
       tournamentId: id,
       rulesVersion: input.rulesVersion,
       snapshot: {
+        tournamentId: id,
         name: String(input.name || 'HEXCORE 多人测试赛事').trim().slice(0, 80),
         createdAt: new Date().toISOString(),
         currentTeamId: teamIdFromInput(input),
@@ -116,16 +117,20 @@ class MemoryTournamentStore {
     return {
       backupVersion: 'hexcore-multiplayer-backup-v1',
       exportedAt: new Date().toISOString(),
-      storage: 'memory',
+      storage: this.storageLabel(),
       checksum: checksumJson(tournament),
       tournament,
     };
   }
 
+  storageLabel() {
+    return this.dataFile ? 'memory+file' : 'memory';
+  }
+
   publicStats() {
     const subscriberCount = Array.from(this.subscribers.values()).reduce((sum, bucket) => sum + bucket.size, 0);
     return {
-      storage: this.dataFile ? 'memory+file' : 'memory',
+      storage: this.storageLabel(),
       tournamentCount: this.tournaments.size,
       roomCount: this.roomAccess.size,
       subscriberCount,
