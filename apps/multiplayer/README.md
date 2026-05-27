@@ -22,13 +22,22 @@ E:\only_why\HEXCORE2.0\
 本地启动：
 
 ```powershell
-npm run start:multiplayer
+npm run start:multiplayer:stack
 ```
 
 默认访问：
 
 ```text
-http://127.0.0.1:4186/
+本机访问：http://127.0.0.1:4186/
+手机访问：http://电脑局域网IP:4186/
+加入页服务地址：http://电脑局域网IP:4196
+```
+
+多人端堆栈默认监听 `0.0.0.0`，会在控制台打印可供手机访问的局域网页面和 API 地址。若手机仍无法访问，需要用管理员 PowerShell 放行端口：
+
+```powershell
+New-NetFirewallRule -DisplayName "HEXCORE 多人端页面 4186" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 4186
+New-NetFirewallRule -DisplayName "HEXCORE 多人端 API 4196" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 4196
 ```
 
 提交前必须运行：

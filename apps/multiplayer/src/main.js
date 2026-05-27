@@ -1069,12 +1069,38 @@
     global.localStorage.setItem(MULTIPLAYER_SESSION_KEY, JSON.stringify(session));
   }
 
-  function recentMultiplayerApiBase() {
+  function defaultMultiplayerApiBase() {
     try {
-      const value = global.localStorage && global.localStorage.getItem(MULTIPLAYER_API_BASE_KEY);
-      return String(value || 'http://127.0.0.1:4196').trim() || 'http://127.0.0.1:4196';
+      const location = global.location || {};
+      const protocol = location.protocol && /^https?:$/.test(location.protocol) ? location.protocol : 'http:';
+      const hostname = location.hostname || '127.0.0.1';
+      return `${protocol}//${hostname}:4196`;
     } catch (error) {
       return 'http://127.0.0.1:4196';
+    }
+  }
+
+  function shouldPreferCurrentHostApiBase(savedValue, fallbackValue) {
+    try {
+      const currentHost = (global.location && global.location.hostname) || '';
+      if (!currentHost || /^(localhost|127\.0\.0\.1)$/.test(currentHost)) return false;
+      const savedHost = new URL(savedValue).hostname;
+      const fallbackHost = new URL(fallbackValue).hostname;
+      return /^(localhost|127\.0\.0\.1)$/.test(savedHost) && savedHost !== fallbackHost;
+    } catch (error) {
+      return false;
+    }
+  }
+
+  function recentMultiplayerApiBase() {
+    const fallback = defaultMultiplayerApiBase();
+    try {
+      const value = global.localStorage && global.localStorage.getItem(MULTIPLAYER_API_BASE_KEY);
+      const saved = String(value || '').trim();
+      if (saved && !shouldPreferCurrentHostApiBase(saved, fallback)) return saved;
+      return fallback;
+    } catch (error) {
+      return fallback;
     }
   }
 

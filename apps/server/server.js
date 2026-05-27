@@ -16,7 +16,7 @@ const {
 const { acceptCommandAsEvent, appendEvent } = require('../../packages/rules');
 const { createAuthoritativeCommandPayload } = require('./shop-service');
 
-const host = process.env.HOST || '127.0.0.1';
+const host = process.env.HOST || '0.0.0.0';
 const port = Number(process.env.MULTIPLAYER_API_PORT || process.env.PORT || 4196);
 
 const commandEventMap = {

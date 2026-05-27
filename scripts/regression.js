@@ -5508,6 +5508,7 @@ function testMultiplayerJoinGateAndCors() {
   const css = fs.readFileSync(path.join(root, 'apps/multiplayer/src/styles/main.css'), 'utf8');
   const packageJson = fs.readFileSync(path.join(root, 'package.json'), 'utf8');
   const stackScript = fs.readFileSync(path.join(root, 'scripts/start-multiplayer-stack.js'), 'utf8');
+  const multiplayerServe = fs.readFileSync(path.join(root, 'scripts/serve-multiplayer.js'), 'utf8');
   assert(
     ui.includes('joinGatePage()')
     && ui.includes("classList.toggle('join-gate-root', shouldShowJoinGate())")
@@ -5541,6 +5542,9 @@ function testMultiplayerJoinGateAndCors() {
     && main.includes('MULTIPLAYER_API_BASE_KEY')
     && main.includes('recentMultiplayerApiBase()')
     && main.includes('rememberMultiplayerApiBase(apiBase)')
+    && main.includes('defaultMultiplayerApiBase()')
+    && main.includes('location.hostname')
+    && main.includes('shouldPreferCurrentHostApiBase')
     && main.includes('服务地址无法连接')
     && main.includes('赛事 ID 不存在')
     && main.includes('加入码无效')
@@ -5561,6 +5565,14 @@ function testMultiplayerJoinGateAndCors() {
     && main.includes('persistJoinedSession(apiBase, tournamentId, payload)')
     && main.includes('房间码明文只显示一次'),
     '加入房间应调用服务端 join 接口，保存 sessionToken，按返回角色进入对应端，并能清理会话返回多人房间',
+  );
+  assert(
+    stackScript.includes("process.env.HOST || '0.0.0.0'")
+    && stackScript.includes('os.networkInterfaces()')
+    && stackScript.includes('局域网访问页面')
+    && multiplayerServe.includes("process.env.HOST || '0.0.0.0'")
+    && server.includes("process.env.HOST || '0.0.0.0'"),
+    '多人端默认启动应监听局域网地址，并在控制台打印手机可访问的页面和 API 地址',
   );
   assert(
     server.includes('Access-Control-Allow-Origin')

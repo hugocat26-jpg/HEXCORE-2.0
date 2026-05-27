@@ -2,7 +2,9 @@ const path = require('path');
 const { spawn } = require('child_process');
 
 const root = path.resolve(__dirname, '..');
-const host = process.env.HOST || '127.0.0.1';
+const os = require('os');
+
+const host = process.env.HOST || '0.0.0.0';
 const appPort = String(process.env.MULTIPLAYER_APP_PORT || '4186');
 const apiPort = String(process.env.MULTIPLAYER_API_PORT || '4196');
 
@@ -43,3 +45,10 @@ start('多人端 API 服务', 'apps/server/server.js', { MULTIPLAYER_API_PORT: a
 
 console.log(`HEXCORE 多人端页面：http://${host}:${appPort}/`);
 console.log(`HEXCORE 多人端 API：http://${host}:${apiPort}/health`);
+Object.values(os.networkInterfaces())
+  .flat()
+  .filter(item => item && item.family === 'IPv4' && !item.internal)
+  .forEach(item => {
+    console.log(`局域网访问页面：http://${item.address}:${appPort}/`);
+    console.log(`局域网 API 地址：http://${item.address}:${apiPort}`);
+  });
