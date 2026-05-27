@@ -1748,7 +1748,7 @@
         <div class="top-spacer"></div>
         <div class="live-status ${Hexcore2.state.draft.phase === 'completed' ? 'done' : ''}"><span></span>${statusText}</div>
         <div class="clock">${time}</div>
-        <button class="ghost-btn ${refreshDisabledReason ? 'disabled' : ''}" ${refreshDisabledReason ? 'disabled' : ''} title="${escapeHtml(refreshDisabledReason || '刷新当前商店')}" onclick="${refreshDisabledReason ? '' : 'window.hexcoreUI.refreshShop()'}">${Hexcore2.icon('refresh')}刷新商店</button>
+        ${isCaptainClient() || isReadonlyClient() ? '' : `<button class="ghost-btn ${refreshDisabledReason ? 'disabled' : ''}" ${refreshDisabledReason ? 'disabled' : ''} title="${escapeHtml(refreshDisabledReason || '刷新当前商店')}" onclick="${refreshDisabledReason ? '' : 'window.hexcoreUI.refreshShop()'}">${Hexcore2.icon('refresh')}刷新商店</button>`}
       </header>
     `;
   }

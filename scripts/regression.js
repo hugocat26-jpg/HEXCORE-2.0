@@ -5484,6 +5484,7 @@ function testMultiplayerViewerUiIsReadonlyCurrentCaptainPerspective() {
     ui.includes('readonlyShopReason()')
     && ui.includes('观众端只读，无法操作')
     && ui.includes('const canBuy = Boolean(captain && roundState && !isReadonlyClient()')
+    && ui.includes("isCaptainClient() || isReadonlyClient() ? '' : `<button class=\"ghost-btn")
     && ui.includes("isReadonlyClient() ? '' : refereeControls()"),
     '观众端商店卡、开店刷新购买和流程按钮都应为只读，不允许写操作入口',
   );
