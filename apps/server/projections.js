@@ -161,6 +161,16 @@ function publicHexcoreWindows(windows = []) {
   })).filter(window => window.teamId && window.hexcoreId);
 }
 
+function publicRefereeRuling(ruling = null) {
+  if (!ruling || typeof ruling !== 'object') return null;
+  return {
+    eventSeq: Number(ruling.eventSeq) || 0,
+    reason: String(ruling.reason || '').trim().slice(0, 160),
+    patchSummary: String(ruling.patchSummary || '').trim().slice(0, 240),
+    createdAt: String(ruling.createdAt || '').trim().slice(0, 40),
+  };
+}
+
 function resolvePerspectiveTeamId(snapshot = {}, requestedTeamId = '') {
   const currentTeamId = String(snapshot.currentTeamId || '').trim();
   const teamId = String(requestedTeamId || '').trim();
@@ -174,6 +184,7 @@ function projectSnapshotData(snapshot = {}, view = VIEW_TYPES.PUBLIC, options = 
     teams: publicTeams(snapshot),
     currentShop: publicCurrentShop(snapshot.currentShop),
     lastPurchase: publicLastPurchase(snapshot.lastPurchase),
+    lastRefereeRuling: publicRefereeRuling(snapshot.lastRefereeRuling),
     roundStates: publicRoundStates(snapshot.roundStates),
     hexcoreActionWindows: publicHexcoreWindows(snapshot.hexcoreActionWindows),
     perspectiveTeamId: resolvePerspectiveTeamId(snapshot, options.teamId),

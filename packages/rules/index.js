@@ -357,6 +357,14 @@ function applyEventToSnapshot(snapshot, event) {
       });
     }
   }
+  if (event.type === EVENT_TYPES.REFEREE_RULING_FORCED) {
+    next.lastRefereeRuling = {
+      eventSeq: event.eventSeq,
+      reason: safeText(payload.reason, '', 160),
+      patchSummary: safeText(payload.patchSummary, '', 240),
+      createdAt: event.createdAt,
+    };
+  }
   return next;
 }
 

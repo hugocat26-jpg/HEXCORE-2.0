@@ -1108,7 +1108,7 @@ function testSystemIntegrityCheck() {
   H.actions.setActiveView('settings');
   H.actions.runSystemCheck();
 
-  assert(H.meta.version === '2.0.10' && app.innerHTML.includes('HEXCORE 2.0 v2.0.10 裁判端'), '系统设置页应展示统一项目版本号');
+  assert(H.meta.version === '2.0.11' && app.innerHTML.includes('HEXCORE 2.0 v2.0.11 裁判端'), '系统设置页应展示统一项目版本号');
   assert(H.state.ui.systemCheckResult && !H.state.ui.systemCheckResult.ok, '状态检查应保存可视化结果');
   assert(H.state.ui.systemCheckResult.issues.some(issue => issue.type === '重复归属'), '状态检查应识别重复归属');
   assert(H.state.ui.systemCheckResult.issues.some(issue => issue.type === '跨阵营'), '状态检查应识别跨阵营');
@@ -3653,12 +3653,42 @@ async function testMultiplayerApiServer() {
       && auditAfterResume.body.auditLog.some(entry => entry.eventType === multiplayerShared.EVENT_TYPES.TOURNAMENT_RESUMED && entry.reason === '复核完成继续'),
       '裁判恢复应解除 paused 状态并写入审计摘要'
     );
+    const forcedRuling = await requestJson(port, 'POST', '/api/tournaments/t-api/commands', {
+      sessionToken: refereeJoin.body.session.sessionToken,
+      command: {
+        commandId: 'cmd-api-force-ruling',
+        type: multiplayerShared.COMMAND_TYPES.FORCE_REFEREE_RULING,
+        baseVersion: 8,
+        payload: {
+          reason: '裁判公告：本轮按现场判定继续',
+          patchSummary: '仅公告，不直接改写队伍或选手状态',
+          hiddenSeed: 'ruling-hidden-seed',
+          players: [{ id: 'should-not-leak-player' }],
+        },
+      },
+    });
+    const rulingText = JSON.stringify(forcedRuling.body);
+    assert(
+      forcedRuling.status === 200
+      && forcedRuling.body.tournament.stateVersion === 9
+      && forcedRuling.body.tournament.snapshot.lastRefereeRuling.reason === '裁判公告：本轮按现场判定继续'
+      && forcedRuling.body.tournament.snapshot.lastRefereeRuling.patchSummary === '仅公告，不直接改写队伍或选手状态'
+      && !rulingText.includes('ruling-hidden-seed')
+      && !rulingText.includes('should-not-leak-player'),
+      '强制裁决第一版应只公开裁判公告原因和摘要，不能借 payload 泄漏隐藏字段或任意改写状态'
+    );
+    const auditAfterRuling = await requestJson(port, 'GET', `/api/tournaments/t-api/audit?sessionToken=${encodeURIComponent(refereeJoin.body.session.sessionToken)}`);
+    assert(
+      auditAfterRuling.body.auditLog.some(entry => entry.eventType === multiplayerShared.EVENT_TYPES.REFEREE_RULING_FORCED && entry.patchSummary === '仅公告，不直接改写队伍或选手状态'),
+      '强制裁决应进入裁判审计摘要'
+    );
     const viewerProjection = await requestJson(port, 'GET', '/api/tournaments/t-api/projection?view=viewer');
     const projectionText = JSON.stringify(viewerProjection.body);
     assert(viewerProjection.status === 200 && viewerProjection.body.tournament.view === 'viewer', '观众投影接口应返回 viewer 视图');
     assert(viewerProjection.body.tournament.perspective && viewerProjection.body.tournament.perspective.teamId === 'team-1', '观众投影应使用当前回合队长视角');
     assert(projectionText.includes('公开摘要'), '观众投影应保留允许公开的摘要字段');
-    assert(!projectionText.includes('should-not-leak') && !projectionText.includes('hidden-player') && !projectionText.includes('hidden-seed'), '观众投影不应泄漏房间码、真实暗牌或内部随机字段');
+    assert(projectionText.includes('裁判公告：本轮按现场判定继续') && projectionText.includes('仅公告，不直接改写队伍或选手状态'), '观众投影应展示裁判强制裁决公告');
+    assert(!projectionText.includes('should-not-leak') && !projectionText.includes('hidden-player') && !projectionText.includes('hidden-seed') && !projectionText.includes('ruling-hidden-seed') && !projectionText.includes('should-not-leak-player'), '观众投影不应泄漏房间码、真实暗牌、内部随机字段或裁决 payload 额外字段');
     const badProjection = await requestJson(port, 'GET', '/api/tournaments/t-api/projection?view=referee');
     assert(badProjection.status === 400 && /未知只读投影视图/.test(badProjection.body.error), '只读投影接口不应接受裁判视图参数');
 
