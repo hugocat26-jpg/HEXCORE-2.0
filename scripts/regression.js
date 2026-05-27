@@ -1108,7 +1108,7 @@ function testSystemIntegrityCheck() {
   H.actions.setActiveView('settings');
   H.actions.runSystemCheck();
 
-  assert(H.meta.version === '2.0.9' && app.innerHTML.includes('HEXCORE 2.0 v2.0.9 裁判端'), '系统设置页应展示统一项目版本号');
+  assert(H.meta.version === '2.0.10' && app.innerHTML.includes('HEXCORE 2.0 v2.0.10 裁判端'), '系统设置页应展示统一项目版本号');
   assert(H.state.ui.systemCheckResult && !H.state.ui.systemCheckResult.ok, '状态检查应保存可视化结果');
   assert(H.state.ui.systemCheckResult.issues.some(issue => issue.type === '重复归属'), '状态检查应识别重复归属');
   assert(H.state.ui.systemCheckResult.issues.some(issue => issue.type === '跨阵营'), '状态检查应识别跨阵营');
@@ -3591,6 +3591,68 @@ async function testMultiplayerApiServer() {
       },
     });
     assert(importedSecret.status === 200 && importedSecret.body.tournament.stateVersion === 6, '裁判导入命令应能推进公开投影测试状态');
+    const paused = await requestJson(port, 'POST', '/api/tournaments/t-api/commands', {
+      sessionToken: refereeJoin.body.session.sessionToken,
+      command: {
+        commandId: 'cmd-api-pause',
+        type: multiplayerShared.COMMAND_TYPES.PAUSE_TOURNAMENT,
+        baseVersion: 6,
+        payload: {
+          reason: '裁判暂停复核',
+        },
+      },
+    });
+    assert(
+      paused.status === 200
+      && paused.body.tournament.stateVersion === 7
+      && paused.body.tournament.paused === true
+      && paused.body.event.type === multiplayerShared.EVENT_TYPES.TOURNAMENT_PAUSED
+      && !JSON.stringify(paused.body.tournament).includes('auditLog'),
+      '裁判暂停应推进权威版本并同步 paused 状态，但公开投影不应直接暴露审计日志'
+    );
+    const anonymousAudit = await requestJson(port, 'GET', '/api/tournaments/t-api/audit');
+    assert(anonymousAudit.status === 401 && !anonymousAudit.body.auditLog, '匿名用户不应读取裁判审计日志');
+    const viewerAudit = await requestJson(port, 'GET', `/api/tournaments/t-api/audit?sessionToken=${encodeURIComponent(viewerJoin.body.session.sessionToken)}`);
+    assert(viewerAudit.status === 403 && !viewerAudit.body.auditLog, '观众不应读取裁判审计日志');
+    const refereeAudit = await requestJson(port, 'GET', `/api/tournaments/t-api/audit?sessionToken=${encodeURIComponent(refereeJoin.body.session.sessionToken)}`);
+    const auditText = JSON.stringify(refereeAudit.body);
+    assert(
+      refereeAudit.status === 200
+      && refereeAudit.body.auditLog.length >= 2
+      && refereeAudit.body.auditLog.some(entry => entry.eventType === multiplayerShared.EVENT_TYPES.STATE_IMPORTED && entry.reason === '')
+      && refereeAudit.body.auditLog.some(entry => entry.eventType === multiplayerShared.EVENT_TYPES.TOURNAMENT_PAUSED && entry.reason === '裁判暂停复核' && entry.commandRole === multiplayerShared.ROLES.REFEREE)
+      && !auditText.includes(refereeJoin.body.session.sessionToken),
+      '裁判应能读取高影响动作审计摘要，审计日志不应回传 sessionToken'
+    );
+    const captainWhilePaused = await requestJson(port, 'POST', '/api/tournaments/t-api/commands', {
+      sessionToken: captainJoin.body.session.sessionToken,
+      command: {
+        commandId: 'cmd-api-paused-captain',
+        type: multiplayerShared.COMMAND_TYPES.OPEN_SHOP,
+        baseVersion: 7,
+        payload: { teamId: 'team-1', round: 1 },
+      },
+    });
+    assert(captainWhilePaused.status === 400 && /赛事已暂停/.test(captainWhilePaused.body.error), '赛事暂停后队长端普通操作应被服务端拒绝');
+    const resumed = await requestJson(port, 'POST', '/api/tournaments/t-api/commands', {
+      sessionToken: refereeJoin.body.session.sessionToken,
+      command: {
+        commandId: 'cmd-api-resume',
+        type: multiplayerShared.COMMAND_TYPES.RESUME_TOURNAMENT,
+        baseVersion: 7,
+        payload: {
+          reason: '复核完成继续',
+        },
+      },
+    });
+    const auditAfterResume = await requestJson(port, 'GET', `/api/tournaments/t-api/audit?sessionToken=${encodeURIComponent(refereeJoin.body.session.sessionToken)}`);
+    assert(
+      resumed.status === 200
+      && resumed.body.tournament.stateVersion === 8
+      && resumed.body.tournament.paused === false
+      && auditAfterResume.body.auditLog.some(entry => entry.eventType === multiplayerShared.EVENT_TYPES.TOURNAMENT_RESUMED && entry.reason === '复核完成继续'),
+      '裁判恢复应解除 paused 状态并写入审计摘要'
+    );
     const viewerProjection = await requestJson(port, 'GET', '/api/tournaments/t-api/projection?view=viewer');
     const projectionText = JSON.stringify(viewerProjection.body);
     assert(viewerProjection.status === 200 && viewerProjection.body.tournament.view === 'viewer', '观众投影接口应返回 viewer 视图');

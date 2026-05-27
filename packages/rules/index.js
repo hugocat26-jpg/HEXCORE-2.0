@@ -38,6 +38,7 @@ function createAuthorityState(input = {}) {
     paused: false,
     processedCommands: {},
     events: [],
+    auditLog: [],
     snapshot: input.snapshot ? clone(input.snapshot) : {},
   };
 }
@@ -359,6 +360,37 @@ function applyEventToSnapshot(snapshot, event) {
   return next;
 }
 
+const AUDITED_EVENT_TYPES = new Set([
+  EVENT_TYPES.STATE_IMPORTED,
+  EVENT_TYPES.TOURNAMENT_PAUSED,
+  EVENT_TYPES.TOURNAMENT_RESUMED,
+  EVENT_TYPES.REFEREE_RULING_FORCED,
+  EVENT_TYPES.MATCH_SCORE_RECORDED,
+]);
+
+function auditEntryFromEvent(event, auditSeq) {
+  if (!AUDITED_EVENT_TYPES.has(event.type)) return null;
+  const payload = event.payload || {};
+  return {
+    auditSeq,
+    eventSeq: event.eventSeq,
+    eventType: event.type,
+    stateVersion: event.stateVersion,
+    actorId: event.actorId,
+    sourceCommandId: event.sourceCommandId || '',
+    commandType: safeText(payload.commandType, '', 80),
+    commandRole: safeText(payload.commandRole, '', 40),
+    teamId: safeText(payload.teamId, '', 80),
+    matchId: safeText(payload.matchId, '', 80),
+    reason: safeText(payload.reason, '', 160),
+    patchSummary: safeText(payload.patchSummary, '', 240),
+    scoreA: Number.isFinite(Number(payload.scoreA)) ? Number(payload.scoreA) : null,
+    scoreB: Number.isFinite(Number(payload.scoreB)) ? Number(payload.scoreB) : null,
+    winnerTeamId: safeText(payload.winnerTeamId, '', 80),
+    createdAt: event.createdAt,
+  };
+}
+
 function appendEvent(state, eventInput) {
   assertAuthorityState(state);
   const next = clone(state);
@@ -371,6 +403,9 @@ function appendEvent(state, eventInput) {
   next.eventSeq = event.eventSeq;
   next.stateVersion = event.stateVersion;
   next.events.push(event);
+  next.auditLog = Array.isArray(next.auditLog) ? next.auditLog : [];
+  const auditEntry = auditEntryFromEvent(event, next.auditLog.length + 1);
+  if (auditEntry) next.auditLog.push(auditEntry);
   next.snapshot = applyEventToSnapshot(next.snapshot, event);
   if (event.sourceCommandId) {
     next.processedCommands[event.sourceCommandId] = event;

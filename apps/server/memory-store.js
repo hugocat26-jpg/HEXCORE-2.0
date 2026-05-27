@@ -87,18 +87,15 @@ class MemoryTournamentStore {
   getRoomAccess(id, sessionToken) {
     const access = this.roomAccess.get(id);
     if (!access) return null;
-    const session = this.getSession(sessionToken, id);
-    if (!session) {
-      const error = new Error('需要有效裁判或管理员 sessionToken 才能查看房间码管理信息');
-      error.statusCode = 401;
-      throw error;
-    }
-    if (![ROLES.REFEREE, ROLES.TOURNAMENT_ADMIN, ROLES.SUPER_ADMIN].includes(session.role)) {
-      const error = new Error('当前身份无权查看房间码管理信息');
-      error.statusCode = 403;
-      throw error;
-    }
+    this.requireManagementSession(id, sessionToken, '房间码管理信息');
     return roomAccessSummary(access);
+  }
+
+  getAuditLog(id, sessionToken) {
+    const state = this.tournaments.get(id);
+    if (!state) return null;
+    this.requireManagementSession(id, sessionToken, '裁判审计日志');
+    return clone(Array.isArray(state.auditLog) ? state.auditLog : []);
   }
 
   joinTournament(id, input = {}) {
@@ -137,6 +134,21 @@ class MemoryTournamentStore {
       role: session.role,
       teamId: session.teamId,
     };
+  }
+
+  requireManagementSession(tournamentId, sessionToken, resourceName) {
+    const session = this.getSession(sessionToken, tournamentId);
+    if (!session) {
+      const error = new Error(`需要有效裁判或管理员 sessionToken 才能查看${resourceName}`);
+      error.statusCode = 401;
+      throw error;
+    }
+    if (![ROLES.REFEREE, ROLES.TOURNAMENT_ADMIN, ROLES.SUPER_ADMIN].includes(session.role)) {
+      const error = new Error(`当前身份无权查看${resourceName}`);
+      error.statusCode = 403;
+      throw error;
+    }
+    return session;
   }
 }
 

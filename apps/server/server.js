@@ -178,6 +178,17 @@ function createServer(options = {}) {
         return;
       }
 
+      const auditTournamentId = req.method === 'GET' ? matchTournamentRoute(pathname, '/audit') : null;
+      if (auditTournamentId) {
+        const auditLog = store.getAuditLog(auditTournamentId, sessionTokenFromRequest(req, parsed));
+        if (!auditLog) {
+          sendJson(res, 404, { ok: false, error: '赛事不存在' });
+          return;
+        }
+        sendJson(res, 200, { ok: true, auditLog });
+        return;
+      }
+
       const joinTournamentId = req.method === 'POST' ? matchTournamentRoute(pathname, '/join') : null;
       if (joinTournamentId) {
         const body = await readJson(req);
