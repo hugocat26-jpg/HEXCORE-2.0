@@ -5382,9 +5382,12 @@ function testMultiplayerCaptainUiReusesRefereeScreensWithScopedAccess() {
     && !ui.includes('当前页面直接复用裁判端画面')
     && ui.includes("isCaptainClient() ? '' : workflowGatePanel()")
     && ui.includes("canBuy ? `onclick=\"window.hexcoreUI.buyCard")
+    && ui.includes('const showShopPanelButton = !isReadonlyClient() && (!isCaptainClient() || !shopPanelBlockReason)')
+    && ui.includes("if (isReadonlyClient() || (isCaptainClient() && shopDisabled && !skipEnabled)) return '';")
+    && ui.includes("isCaptainClient() || isReadonlyClient() ? '' : `<div class=\"captain-title\">刷新：")
     && ui.includes("isCaptainClient() ? '' : '<button class=\"export-btn\"")
     && !ui.includes("captainAllowedView(view) && view === 'logs'"),
-    '队长端实时抽选应按本人回合开放按钮，说明区只介绍队长端，并移除流程门禁、撤回、日志导出等裁判专属入口',
+    '队长端实时抽选应按本人回合开放按钮，非本人回合隐藏商店/流程禁用按钮和顶栏刷新状态，并移除流程门禁、撤回、日志导出等裁判专属入口',
   );
   assert(
     ui.includes("['draft', 'teams', 'hexcores', 'tournament', 'rules'].includes(view)")
@@ -5485,8 +5488,11 @@ function testMultiplayerViewerUiIsReadonlyCurrentCaptainPerspective() {
     && ui.includes('观众端只读，无法操作')
     && ui.includes('const canBuy = Boolean(captain && roundState && !isReadonlyClient()')
     && ui.includes("isCaptainClient() || isReadonlyClient() ? '' : `<button class=\"ghost-btn")
+    && ui.includes('const showShopPanelButton = !isReadonlyClient() && (!isCaptainClient() || !shopPanelBlockReason)')
+    && ui.includes("if (isReadonlyClient() || (isCaptainClient() && shopDisabled && !skipEnabled)) return '';")
+    && ui.includes("isCaptainClient() || isReadonlyClient() ? '' : `<div class=\"captain-title\">刷新：")
     && ui.includes("isReadonlyClient() ? '' : refereeControls()"),
-    '观众端商店卡、开店刷新购买和流程按钮都应为只读，不允许写操作入口',
+    '观众端商店卡、开店刷新购买、流程按钮和顶栏刷新状态都应为只读隐藏，不允许写操作入口',
   );
   assert(
     main.includes('rejectViewerClient(actionLabel)')

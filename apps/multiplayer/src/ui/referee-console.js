@@ -1743,7 +1743,7 @@
         <div class="phase">当前阶段：<strong>第 ${Hexcore2.state.draft.round} 轮 / 金币商店</strong></div>
         <div class="captain-title">当前队长：<strong>${captain ? escapeHtml(captain.name) : '无'}</strong></div>
         <div class="captain-title">金币：<strong>${economy ? economy.gold : 0}</strong></div>
-        <div class="captain-title">刷新：<strong>${escapeHtml(refreshLabel)}</strong></div>
+        ${isCaptainClient() || isReadonlyClient() ? '' : `<div class="captain-title">刷新：<strong>${escapeHtml(refreshLabel)}</strong></div>`}
         ${currentHexcoreStatus(captain)}
         <div class="top-spacer"></div>
         <div class="live-status ${Hexcore2.state.draft.phase === 'completed' ? 'done' : ''}"><span></span>${statusText}</div>
@@ -1929,6 +1929,7 @@
       : shopActionBlockReason(captain, roundState, inSetup));
     const shopPanelButton = shopActionText(captain, roundState, nextRefreshCost, nextRefreshReason, inSetup);
     const shopPanelClick = shopPanelBlockReason ? '' : (inSetup ? 'window.hexcoreUI.startDraft()' : 'window.hexcoreUI.drawCards()');
+    const showShopPanelButton = !isReadonlyClient() && (!isCaptainClient() || !shopPanelBlockReason);
     if (shouldAnimateShop) draw.revealAnimationPlayed = true;
     const shopSlotCount = 6;
     const slotCount = isOpenPick ? cards.length : Math.max(shopSlotCount, cards.length);
@@ -1946,7 +1947,7 @@
       <section class="draw-panel">
         <div class="panel-title-row">
           <h2>${escapeHtml(currentDrawLabel())} <span>${draw && draw.reason ? escapeHtml(draw.reason) : '每次展示最多 5 张，按轮次概率生成'}</span></h2>
-          <button class="subtle-btn ${shopPanelBlockReason ? 'disabled' : ''}" ${shopPanelBlockReason ? 'disabled' : ''} title="${escapeHtml(shopPanelBlockReason || shopPanelButton.hint)}" onclick="${shopPanelClick}">${Hexcore2.icon('cube')}${escapeHtml(shopPanelBlockReason ? '处理轮初海克斯' : shopPanelButton.title)}</button>
+          ${showShopPanelButton ? `<button class="subtle-btn ${shopPanelBlockReason ? 'disabled' : ''}" ${shopPanelBlockReason ? 'disabled' : ''} title="${escapeHtml(shopPanelBlockReason || shopPanelButton.hint)}" onclick="${shopPanelClick}">${Hexcore2.icon('cube')}${escapeHtml(shopPanelBlockReason ? '处理轮初海克斯' : shopPanelButton.title)}</button>` : ''}
         </div>
         <div class="draw-timeout-bar">
           <strong>${captain ? `${escapeHtml(captain.name)} · ${economy ? economy.gold : 0} 金币` : '无当前队长'}</strong>
@@ -2077,6 +2078,8 @@
       ? '非你的回合，仅可查看'
       : shopActionBlockReason(captain, roundState, inSetup));
     const shopDisabled = Boolean(shopBlockedReason);
+    const skipEnabled = Boolean(!isReadonlyClient() && roundState && captainCanOperateCurrentTurn() && !roundState.purchaseUsed && !roundState.skipped);
+    if (isReadonlyClient() || (isCaptainClient() && shopDisabled && !skipEnabled)) return '';
     const shopTitle = shopDisabled ? '已无购买权' : shopButton.title;
     const shopHint = shopDisabled ? shopBlockedReason : shopButton.hint;
     const shopClick = shopDisabled ? '' : (inSetup ? 'window.hexcoreUI.startDraft()' : 'window.hexcoreUI.drawCards()');
@@ -2090,7 +2093,7 @@
           </div>
           <div class="control-group primary-actions">
             <span class="control-group-label">流程</span>
-            <button class="action-btn amber ${!isReadonlyClient() && roundState && captainCanOperateCurrentTurn() && !roundState.purchaseUsed && !roundState.skipped ? '' : 'disabled'}" ${!isReadonlyClient() && roundState && captainCanOperateCurrentTurn() && !roundState.purchaseUsed && !roundState.skipped ? '' : 'disabled'} onclick="window.hexcoreUI.skipTurn()"><span class="fast-icon">»</span><strong>跳过本轮</strong><span>${isReadonlyClient() ? '观众只读' : (captainCanOperateCurrentTurn() ? '购买权限作废' : '非你的回合')}</span></button>
+            <button class="action-btn amber ${skipEnabled ? '' : 'disabled'}" ${skipEnabled ? '' : 'disabled'} onclick="window.hexcoreUI.skipTurn()"><span class="fast-icon">»</span><strong>跳过本轮</strong><span>${isReadonlyClient() ? '观众只读' : (captainCanOperateCurrentTurn() ? '购买权限作废' : '非你的回合')}</span></button>
             ${isCaptainClient() || isReadonlyClient() ? '' : `<button class="action-btn blue" onclick="window.hexcoreUI.nextCaptain()">${icon('team')}<strong>下一位</strong><span>交给下一队长</span></button>`}
           </div>
           ${isCaptainClient() || isReadonlyClient() ? '' : `<div class="control-group system-actions">
