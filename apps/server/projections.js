@@ -135,7 +135,22 @@ function publicLastPurchase(purchase = null) {
     resolvedAt: String(purchase.resolvedAt || '').trim(),
     pricePaid: Math.max(0, Number(purchase.pricePaid) || 0),
     goldAfter: Math.max(0, Number(purchase.goldAfter) || 0),
+    hungryWave: publicHungryWaveSummary(purchase.hungryWave),
     masked,
+  };
+}
+
+function publicHungryWaveSummary(summary = null) {
+  if (!summary || typeof summary !== 'object') return null;
+  return {
+    type: String(summary.type || '').trim().slice(0, 40),
+    sourceTeamId: String(summary.sourceTeamId || '').trim().slice(0, 80),
+    buyerTeamId: String(summary.buyerTeamId || '').trim().slice(0, 80),
+    playerId: String(summary.playerId || '').trim().slice(0, 80),
+    round: Number(summary.round) || 1,
+    priceRefunded: Math.max(0, Number(summary.priceRefunded) || 0),
+    pendingRoundReward: Boolean(summary.pendingRoundReward),
+    resolvedAt: String(summary.resolvedAt || '').trim().slice(0, 40),
   };
 }
 
@@ -267,6 +282,7 @@ function projectSnapshotData(snapshot = {}, view = VIEW_TYPES.PUBLIC, options = 
     teams: publicTeams(snapshot),
     currentShop: publicCurrentShop(snapshot.currentShop),
     lastPurchase: publicLastPurchase(snapshot.lastPurchase),
+    lastHungryWave: publicHungryWaveSummary(snapshot.lastHungryWave),
     lastRefereeRuling: publicRefereeRuling(snapshot.lastRefereeRuling),
     lastRollback: publicRollback(snapshot.lastRollback),
     lastRoundIncome: publicRoundIncome(snapshot.lastRoundIncome),

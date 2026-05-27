@@ -31,6 +31,7 @@ class MemoryTournamentStore {
         teams: normalizeTeams(input),
         players: normalizePlayers(input),
         hexcoreAssignments: normalizeHexcoreAssignments(input),
+        hungryWaveRound: normalizeHungryWaveRound(input),
         tournament: normalizeTournament(input.tournament || (input.snapshot && input.snapshot.tournament)),
       },
     });
@@ -261,6 +262,29 @@ function normalizeHexcoreAssignments(input = {}) {
       status: String((item && item.status) || 'available').trim().slice(0, 40),
     })).filter(item => item.id).slice(0, 4),
   ]).filter(([teamId]) => teamId));
+}
+
+function normalizeHungryWaveRound(input = {}) {
+  const source = input.hungryWaveRound && typeof input.hungryWaveRound === 'object'
+    ? input.hungryWaveRound
+    : (input.snapshot && input.snapshot.hungryWaveRound && typeof input.snapshot.hungryWaveRound === 'object' ? input.snapshot.hungryWaveRound : null);
+  if (!source) return null;
+  const captainId = String(source.captainId || source.teamId || '').trim().slice(0, 80);
+  const round = safePositiveNumber(source.round, 1, 8);
+  if (!captainId || !round) return null;
+  return {
+    type: 'hungry_wave_round',
+    captainId,
+    round,
+    active: source.active === false ? false : true,
+    consumed: Boolean(source.consumed),
+    triggered: Boolean(source.triggered),
+    pendingRoundReward: Boolean(source.pendingRoundReward),
+    checkedTeamIds: Array.isArray(source.checkedTeamIds)
+      ? source.checkedTeamIds.map(teamId => String(teamId || '').trim().slice(0, 80)).filter(Boolean).slice(0, 20)
+      : [],
+    resolvedAt: String(source.resolvedAt || '').trim().slice(0, 40),
+  };
 }
 
 function normalizeTournament(input = {}) {

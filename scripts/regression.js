@@ -3826,6 +3826,152 @@ async function testMultiplayerApiServer() {
       '骤雨血雾清风应由服务端登记最多3名目标的商店扰乱，目标公开商店隐藏身份但不泄漏内部扰乱状态'
     );
 
+    const hungrySameCreated = await requestJson(port, 'POST', '/api/tournaments', {
+      id: 't-hungry-wave-same',
+      name: '同阵营海浪权威回归',
+      actorId: 'referee-hungry-same',
+      settings: { initialGold: 9, refreshCosts: [1, 2, 3, 4] },
+      teams: [
+        { teamId: 'wave-source', name: '海浪来源', camp: 'local', code: 'wave-source-code', economy: { gold: 0 } },
+        { teamId: 'wave-buyer', name: '海浪购买者', camp: 'local', code: 'wave-buyer-code', economy: { gold: 9 } },
+      ],
+      hexcoreAssignments: {
+        'wave-source': [{ id: 'hungry-wave', status: 'passive' }],
+      },
+      hungryWaveRound: {
+        captainId: 'wave-source',
+        round: 1,
+        active: true,
+      },
+      players: [
+        { id: 'wave-local-1', name: '海浪本地一号', gameId: 'HW1', camp: 'local', tier: 2, score: 82, status: 'available' },
+      ],
+    });
+    const hungrySameSourceJoin = await requestJson(port, 'POST', '/api/tournaments/t-hungry-wave-same/join', {
+      code: hungrySameCreated.body.room.captainCodes[0].code,
+      displayName: '海浪来源队长',
+    });
+    const hungrySameBuyerJoin = await requestJson(port, 'POST', '/api/tournaments/t-hungry-wave-same/join', {
+      code: hungrySameCreated.body.room.captainCodes[1].code,
+      displayName: '海浪购买队长',
+    });
+    const hungrySameSkip = await requestJson(port, 'POST', '/api/tournaments/t-hungry-wave-same/commands', {
+      sessionToken: hungrySameSourceJoin.body.session.sessionToken,
+      command: {
+        commandId: 'cmd-api-hungry-same-skip',
+        type: multiplayerShared.COMMAND_TYPES.SKIP_TURN,
+        baseVersion: 1,
+        payload: { teamId: 'wave-source', round: 1 },
+      },
+    });
+    const hungrySameShop = await requestJson(port, 'POST', '/api/tournaments/t-hungry-wave-same/commands', {
+      sessionToken: hungrySameBuyerJoin.body.session.sessionToken,
+      command: {
+        commandId: 'cmd-api-hungry-same-shop',
+        type: multiplayerShared.COMMAND_TYPES.OPEN_SHOP,
+        baseVersion: 2,
+        payload: { teamId: 'wave-buyer', round: 1 },
+      },
+    });
+    const hungrySamePurchase = await requestJson(port, 'POST', '/api/tournaments/t-hungry-wave-same/commands', {
+      sessionToken: hungrySameBuyerJoin.body.session.sessionToken,
+      command: {
+        commandId: 'cmd-api-hungry-same-purchase',
+        type: multiplayerShared.COMMAND_TYPES.PURCHASE_SHOP_CARD,
+        baseVersion: 3,
+        payload: { teamId: 'wave-buyer', slotId: hungrySameShop.body.tournament.snapshot.currentShop.cards[0].slotId },
+      },
+    });
+    const hungrySameText = JSON.stringify(hungrySamePurchase.body);
+    assert(
+      hungrySameSkip.status === 200
+      && hungrySameShop.status === 200
+      && hungrySamePurchase.status === 200
+      && hungrySamePurchase.body.tournament.snapshot.teams[0].team.includes('wave-local-1')
+      && !hungrySamePurchase.body.tournament.snapshot.teams[1].team.includes('wave-local-1')
+      && hungrySamePurchase.body.tournament.snapshot.teams[1].economy.gold === 9
+      && hungrySamePurchase.body.tournament.snapshot.roundStates['wave-buyer']['1'].purchaseUsed === false
+      && hungrySamePurchase.body.tournament.snapshot.lastHungryWave.type === 'same_camp_steal'
+      && hungrySamePurchase.body.tournament.snapshot.lastPurchase.hungryWave.type === 'same_camp_steal'
+      && !hungrySameText.includes('hungryWaveRound')
+      && !hungrySameText.includes('hexcoreAssignments')
+      && !hungrySameText.includes('"players"'),
+      '服务端海浪同阵营命中时应夺取真实购买选手、返还购买者金币和购买权，并且公开投影不泄漏内部海浪监听状态'
+    );
+
+    const hungryOppositeCreated = await requestJson(port, 'POST', '/api/tournaments', {
+      id: 't-hungry-wave-opposite',
+      name: '异阵营海浪权威回归',
+      actorId: 'referee-hungry-opposite',
+      settings: { initialGold: 9, refreshCosts: [1, 2, 3, 4] },
+      teams: [
+        { teamId: 'wave-local', name: '本地海浪', camp: 'local', code: 'wave-local-code', economy: { gold: 0 } },
+        { teamId: 'wave-outsider', name: '外地购买者', camp: 'outsider', code: 'wave-outsider-code', economy: { gold: 9 } },
+      ],
+      hexcoreAssignments: {
+        'wave-local': [{ id: 'hungry-wave', status: 'passive' }],
+      },
+      hungryWaveRound: {
+        captainId: 'wave-local',
+        round: 1,
+        active: true,
+      },
+      players: [
+        { id: 'wave-outsider-1', name: '海浪外地一号', gameId: 'HO1', camp: 'outsider', tier: 3, score: 83, status: 'available' },
+      ],
+    });
+    const hungryOppositeSourceJoin = await requestJson(port, 'POST', '/api/tournaments/t-hungry-wave-opposite/join', {
+      code: hungryOppositeCreated.body.room.captainCodes[0].code,
+      displayName: '本地海浪队长',
+    });
+    const hungryOppositeBuyerJoin = await requestJson(port, 'POST', '/api/tournaments/t-hungry-wave-opposite/join', {
+      code: hungryOppositeCreated.body.room.captainCodes[1].code,
+      displayName: '外地购买队长',
+    });
+    const hungryOppositeSkip = await requestJson(port, 'POST', '/api/tournaments/t-hungry-wave-opposite/commands', {
+      sessionToken: hungryOppositeSourceJoin.body.session.sessionToken,
+      command: {
+        commandId: 'cmd-api-hungry-opposite-skip',
+        type: multiplayerShared.COMMAND_TYPES.SKIP_TURN,
+        baseVersion: 1,
+        payload: { teamId: 'wave-local', round: 1 },
+      },
+    });
+    const hungryOppositeShop = await requestJson(port, 'POST', '/api/tournaments/t-hungry-wave-opposite/commands', {
+      sessionToken: hungryOppositeBuyerJoin.body.session.sessionToken,
+      command: {
+        commandId: 'cmd-api-hungry-opposite-shop',
+        type: multiplayerShared.COMMAND_TYPES.OPEN_SHOP,
+        baseVersion: 2,
+        payload: { teamId: 'wave-outsider', round: 1 },
+      },
+    });
+    const hungryOppositePurchase = await requestJson(port, 'POST', '/api/tournaments/t-hungry-wave-opposite/commands', {
+      sessionToken: hungryOppositeBuyerJoin.body.session.sessionToken,
+      command: {
+        commandId: 'cmd-api-hungry-opposite-purchase',
+        type: multiplayerShared.COMMAND_TYPES.PURCHASE_SHOP_CARD,
+        baseVersion: 3,
+        payload: { teamId: 'wave-outsider', slotId: hungryOppositeShop.body.tournament.snapshot.currentShop.cards[0].slotId },
+      },
+    });
+    const hungryOppositeText = JSON.stringify(hungryOppositePurchase.body);
+    assert(
+      hungryOppositeSkip.status === 200
+      && hungryOppositeShop.status === 200
+      && hungryOppositePurchase.status === 200
+      && !hungryOppositePurchase.body.tournament.snapshot.teams[0].team.includes('wave-outsider-1')
+      && !hungryOppositePurchase.body.tournament.snapshot.teams[1].team.includes('wave-outsider-1')
+      && hungryOppositePurchase.body.tournament.snapshot.teams[1].economy.gold === 9
+      && hungryOppositePurchase.body.tournament.snapshot.roundStates['wave-outsider']['1'].purchaseUsed === false
+      && hungryOppositePurchase.body.tournament.snapshot.lastHungryWave.type === 'opposite_camp_return'
+      && hungryOppositePurchase.body.tournament.snapshot.lastHungryWave.pendingRoundReward === true
+      && !hungryOppositeText.includes('hungryWaveRound')
+      && !hungryOppositeText.includes('hexcoreAssignments')
+      && !hungryOppositeText.includes('"players"'),
+      '服务端海浪异阵营命中时应退回真实购买选手、返还购买者金币和购买权，并只公开安全结算摘要'
+    );
+
     const poorCreated = await requestJson(port, 'POST', '/api/tournaments', {
       id: 't-poor-refresh',
       name: '刷新金币不足回归',

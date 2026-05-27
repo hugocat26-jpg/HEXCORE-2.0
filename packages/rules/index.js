@@ -144,6 +144,7 @@ function normalizeShopCard(card = {}, index = 0) {
     purchased: safeBoolean(card.purchased),
     purchasedAt: safeText(card.purchasedAt, '', 40),
     snowCatShuffled: safeBoolean(card.snowCatShuffled),
+    weatherFogged: safeBoolean(card.weatherFogged),
   };
 }
 
@@ -262,6 +263,26 @@ function nextTurnPointer(snapshot, teamId) {
   };
 }
 
+function normalizeHungryWaveRound(input = {}) {
+  if (!input || typeof input !== 'object') return null;
+  const captainId = safeText(input.captainId || input.teamId, '', 80);
+  const round = safePositiveNumber(input.round, 1, 8);
+  if (!captainId || !round) return null;
+  return {
+    type: 'hungry_wave_round',
+    captainId,
+    round,
+    active: input.active === false ? false : true,
+    consumed: safeBoolean(input.consumed),
+    triggered: safeBoolean(input.triggered),
+    pendingRoundReward: safeBoolean(input.pendingRoundReward),
+    checkedTeamIds: Array.isArray(input.checkedTeamIds)
+      ? input.checkedTeamIds.map(teamId => safeText(teamId, '', 80)).filter(Boolean).slice(0, 20)
+      : [],
+    resolvedAt: safeText(input.resolvedAt, '', 40),
+  };
+}
+
 function applyRoundIncome(snapshot, round) {
   const incomeRound = safePositiveNumber(round, 1, 8);
   if (incomeRound <= 1) return snapshot;
@@ -372,6 +393,33 @@ function teamIdsFrom(snapshot = {}) {
     : [];
 }
 
+function teamById(snapshot = {}, teamId = '') {
+  const cleanTeamId = safeText(teamId, '', 80);
+  return Array.isArray(snapshot.teams)
+    ? snapshot.teams.find(team => safeText(team && (team.teamId || team.id), '', 80) === cleanTeamId)
+    : null;
+}
+
+function teamCamp(snapshot = {}, teamId = '') {
+  const team = teamById(snapshot, teamId);
+  return safeText(team && team.camp, '', 40);
+}
+
+function playerById(snapshot = {}, playerId = '') {
+  const cleanPlayerId = safeText(playerId, '', 80);
+  return Array.isArray(snapshot.players)
+    ? snapshot.players.find(player => safeText(player && (player.id || player.playerId), '', 80) === cleanPlayerId)
+    : null;
+}
+
+function activeHungryWave(snapshot = {}, round = 1) {
+  const wave = normalizeHungryWaveRound(snapshot.hungryWaveRound);
+  if (!wave || !wave.active || wave.consumed || wave.triggered) return null;
+  if (wave.round !== safePositiveNumber(round, 1, 8)) return null;
+  if (!teamHasHexcore(snapshot, wave.captainId, 'hungry-wave')) return null;
+  return wave;
+}
+
 function stormFogTargetIds(snapshot, sourceTeamId, startTeamId) {
   const order = teamIdsFrom(snapshot);
   const source = safeText(sourceTeamId, '', 80);
@@ -421,6 +469,142 @@ function assignPurchasedPlayer(snapshot, teamId, playerId) {
     });
   }
   return snapshot;
+}
+
+function removePlayerFromTeam(snapshot, teamId, playerId) {
+  const cleanTeamId = safeText(teamId, '', 80);
+  const cleanPlayerId = safeText(playerId, '', 80);
+  if (!cleanTeamId || !cleanPlayerId || !Array.isArray(snapshot.teams)) return snapshot;
+  snapshot.teams = snapshot.teams.map(team => {
+    const currentId = safeText(team && (team.teamId || team.id), '', 80);
+    if (currentId !== cleanTeamId) return team;
+    const currentTeam = Array.isArray(team.team)
+      ? team.team.map(item => safeText(item, '', 80)).filter(Boolean)
+      : [];
+    return {
+      ...team,
+      team: currentTeam.filter(item => item !== cleanPlayerId),
+    };
+  });
+  return snapshot;
+}
+
+function addPlayerToTeam(snapshot, teamId, playerId) {
+  const cleanTeamId = safeText(teamId, '', 80);
+  const cleanPlayerId = safeText(playerId, '', 80);
+  if (!cleanTeamId || !cleanPlayerId || !Array.isArray(snapshot.teams)) return snapshot;
+  snapshot.teams = snapshot.teams.map(team => {
+    const currentId = safeText(team && (team.teamId || team.id), '', 80);
+    if (currentId !== cleanTeamId) return team;
+    const currentTeam = Array.isArray(team.team)
+      ? team.team.map(item => safeText(item, '', 80)).filter(Boolean)
+      : [];
+    return {
+      ...team,
+      team: currentTeam.includes(cleanPlayerId) ? currentTeam : [...currentTeam, cleanPlayerId],
+    };
+  });
+  return snapshot;
+}
+
+function refundTeamGold(snapshot, teamId, amount) {
+  const economy = ensureTeamEconomy(snapshot, teamId);
+  if (!economy) return 0;
+  economy.gold += safePositiveNumber(amount, 0, 999);
+  return economy.gold;
+}
+
+function releasePlayerToPool(snapshot, playerId) {
+  const cleanPlayerId = safeText(playerId, '', 80);
+  if (!cleanPlayerId || !Array.isArray(snapshot.players)) return snapshot;
+  snapshot.players = snapshot.players.map(player => {
+    const currentId = safeText(player && (player.id || player.playerId), '', 80);
+    if (currentId !== cleanPlayerId) return player;
+    return {
+      ...player,
+      status: 'available',
+      teamId: '',
+    };
+  });
+  return snapshot;
+}
+
+function replacePlayerTeam(snapshot, playerId, teamId) {
+  const cleanPlayerId = safeText(playerId, '', 80);
+  const cleanTeamId = safeText(teamId, '', 80);
+  if (!cleanPlayerId || !cleanTeamId || !Array.isArray(snapshot.players)) return snapshot;
+  snapshot.players = snapshot.players.map(player => {
+    const currentId = safeText(player && (player.id || player.playerId), '', 80);
+    if (currentId !== cleanPlayerId) return player;
+    return {
+      ...player,
+      status: 'drafted',
+      teamId: cleanTeamId,
+    };
+  });
+  return snapshot;
+}
+
+function remainingHungryWaveCandidates(snapshot = {}, wave = {}) {
+  const checked = new Set(Array.isArray(wave.checkedTeamIds) ? wave.checkedTeamIds : []);
+  return teamIdsFrom(snapshot).filter(teamId => teamId !== wave.captainId && !checked.has(teamId));
+}
+
+function resolveHungryWaveAfterPurchase(snapshot, buyerId, playerId, pricePaid, event) {
+  const round = safePositiveNumber(snapshot.currentRound, 1, 8);
+  const wave = activeHungryWave(snapshot, round);
+  const cleanBuyerId = safeText(buyerId, '', 80);
+  const cleanPlayerId = safeText(playerId, '', 80);
+  if (!wave || !cleanBuyerId || !cleanPlayerId || wave.captainId === cleanBuyerId) return null;
+  const remaining = remainingHungryWaveCandidates(snapshot, wave);
+  if (!remaining.includes(cleanBuyerId)) return null;
+  const nextChecked = [...new Set([...(wave.checkedTeamIds || []), cleanBuyerId])];
+  const shouldHit = remaining.length <= 1;
+  if (!shouldHit) {
+    snapshot.hungryWaveRound = {
+      ...wave,
+      checkedTeamIds: nextChecked,
+    };
+    return {
+      type: 'miss',
+      sourceTeamId: wave.captainId,
+      buyerTeamId: cleanBuyerId,
+      playerId: cleanPlayerId,
+      round,
+      resolvedAt: event.createdAt,
+    };
+  }
+  const player = playerById(snapshot, cleanPlayerId);
+  const sameCamp = player && teamCamp(snapshot, wave.captainId) && teamCamp(snapshot, wave.captainId) === safeText(player.camp, '', 40);
+  refundTeamGold(snapshot, cleanBuyerId, pricePaid);
+  removePlayerFromTeam(snapshot, cleanBuyerId, cleanPlayerId);
+  setRoundState(snapshot, cleanBuyerId, round, { freeShopUsed: true, purchaseUsed: false, skipped: false });
+  const result = {
+    type: sameCamp ? 'same_camp_steal' : 'opposite_camp_return',
+    sourceTeamId: wave.captainId,
+    buyerTeamId: cleanBuyerId,
+    playerId: cleanPlayerId,
+    round,
+    priceRefunded: safePositiveNumber(pricePaid, 0, 999),
+    resolvedAt: event.createdAt,
+    pendingRoundReward: !sameCamp,
+  };
+  if (sameCamp) {
+    addPlayerToTeam(snapshot, wave.captainId, cleanPlayerId);
+    replacePlayerTeam(snapshot, cleanPlayerId, wave.captainId);
+  } else {
+    releasePlayerToPool(snapshot, cleanPlayerId);
+  }
+  snapshot.hungryWaveRound = {
+    ...wave,
+    checkedTeamIds: nextChecked,
+    consumed: true,
+    triggered: true,
+    pendingRoundReward: !sameCamp,
+    resolvedAt: event.createdAt,
+  };
+  snapshot.lastHungryWave = result;
+  return result;
 }
 
 function canApplyClientProjection(payload = {}) {
@@ -550,6 +734,7 @@ function applyEventToSnapshot(snapshot, event) {
     const purchasePlayerId = purchasedCard ? purchasedCard.playerId : '';
     const purchaseDisplayPlayerId = purchasedCard ? purchasedCard.displayPlayerId : '';
     assignPurchasedPlayer(next, teamId, purchasePlayerId);
+    const hungryWaveResult = resolveHungryWaveAfterPurchase(next, teamId, purchasePlayerId, pricePaid, event);
     next.lastPurchase = {
       teamId,
       slotId,
@@ -559,8 +744,11 @@ function applyEventToSnapshot(snapshot, event) {
       resolvedAt: event.createdAt,
       pricePaid,
       goldAfter: ensureTeamEconomy(next, teamId) ? ensureTeamEconomy(next, teamId).gold : 0,
+      hungryWave: hungryWaveResult || null,
     };
-    setRoundState(next, teamId, round, { freeShopUsed: true, purchaseUsed: true, skipped: false });
+    if (!hungryWaveResult || hungryWaveResult.type === 'miss') {
+      setRoundState(next, teamId, round, { freeShopUsed: true, purchaseUsed: true, skipped: false });
+    }
     if (canApplyClientProjection(payload)) applyHexcoreWindows(next, payload.hexcoreActionWindows);
   }
   if (event.type === EVENT_TYPES.TURN_SKIPPED) {
