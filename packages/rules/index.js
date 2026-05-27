@@ -427,6 +427,18 @@ function hungryWaveAlreadyStarted(snapshot = {}, round = 1) {
   return Boolean(wave && wave.round === safePositiveNumber(round, 1, 8) && wave.active);
 }
 
+function isHungryWaveImmuneTeam(snapshot = {}, teamId = '', round = 1) {
+  const cleanTeamId = safeText(teamId, '', 80);
+  if (!cleanTeamId) return false;
+  if (teamHasHexcore(snapshot, cleanTeamId, 'hungry-wave')) return true;
+  const wave = normalizeHungryWaveRound(snapshot.hungryWaveRound);
+  return Boolean(wave
+    && wave.active
+    && !wave.consumed
+    && wave.round === safePositiveNumber(round, 1, 8)
+    && wave.captainId === cleanTeamId);
+}
+
 function stormFogTargetIds(snapshot, sourceTeamId, startTeamId) {
   const order = teamIdsFrom(snapshot);
   const source = safeText(sourceTeamId, '', 80);
@@ -436,7 +448,7 @@ function stormFogTargetIds(snapshot, sourceTeamId, startTeamId) {
   const targets = [];
   for (let offset = 0; offset < order.length && targets.length < 3; offset += 1) {
     const teamId = order[(startIndex + offset) % order.length];
-    if (teamId && teamId !== source) targets.push(teamId);
+    if (teamId && teamId !== source && !isHungryWaveImmuneTeam(snapshot, teamId, snapshot.currentRound)) targets.push(teamId);
   }
   return targets;
 }
@@ -830,6 +842,7 @@ function applyEventToSnapshot(snapshot, event) {
       const targetTeamId = safeText(payload.targetTeamId || payload.targetCaptainId, '', 80);
       if (!targetTeamId || !teamExists(next, targetTeamId)) throw new Error('雪定饿的喵需要选择有效目标队伍');
       if (targetTeamId === teamId) throw new Error('雪定饿的喵不能对自己使用');
+      if (isHungryWaveImmuneTeam(next, targetTeamId, next.currentRound)) throw new Error('雪定饿的喵不能对海浪免疫队伍使用');
       if (!canApplyClientProjection(payload) && !teamHasHexcore(next, teamId, hexcoreId)) {
         throw new Error('当前队伍未持有雪定饿的喵');
       }
@@ -852,6 +865,7 @@ function applyEventToSnapshot(snapshot, event) {
       const targetTeamId = safeText(payload.targetTeamId || payload.targetCaptainId, '', 80);
       if (!targetTeamId || !teamExists(next, targetTeamId)) throw new Error('骤雨 血雾 清风需要选择有效目标队伍');
       if (targetTeamId === teamId) throw new Error('骤雨 血雾 清风不能对自己使用');
+      if (isHungryWaveImmuneTeam(next, targetTeamId, next.currentRound)) throw new Error('骤雨 血雾 清风不能直接指定海浪免疫队伍');
       if (!canApplyClientProjection(payload) && !teamHasHexcore(next, teamId, hexcoreId)) {
         throw new Error('当前队伍未持有骤雨 血雾 清风');
       }

@@ -3673,9 +3673,11 @@ async function testMultiplayerApiServer() {
       teams: [
         { teamId: 'snow-source', name: '雪猫来源', camp: 'local', code: 'snow-source-code', economy: { gold: 9 } },
         { teamId: 'snow-target', name: '雪猫目标', camp: 'local', code: 'snow-target-code', economy: { gold: 9 } },
+        { teamId: 'snow-wave', name: '海浪免疫', camp: 'local', code: 'snow-wave-code', economy: { gold: 9 } },
       ],
       hexcoreAssignments: {
         'snow-source': [{ id: 'snow-cat', status: 'available' }],
+        'snow-wave': [{ id: 'hungry-wave', status: 'passive' }],
       },
       players: [
         { id: 'snow-local-1', name: '雪猫一号', gameId: 'S1', camp: 'local', tier: 1, score: 71, status: 'available' },
@@ -3692,6 +3694,15 @@ async function testMultiplayerApiServer() {
     const snowTargetJoin = await requestJson(port, 'POST', '/api/tournaments/t-snow-cat/join', {
       code: snowCreated.body.room.captainCodes[1].code,
       displayName: '雪猫目标队长',
+    });
+    const snowWaveRejected = await requestJson(port, 'POST', '/api/tournaments/t-snow-cat/commands', {
+      sessionToken: snowSourceJoin.body.session.sessionToken,
+      command: {
+        commandId: 'cmd-api-use-snow-cat-wave',
+        type: multiplayerShared.COMMAND_TYPES.USE_HEXCORE,
+        baseVersion: 1,
+        payload: { teamId: 'snow-source', hexcoreId: 'snow-cat', targetTeamId: 'snow-wave' },
+      },
     });
     const snowUsed = await requestJson(port, 'POST', '/api/tournaments/t-snow-cat/commands', {
       sessionToken: snowSourceJoin.body.session.sessionToken,
@@ -3733,6 +3744,8 @@ async function testMultiplayerApiServer() {
     const snowText = JSON.stringify(snowTargetShop.body);
     assert(
       snowUsed.status === 200
+      && snowWaveRejected.status === 400
+      && /海浪免疫/.test(snowWaveRejected.body.error)
       && snowUsedAgain.status === 400
       && /未持有/.test(snowUsedAgain.body.error)
       && snowSkip.status === 200
@@ -3824,6 +3837,107 @@ async function testMultiplayerApiServer() {
       && !stormText.includes('shopDisturbances')
       && !stormText.includes('hexcoreAssignments'),
       '骤雨血雾清风应由服务端登记最多3名目标的商店扰乱，目标公开商店隐藏身份但不泄漏内部扰乱状态'
+    );
+
+    const stormHungryCreated = await requestJson(port, 'POST', '/api/tournaments', {
+      id: 't-storm-fog-hungry',
+      name: '血雾跳过海浪权威回归',
+      actorId: 'referee-storm-hungry',
+      teams: [
+        { teamId: 'storm-h-source', name: '血雾来源', camp: 'local', code: 'storm-h-source-code', economy: { gold: 9 } },
+        { teamId: 'storm-h-a', name: '血雾A', camp: 'local', code: 'storm-h-a-code', economy: { gold: 9 } },
+        { teamId: 'storm-h-wave', name: '海浪免疫', camp: 'local', code: 'storm-h-wave-code', economy: { gold: 9 } },
+        { teamId: 'storm-h-b', name: '血雾B', camp: 'local', code: 'storm-h-b-code', economy: { gold: 9 } },
+      ],
+      hexcoreAssignments: {
+        'storm-h-source': [{ id: 'storm-fog', status: 'available' }],
+        'storm-h-wave': [{ id: 'hungry-wave', status: 'passive' }],
+      },
+      players: [
+        { id: 'storm-h-local-1', name: '血雾海浪一号', gameId: 'HF1', camp: 'local', tier: 1, score: 71, status: 'available' },
+        { id: 'storm-h-local-2', name: '血雾海浪二号', gameId: 'HF2', camp: 'local', tier: 2, score: 72, status: 'available' },
+        { id: 'storm-h-local-3', name: '血雾海浪三号', gameId: 'HF3', camp: 'local', tier: 3, score: 73, status: 'available' },
+        { id: 'storm-h-local-4', name: '血雾海浪四号', gameId: 'HF4', camp: 'local', tier: 4, score: 74, status: 'available' },
+        { id: 'storm-h-local-5', name: '血雾海浪五号', gameId: 'HF5', camp: 'local', tier: 5, score: 75, status: 'available' },
+      ],
+    });
+    const stormHungrySourceJoin = await requestJson(port, 'POST', '/api/tournaments/t-storm-fog-hungry/join', {
+      code: stormHungryCreated.body.room.captainCodes[0].code,
+      displayName: '血雾海浪来源',
+    });
+    const stormHungryAJoin = await requestJson(port, 'POST', '/api/tournaments/t-storm-fog-hungry/join', {
+      code: stormHungryCreated.body.room.captainCodes[1].code,
+      displayName: '血雾A队长',
+    });
+    const stormHungryWaveJoin = await requestJson(port, 'POST', '/api/tournaments/t-storm-fog-hungry/join', {
+      code: stormHungryCreated.body.room.captainCodes[2].code,
+      displayName: '海浪队长',
+    });
+    const stormHungryDirectRejected = await requestJson(port, 'POST', '/api/tournaments/t-storm-fog-hungry/commands', {
+      sessionToken: stormHungrySourceJoin.body.session.sessionToken,
+      command: {
+        commandId: 'cmd-api-use-storm-fog-hungry-direct',
+        type: multiplayerShared.COMMAND_TYPES.USE_HEXCORE,
+        baseVersion: 1,
+        payload: { teamId: 'storm-h-source', hexcoreId: 'storm-fog', targetTeamId: 'storm-h-wave' },
+      },
+    });
+    const stormHungryUsed = await requestJson(port, 'POST', '/api/tournaments/t-storm-fog-hungry/commands', {
+      sessionToken: stormHungrySourceJoin.body.session.sessionToken,
+      command: {
+        commandId: 'cmd-api-use-storm-fog-hungry',
+        type: multiplayerShared.COMMAND_TYPES.USE_HEXCORE,
+        baseVersion: 1,
+        payload: { teamId: 'storm-h-source', hexcoreId: 'storm-fog', targetTeamId: 'storm-h-a' },
+      },
+    });
+    const stormHungrySkipSource = await requestJson(port, 'POST', '/api/tournaments/t-storm-fog-hungry/commands', {
+      sessionToken: stormHungrySourceJoin.body.session.sessionToken,
+      command: {
+        commandId: 'cmd-api-storm-h-source-skip',
+        type: multiplayerShared.COMMAND_TYPES.SKIP_TURN,
+        baseVersion: 2,
+        payload: { teamId: 'storm-h-source', round: 1 },
+      },
+    });
+    const stormHungryAShop = await requestJson(port, 'POST', '/api/tournaments/t-storm-fog-hungry/commands', {
+      sessionToken: stormHungryAJoin.body.session.sessionToken,
+      command: {
+        commandId: 'cmd-api-storm-h-a-shop',
+        type: multiplayerShared.COMMAND_TYPES.OPEN_SHOP,
+        baseVersion: 3,
+        payload: { teamId: 'storm-h-a', round: 1 },
+      },
+    });
+    const stormHungrySkipA = await requestJson(port, 'POST', '/api/tournaments/t-storm-fog-hungry/commands', {
+      sessionToken: stormHungryAJoin.body.session.sessionToken,
+      command: {
+        commandId: 'cmd-api-storm-h-a-skip',
+        type: multiplayerShared.COMMAND_TYPES.SKIP_TURN,
+        baseVersion: 4,
+        payload: { teamId: 'storm-h-a', round: 1 },
+      },
+    });
+    const stormHungryWaveShop = await requestJson(port, 'POST', '/api/tournaments/t-storm-fog-hungry/commands', {
+      sessionToken: stormHungryWaveJoin.body.session.sessionToken,
+      command: {
+        commandId: 'cmd-api-storm-h-wave-shop',
+        type: multiplayerShared.COMMAND_TYPES.OPEN_SHOP,
+        baseVersion: 5,
+        payload: { teamId: 'storm-h-wave', round: 1 },
+      },
+    });
+    assert(
+      stormHungryDirectRejected.status === 400
+      && /海浪免疫/.test(stormHungryDirectRejected.body.error)
+      && stormHungryUsed.status === 200
+      && stormHungrySkipSource.status === 200
+      && stormHungryAShop.status === 200
+      && stormHungryAShop.body.tournament.snapshot.currentShop.cards.some(card => card.masked)
+      && stormHungrySkipA.status === 200
+      && stormHungryWaveShop.status === 200
+      && stormHungryWaveShop.body.tournament.snapshot.currentShop.cards.every(card => !card.masked),
+      '骤雨血雾清风服务端权威目标应跳过海浪免疫队伍，且不能直接指定海浪免疫目标'
     );
 
     const hungrySameCreated = await requestJson(port, 'POST', '/api/tournaments', {
