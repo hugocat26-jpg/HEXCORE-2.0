@@ -262,6 +262,39 @@ function nextTurnPointer(snapshot, teamId) {
   };
 }
 
+function applyRoundIncome(snapshot, round) {
+  const incomeRound = safePositiveNumber(round, 1, 8);
+  if (incomeRound <= 1) return snapshot;
+  snapshot.roundIncomeApplied = snapshot.roundIncomeApplied && typeof snapshot.roundIncomeApplied === 'object'
+    ? snapshot.roundIncomeApplied
+    : {};
+  const roundKey = String(incomeRound);
+  if (snapshot.roundIncomeApplied[roundKey]) return snapshot;
+  const income = safePositiveNumber(snapshot.settings && snapshot.settings.roundIncome, 3, 99);
+  if (Array.isArray(snapshot.teams)) {
+    snapshot.teams = snapshot.teams.map(team => {
+      const teamId = safeText(team && (team.teamId || team.id), '', 80);
+      if (!teamId) return team;
+      const source = team.economy && typeof team.economy === 'object' ? team.economy : {};
+      const defaultGold = safePositiveNumber(snapshot.settings && snapshot.settings.initialGold, 6, 999);
+      return {
+        ...team,
+        economy: {
+          ...source,
+          gold: safePositiveNumber(source.gold, defaultGold, 999) + income,
+          roundState: source.roundState && typeof source.roundState === 'object' ? source.roundState : {},
+        },
+      };
+    });
+  }
+  snapshot.roundIncomeApplied[roundKey] = true;
+  snapshot.lastRoundIncome = {
+    round: incomeRound,
+    income,
+  };
+  return snapshot;
+}
+
 function normalizeHexcoreActionWindow(input = {}) {
   return {
     windowId: safeText(input.windowId || input.id, '', 80),
@@ -367,8 +400,20 @@ function applyEventToSnapshot(snapshot, event) {
   if (event.type === EVENT_TYPES.SHOP_OPENED || event.type === EVENT_TYPES.SHOP_REFRESHED) {
     const teamId = safeText(payload.teamId, '', 80);
     const round = safePositiveNumber(payload.round || next.currentRound, 1, 8);
-    const trustedProjection = canApplyClientProjection(payload) || payload._serverGeneratedProjection === true;
+    const refereeProjection = canApplyClientProjection(payload);
+    const trustedProjection = refereeProjection || payload._serverGeneratedProjection === true;
     const previousRoundState = roundStateFor(next, teamId, round);
+    const currentShopForTeam = next.currentShop
+      && typeof next.currentShop === 'object'
+      && safeText(next.currentShop.teamId || next.currentShop.captainId, '', 80) === teamId;
+    if (!refereeProjection && previousRoundState.purchaseUsed && currentShopForTeam) throw new Error('本轮购买权已使用，不能再次开店或刷新');
+    if (!refereeProjection && previousRoundState.skipped) throw new Error('本轮已跳过，不能再次开店或刷新');
+    if (!refereeProjection && event.type === EVENT_TYPES.SHOP_OPENED && previousRoundState.freeShopUsed && currentShopForTeam) {
+      throw new Error('本轮免费商店已使用，不能重复开店');
+    }
+    if (!refereeProjection && event.type === EVENT_TYPES.SHOP_REFRESHED && !previousRoundState.freeShopUsed) {
+      throw new Error('刷新前必须先打开本轮商店');
+    }
     let refreshCostPaid = 0;
     let refreshCount = event.type === EVENT_TYPES.SHOP_REFRESHED
       ? safePositiveNumber(previousRoundState.refreshCount, 0, 99) + 1
@@ -453,9 +498,11 @@ function applyEventToSnapshot(snapshot, event) {
     setRoundState(next, teamId, round, { freeShopUsed: true, purchaseUsed: false, skipped: true });
     next.currentShop = null;
     const nextPointer = nextTurnPointer(next, teamId);
-    next.currentTeamId = safeText(payload.nextTeamId || nextPointer.nextTeamId, '', 80);
-    next.currentRound = safePositiveNumber(payload.nextRound || nextPointer.nextRound, round, 8);
-    if (canApplyClientProjection(payload)) applyHexcoreWindows(next, payload.hexcoreActionWindows);
+    const trustedProjection = canApplyClientProjection(payload);
+    next.currentTeamId = safeText(trustedProjection ? (payload.nextTeamId || nextPointer.nextTeamId) : nextPointer.nextTeamId, '', 80);
+    next.currentRound = safePositiveNumber(trustedProjection ? (payload.nextRound || nextPointer.nextRound) : nextPointer.nextRound, round, 8);
+    if (next.currentRound > round) applyRoundIncome(next, next.currentRound);
+    if (trustedProjection) applyHexcoreWindows(next, payload.hexcoreActionWindows);
   }
   if (event.type === EVENT_TYPES.HEXCORE_USED) {
     if (canApplyClientProjection(payload)) applyHexcoreWindows(next, payload.hexcoreActionWindows);

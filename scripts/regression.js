@@ -3646,6 +3646,24 @@ async function testMultiplayerApiServer() {
       && !generatedPurchaseText.includes('forged-purchase-player'),
       '购买服务端生成商店卡后，应扣除服务端价格、更新公开队伍成员和购买状态，但不公开完整私有选手池或伪造选手 ID'
     );
+    const refreshAfterPurchase = await requestJson(port, 'POST', '/api/tournaments/t-shop/commands', {
+      sessionToken: shopCaptainJoin.body.session.sessionToken,
+      command: {
+        commandId: 'cmd-api-refresh-after-purchase',
+        type: multiplayerShared.COMMAND_TYPES.REFRESH_SHOP,
+        baseVersion: 4,
+        payload: { teamId: 'team-local', round: 1 },
+      },
+    });
+    const afterBlockedRefresh = await requestJson(port, 'GET', '/api/tournaments/t-shop/snapshot');
+    assert(
+      refreshAfterPurchase.status === 400
+      && /购买权已使用/.test(refreshAfterPurchase.body.error)
+      && afterBlockedRefresh.body.tournament.stateVersion === 4
+      && afterBlockedRefresh.body.tournament.snapshot.roundStates['team-local']['1'].purchaseUsed
+      && afterBlockedRefresh.body.tournament.snapshot.teams[0].economy.gold === 5 - generatedPlayerPrice,
+      '服务端购买后应固化本轮权限，不能再通过刷新重置购买状态或再次扣费'
+    );
 
     const poorCreated = await requestJson(port, 'POST', '/api/tournaments', {
       id: 't-poor-refresh',
@@ -3709,7 +3727,7 @@ async function testMultiplayerApiServer() {
         commandId: 'cmd-api-skip-turn',
         type: multiplayerShared.COMMAND_TYPES.SKIP_TURN,
         baseVersion: 1,
-        payload: { teamId: 'skip-a', round: 1 },
+        payload: { teamId: 'skip-a', round: 1, nextTeamId: 'skip-a', nextRound: 8 },
       },
     });
     assert(
@@ -3719,7 +3737,31 @@ async function testMultiplayerApiServer() {
       && skippedTurn.body.tournament.snapshot.currentRound === 1
       && skippedTurn.body.tournament.snapshot.currentShop === null
       && skippedTurn.body.tournament.snapshot.roundStates['skip-a']['1'].skipped,
-      '服务端跳过本轮应清空当前商店、标记跳过并推进到下一队'
+      '服务端跳过本轮应清空当前商店、标记跳过并推进到下一队，且不能信任队长 payload 伪造下一队或下一轮'
+    );
+    const skipBJoin = await requestJson(port, 'POST', '/api/tournaments/t-skip-turn/join', {
+      code: skipCreated.body.room.captainCodes[1].code,
+      displayName: '跳过B队长',
+    });
+    const skippedRoundWrap = await requestJson(port, 'POST', '/api/tournaments/t-skip-turn/commands', {
+      sessionToken: skipBJoin.body.session.sessionToken,
+      command: {
+        commandId: 'cmd-api-skip-round-wrap',
+        type: multiplayerShared.COMMAND_TYPES.SKIP_TURN,
+        baseVersion: 2,
+        payload: { teamId: 'skip-b', round: 1 },
+      },
+    });
+    assert(
+      skippedRoundWrap.status === 200
+      && skippedRoundWrap.body.tournament.stateVersion === 3
+      && skippedRoundWrap.body.tournament.snapshot.currentTeamId === 'skip-a'
+      && skippedRoundWrap.body.tournament.snapshot.currentRound === 2
+      && skippedRoundWrap.body.tournament.snapshot.teams.every(team => team.economy.gold === 9)
+      && skippedRoundWrap.body.tournament.snapshot.lastRoundIncome.round === 2
+      && skippedRoundWrap.body.tournament.snapshot.lastRoundIncome.income === 3
+      && skippedRoundWrap.body.tournament.snapshot.roundStates['skip-b']['1'].skipped,
+      '服务端回合绕回下一轮时应由权威层统一发放轮次收入，并公开同步金币余额'
     );
 
     const trustedShop = await requestJson(port, 'POST', '/api/tournaments/t-api/commands', {

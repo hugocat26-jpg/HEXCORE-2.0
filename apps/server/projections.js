@@ -191,6 +191,14 @@ function publicRollback(rollback = null) {
   };
 }
 
+function publicRoundIncome(income = null) {
+  if (!income || typeof income !== 'object') return null;
+  return {
+    round: Math.max(1, Number(income.round) || 1),
+    income: Math.max(0, Number(income.income) || 0),
+  };
+}
+
 function publicTournament(tournament = null, view = VIEW_TYPES.PUBLIC, options = {}) {
   if (view !== VIEW_TYPES.CAPTAIN || !options.teamId || !tournament || typeof tournament !== 'object') return undefined;
   const teamId = String(options.teamId || '').trim();
@@ -261,6 +269,7 @@ function projectSnapshotData(snapshot = {}, view = VIEW_TYPES.PUBLIC, options = 
     lastPurchase: publicLastPurchase(snapshot.lastPurchase),
     lastRefereeRuling: publicRefereeRuling(snapshot.lastRefereeRuling),
     lastRollback: publicRollback(snapshot.lastRollback),
+    lastRoundIncome: publicRoundIncome(snapshot.lastRoundIncome),
     tournament: publicTournament(snapshot.tournament, view, options),
     roundStates: publicRoundStates(snapshot.roundStates),
     hexcoreActionWindows: publicHexcoreWindows(snapshot.hexcoreActionWindows),
