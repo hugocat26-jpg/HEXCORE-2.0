@@ -184,6 +184,61 @@ function publicRollback(rollback = null) {
   };
 }
 
+function publicTournament(tournament = null, view = VIEW_TYPES.PUBLIC, options = {}) {
+  if (view !== VIEW_TYPES.CAPTAIN || !options.teamId || !tournament || typeof tournament !== 'object') return undefined;
+  const teamId = String(options.teamId || '').trim();
+  const rounds = Array.isArray(tournament.rounds) ? tournament.rounds.map(round => {
+    const matches = Array.isArray(round.matches)
+      ? round.matches
+        .filter(match => tournamentMatchTouchesTeam(match, teamId))
+        .map(publicTournamentMatch)
+      : [];
+    if (!matches.length) return null;
+    return {
+      id: String(round.id || '').trim().slice(0, 80),
+      name: String(round.name || '').trim().slice(0, 40),
+      index: Number(round.index) || 0,
+      pairingMode: String(round.pairingMode || tournament.pairingMode || '').trim().slice(0, 40),
+      matches,
+    };
+  }).filter(Boolean) : [];
+  return {
+    type: String(tournament.type || '').trim().slice(0, 40),
+    status: String(tournament.status || (rounds.length ? 'running' : 'empty')).trim().slice(0, 40),
+    pairingMode: String(tournament.pairingMode || '').trim().slice(0, 40),
+    championId: tournament.championId === teamId ? teamId : '',
+    rounds,
+  };
+}
+
+function tournamentMatchTouchesTeam(match = {}, teamId = '') {
+  if (!teamId || !match || typeof match !== 'object') return false;
+  return [match.teamAId, match.teamBId, match.winnerId].some(value => String(value || '').trim() === teamId);
+}
+
+function publicTournamentMatch(match = {}) {
+  return {
+    id: String(match.id || '').trim().slice(0, 80),
+    status: String(match.status || 'pending').trim().slice(0, 40),
+    teamAId: String(match.teamAId || '').trim().slice(0, 80),
+    teamBId: String(match.teamBId || '').trim().slice(0, 80),
+    scoreA: publicScore(match.scoreA),
+    scoreB: publicScore(match.scoreB),
+    winnerId: String(match.winnerId || '').trim().slice(0, 80),
+    byeConfirmed: Boolean(match.byeConfirmed),
+    pairingMode: String(match.pairingMode || '').trim().slice(0, 40),
+    expectedCampA: String(match.expectedCampA || '').trim().slice(0, 40),
+    expectedCampB: String(match.expectedCampB || '').trim().slice(0, 40),
+  };
+}
+
+function publicScore(value) {
+  if (value === '' || value === null || typeof value === 'undefined') return '';
+  const score = Number(value);
+  if (!Number.isFinite(score) || score < 0) return '';
+  return Math.round(score);
+}
+
 function resolvePerspectiveTeamId(snapshot = {}, requestedTeamId = '') {
   const currentTeamId = String(snapshot.currentTeamId || '').trim();
   const teamId = String(requestedTeamId || '').trim();
@@ -199,6 +254,7 @@ function projectSnapshotData(snapshot = {}, view = VIEW_TYPES.PUBLIC, options = 
     lastPurchase: publicLastPurchase(snapshot.lastPurchase),
     lastRefereeRuling: publicRefereeRuling(snapshot.lastRefereeRuling),
     lastRollback: publicRollback(snapshot.lastRollback),
+    tournament: publicTournament(snapshot.tournament, view, options),
     roundStates: publicRoundStates(snapshot.roundStates),
     hexcoreActionWindows: publicHexcoreWindows(snapshot.hexcoreActionWindows),
     perspectiveTeamId: resolvePerspectiveTeamId(snapshot, options.teamId),

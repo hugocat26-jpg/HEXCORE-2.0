@@ -29,6 +29,7 @@ class MemoryTournamentStore {
         currentRound: safePositiveNumber(input.currentRound, 1, 8),
         teams: normalizeTeams(input),
         players: normalizePlayers(input),
+        tournament: normalizeTournament(input.tournament || (input.snapshot && input.snapshot.tournament)),
       },
     });
     this.tournaments.set(id, state);
@@ -186,6 +187,73 @@ function normalizePlayers(input = {}) {
     teamId: String(player.teamId || '').trim().slice(0, 80),
     isCaptain: Boolean(player.isCaptain),
   })).filter(player => player.id);
+}
+
+function normalizeTournament(input = {}) {
+  const source = input && typeof input === 'object' ? input : {};
+  const rounds = Array.isArray(source.rounds)
+    ? source.rounds.map((round, roundIndex) => ({
+      id: String(round.id || `r${roundIndex + 1}`).trim().slice(0, 80),
+      name: String(round.name || `第 ${roundIndex + 1} 轮`).trim().slice(0, 40),
+      index: safePositiveNumber(round.index || roundIndex + 1, roundIndex + 1, 99),
+      pairingMode: String(round.pairingMode || source.pairingMode || '').trim().slice(0, 40),
+      matches: Array.isArray(round.matches) ? round.matches.map((match, matchIndex) => normalizeTournamentMatch(match, roundIndex, matchIndex)) : [],
+    })).filter(round => round.id)
+    : [];
+  return {
+    type: String(source.type || '').trim().slice(0, 40),
+    status: String(source.status || (rounds.length ? 'running' : 'empty')).trim().slice(0, 40),
+    pairingMode: String(source.pairingMode || '').trim().slice(0, 40),
+    championId: String(source.championId || '').trim().slice(0, 80),
+    winnerCamp: String(source.winnerCamp || '').trim().slice(0, 40),
+    winnerReason: String(source.winnerReason || '').trim().slice(0, 80),
+    finalBandlePoints: safePositiveNumber(source.finalBandlePoints, 0, 999),
+    finalInvaderPoints: safePositiveNumber(source.finalInvaderPoints, 0, 999),
+    finalBattle: normalizeFinalBattle(source.finalBattle),
+    rounds,
+  };
+}
+
+function normalizeTournamentMatch(match = {}, roundIndex = 0, matchIndex = 0) {
+  return {
+    id: String(match.id || `r${roundIndex + 1}m${matchIndex + 1}`).trim().slice(0, 80),
+    status: String(match.status || 'pending').trim().slice(0, 40),
+    teamAId: String(match.teamAId || '').trim().slice(0, 80),
+    teamBId: String(match.teamBId || '').trim().slice(0, 80),
+    scoreA: normalizeScore(match.scoreA),
+    scoreB: normalizeScore(match.scoreB),
+    winnerId: String(match.winnerId || '').trim().slice(0, 80),
+    byeConfirmed: Boolean(match.byeConfirmed),
+    pairingMode: String(match.pairingMode || '').trim().slice(0, 40),
+    expectedCampA: String(match.expectedCampA || '').trim().slice(0, 40),
+    expectedCampB: String(match.expectedCampB || '').trim().slice(0, 40),
+    yordleCount: safePositiveNumber(match.yordleCount, 0, 5),
+    bandlePoints: safePositiveNumber(match.bandlePoints, 0, 99),
+    invaderPoints: safePositiveNumber(match.invaderPoints, 0, 99),
+  };
+}
+
+function normalizeFinalBattle(finalBattle = {}) {
+  const source = finalBattle && typeof finalBattle === 'object' ? finalBattle : {};
+  return {
+    enabled: Boolean(source.enabled),
+    bonusPoints: safePositiveNumber(source.bonusPoints, 10, 99),
+    bandleTeamId: String(source.bandleTeamId || '').trim().slice(0, 80),
+    invaderTeamId: String(source.invaderTeamId || '').trim().slice(0, 80),
+    winnerCamp: String(source.winnerCamp || '').trim().slice(0, 40),
+    games: Array.isArray(source.games) ? source.games.map((game, index) => ({
+      id: String(game.id || `bo5-${index + 1}`).trim().slice(0, 80),
+      bandleScore: normalizeScore(game.bandleScore),
+      invaderScore: normalizeScore(game.invaderScore),
+      winnerCamp: String(game.winnerCamp || '').trim().slice(0, 40),
+      status: String(game.status || 'pending').trim().slice(0, 40),
+    })).slice(0, 5) : [],
+  };
+}
+
+function normalizeScore(value) {
+  if (value === '' || value === null || typeof value === 'undefined') return '';
+  return safePositiveNumber(value, 0, 999);
 }
 
 function teamIdFromInput(input = {}) {

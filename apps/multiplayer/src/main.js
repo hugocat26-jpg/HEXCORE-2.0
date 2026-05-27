@@ -1333,6 +1333,16 @@
     return previous !== JSON.stringify(Hexcore2.state.multiplayer.lastPurchase || null);
   }
 
+  function applyTournamentProjection(tournament) {
+    if (!tournament || typeof tournament !== 'object') return false;
+    const previous = JSON.stringify(Hexcore2.state.tournament || {});
+    Hexcore2.state.tournament = JSON.parse(JSON.stringify(tournament));
+    Hexcore2.state.tournament.rounds = Array.isArray(Hexcore2.state.tournament.rounds)
+      ? Hexcore2.state.tournament.rounds
+      : [];
+    return previous !== JSON.stringify(Hexcore2.state.tournament || {});
+  }
+
   function applyRoomProjection(tournament) {
     if (!tournament || typeof tournament !== 'object') return false;
     const snapshot = tournament.snapshot || {};
@@ -1341,6 +1351,7 @@
     if (applyRoundStatesProjection(snapshot.roundStates)) changed = true;
     if (Object.prototype.hasOwnProperty.call(snapshot, 'currentShop') && applyCurrentShopProjection(snapshot.currentShop)) changed = true;
     if (Object.prototype.hasOwnProperty.call(snapshot, 'lastPurchase') && applyLastPurchaseProjection(snapshot.lastPurchase)) changed = true;
+    if (Object.prototype.hasOwnProperty.call(snapshot, 'tournament') && applyTournamentProjection(snapshot.tournament)) changed = true;
     if (applyHexcoreWindowProjection(snapshot.hexcoreActionWindows)) changed = true;
     if (Number.isInteger(Number(snapshot.currentRound)) && Hexcore2.state.draft.round !== Number(snapshot.currentRound)) {
       Hexcore2.state.draft.round = Number(snapshot.currentRound);
@@ -1445,7 +1456,9 @@
     if (!session || !session.apiBase || !session.tournamentId || !global.EventSource) return;
     if (Hexcore2.roomEventSource && Hexcore2.roomEventSource.readyState !== 2) return;
     const view = session.role === 'captain' ? 'captain' : 'viewer';
-    const url = `${session.apiBase}/api/tournaments/${encodeURIComponent(session.tournamentId)}/events?view=${encodeURIComponent(view)}`;
+    const params = new URLSearchParams({ view });
+    if (session.role === 'captain' && session.sessionToken) params.set('sessionToken', session.sessionToken);
+    const url = `${session.apiBase}/api/tournaments/${encodeURIComponent(session.tournamentId)}/events?${params.toString()}`;
     const eventSource = new global.EventSource(url);
     Hexcore2.roomEventSource = eventSource;
     eventSource.addEventListener('snapshot', event => {

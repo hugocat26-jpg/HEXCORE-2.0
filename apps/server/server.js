@@ -9,6 +9,7 @@ const {
 const {
   COMMAND_TYPES,
   EVENT_TYPES,
+  ROLES,
   RULES_VERSION,
   createCommand,
 } = require('../../packages/shared');
@@ -104,6 +105,23 @@ function publicSnapshot(state) {
   return createReadOnlyProjection(state, 'public');
 }
 
+function projectionOptionsFromRequest(req, parsed, store, tournamentId, view) {
+  if (view !== 'captain') return {};
+  const sessionToken = sessionTokenFromRequest(req, parsed);
+  const binding = store.getSessionBinding(sessionToken, tournamentId);
+  if (!binding) {
+    const error = new Error('需要有效队长 sessionToken 才能读取队长投影');
+    error.statusCode = 401;
+    throw error;
+  }
+  if (binding.role !== ROLES.CAPTAIN || !binding.teamId) {
+    const error = new Error('当前身份无权读取队长投影');
+    error.statusCode = 403;
+    throw error;
+  }
+  return { teamId: binding.teamId };
+}
+
 function createServer(options = {}) {
   const store = options.store || new MemoryTournamentStore();
   return http.createServer(async (req, res) => {
@@ -164,7 +182,8 @@ function createServer(options = {}) {
           return;
         }
         const view = normalizeProjectionView(parsed.searchParams.get('view') || 'public');
-        sendJson(res, 200, { ok: true, tournament: createReadOnlyProjection(state, view) });
+        const projectionOptions = projectionOptionsFromRequest(req, parsed, store, projectionTournamentId, view);
+        sendJson(res, 200, { ok: true, tournament: createReadOnlyProjection(state, view, projectionOptions) });
         return;
       }
 
@@ -207,6 +226,7 @@ function createServer(options = {}) {
           return;
         }
         const view = normalizeProjectionView(parsed.searchParams.get('view') || 'public');
+        const projectionOptions = projectionOptionsFromRequest(req, parsed, store, eventTournamentId, view);
         res.writeHead(200, {
           'Content-Type': 'text/event-stream; charset=utf-8',
           'Cache-Control': 'no-store',
@@ -214,7 +234,7 @@ function createServer(options = {}) {
           'X-Content-Type-Options': 'nosniff',
           'Access-Control-Allow-Origin': '*',
         });
-        res.write(`event: snapshot\ndata: ${JSON.stringify(createReadOnlyProjection(state, view))}\n\n`);
+        res.write(`event: snapshot\ndata: ${JSON.stringify(createReadOnlyProjection(state, view, projectionOptions))}\n\n`);
         const unsubscribe = store.subscribe(eventTournamentId, res, event => projectEvent(event, view));
         req.on('close', unsubscribe);
         return;

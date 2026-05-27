@@ -1108,7 +1108,7 @@ function testSystemIntegrityCheck() {
   H.actions.setActiveView('settings');
   H.actions.runSystemCheck();
 
-  assert(H.meta.version === '2.0.12' && app.innerHTML.includes('HEXCORE 2.0 v2.0.12 裁判端'), '系统设置页应展示统一项目版本号');
+  assert(H.meta.version === '2.0.13' && app.innerHTML.includes('HEXCORE 2.0 v2.0.13 裁判端'), '系统设置页应展示统一项目版本号');
   assert(H.state.ui.systemCheckResult && !H.state.ui.systemCheckResult.ok, '状态检查应保存可视化结果');
   assert(H.state.ui.systemCheckResult.issues.some(issue => issue.type === '重复归属'), '状态检查应识别重复归属');
   assert(H.state.ui.systemCheckResult.issues.some(issue => issue.type === '跨阵营'), '状态检查应识别跨阵营');
@@ -3303,6 +3303,7 @@ async function testMultiplayerApiServer() {
   const server = multiplayerApiServer.createServer();
   const port = await listen(server);
   let sse = null;
+  let captainSse = null;
   try {
     const health = await requestJson(port, 'GET', '/health');
     assert(health.status === 200 && health.body.ok && health.body.rulesVersion === multiplayerShared.RULES_VERSION, '多人端服务应提供健康检查和规则版本');
@@ -3311,7 +3312,34 @@ async function testMultiplayerApiServer() {
       id: 't-api',
       name: 'API 回归赛事',
       actorId: 'referee-1',
-      teams: [{ teamId: 'team-1', name: '测试1队', code: 'captain-code-1' }],
+      teams: [
+        { teamId: 'team-1', name: '测试1队', code: 'captain-code-1', camp: 'local' },
+        { teamId: 'team-2', name: '测试2队', code: 'captain-code-2', camp: 'outsider' },
+        { teamId: 'team-3', name: '测试3队', code: 'captain-code-3', camp: 'local' },
+        { teamId: 'team-4', name: '测试4队', code: 'captain-code-4', camp: 'outsider' },
+      ],
+      tournament: {
+        type: 'single_elimination',
+        status: 'running',
+        pairingMode: 'camp_versus',
+        rounds: [
+          {
+            id: 'r1',
+            name: '第 1 轮',
+            matches: [
+              { id: 'r1m1', teamAId: 'team-1', teamBId: 'team-2', scoreA: 1, scoreB: 0, winnerId: 'team-1', status: 'completed', hiddenNote: 'schedule-secret' },
+              { id: 'r1m2', teamAId: 'team-3', teamBId: 'team-4', scoreA: '', scoreB: '', winnerId: '', status: 'pending', hiddenNote: 'other-secret' },
+            ],
+          },
+          {
+            id: 'r2',
+            name: '决赛',
+            matches: [
+              { id: 'r2m1', teamAId: 'team-1', teamBId: '', scoreA: '', scoreB: '', winnerId: '', status: 'pending' },
+            ],
+          },
+        ],
+      },
       viewerCode: 'viewer-code',
     });
     assert(created.status === 201 && created.body.tournament.stateVersion === 1, '创建赛事应写入 TournamentCreated 事件并推进版本');
@@ -3332,6 +3360,23 @@ async function testMultiplayerApiServer() {
     assert(captainJoin.body.tournament && captainJoin.body.tournament.stateVersion === 1, '加入房间应返回当前公开快照，供前端初始化 stateVersion');
     assert(!captainJoin.body.session.sessionTokenHash && !/^session-/.test(captainJoin.body.session.sessionToken), '客户端不应收到 session 摘要，sessionToken 不应使用可预测旧格式');
 
+    const anonymousCaptainProjection = await requestJson(port, 'GET', '/api/tournaments/t-api/projection?view=captain');
+    assert(anonymousCaptainProjection.status === 401 && /sessionToken/.test(anonymousCaptainProjection.body.error), '队长投影必须通过有效 sessionToken 绑定本队视角');
+    const captainProjection = await requestJson(port, 'GET', `/api/tournaments/t-api/projection?view=captain&sessionToken=${encodeURIComponent(captainJoin.body.session.sessionToken)}`);
+    const captainProjectionText = JSON.stringify(captainProjection.body);
+    assert(
+      captainProjection.status === 200
+      && captainProjection.body.tournament.view === 'captain'
+      && captainProjection.body.tournament.perspective.teamId === 'team-1'
+      && captainProjection.body.tournament.snapshot.tournament.rounds.length === 2
+      && captainProjectionText.includes('r1m1')
+      && captainProjectionText.includes('r2m1')
+      && !captainProjectionText.includes('r1m2')
+      && !captainProjectionText.includes('schedule-secret')
+      && !captainProjectionText.includes('other-secret'),
+      '队长赛程投影只应返回本队相关场次，不暴露无关赛程或私有字段'
+    );
+
     const viewerJoin = await requestJson(port, 'POST', '/api/tournaments/t-api/join', {
       code: created.body.room.viewerCode,
       displayName: '观众用户',
@@ -3351,9 +3396,14 @@ async function testMultiplayerApiServer() {
 
     const snapshot = await requestJson(port, 'GET', '/api/tournaments/t-api/snapshot');
     assert(snapshot.status === 200 && snapshot.body.tournament.snapshot.name === 'API 回归赛事', '多人端服务应读取赛事快照');
+    assert(!JSON.stringify(snapshot.body).includes('r1m2') && !JSON.stringify(snapshot.body).includes('schedule-secret'), '公开快照不应直接暴露完整赛程');
 
     sse = await subscribeSse(port, '/api/tournaments/t-api/events');
     assert(sse.initial.includes('event: snapshot') && sse.initial.includes('"tournamentId":"t-api"'), 'SSE 应先推送当前快照');
+    captainSse = await subscribeSse(port, `/api/tournaments/t-api/events?view=captain&sessionToken=${encodeURIComponent(captainJoin.body.session.sessionToken)}`);
+    assert(captainSse.initial.includes('r1m1') && !captainSse.initial.includes('r1m2'), '队长 SSE 初始快照应使用本队赛程投影');
+    captainSse.req.destroy();
+    captainSse = null;
 
     const command = await requestJson(port, 'POST', '/api/tournaments/t-api/commands', {
       sessionToken: captainJoin.body.session.sessionToken,
@@ -3686,6 +3736,7 @@ async function testMultiplayerApiServer() {
     const projectionText = JSON.stringify(viewerProjection.body);
     assert(viewerProjection.status === 200 && viewerProjection.body.tournament.view === 'viewer', '观众投影接口应返回 viewer 视图');
     assert(viewerProjection.body.tournament.perspective && viewerProjection.body.tournament.perspective.teamId === 'team-1', '观众投影应使用当前回合队长视角');
+    assert(!viewerProjection.body.tournament.snapshot.tournament && !projectionText.includes('r1m2'), '观众端不应接收队长赛程或完整赛程管理数据');
     assert(projectionText.includes('公开摘要'), '观众投影应保留允许公开的摘要字段');
     assert(projectionText.includes('裁判公告：本轮按现场判定继续') && projectionText.includes('仅公告，不直接改写队伍或选手状态'), '观众投影应展示裁判强制裁决公告');
     assert(!projectionText.includes('should-not-leak') && !projectionText.includes('hidden-player') && !projectionText.includes('hidden-seed') && !projectionText.includes('ruling-hidden-seed') && !projectionText.includes('should-not-leak-player'), '观众投影不应泄漏房间码、真实暗牌、内部随机字段或裁决 payload 额外字段');
@@ -3780,6 +3831,7 @@ async function testMultiplayerApiServer() {
     assert(riskCreated.body.room.refereeCode && riskCreated.body.room.refereeCode !== 'risk-demo-referee', '创建赛事返回的裁判码应为随机码而非旧默认格式');
   } finally {
     if (sse && sse.req) sse.req.destroy();
+    if (captainSse && captainSse.req) captainSse.req.destroy();
     await closeServer(server);
   }
 }
@@ -4536,8 +4588,10 @@ function testMultiplayerClientSubmitsAuthoritativeCommands() {
     && main.includes('applyLastPurchaseProjection(snapshot.lastPurchase)')
     && main.includes('applyRoundStatesProjection(snapshot.roundStates)')
     && main.includes('applyHexcoreWindowProjection(snapshot.hexcoreActionWindows)')
+    && main.includes('applyTournamentProjection(snapshot.tournament)')
     && main.includes('connectRoomEventStream()')
     && main.includes('new global.EventSource')
+    && main.includes("params.set('sessionToken', session.sessionToken)")
     && main.includes('eventSource.addEventListener')
     && main.includes('applyRoomProjection(responsePayload.tournament)'),
     '多人端应在 command 成功和 SSE 快照/事件到达时应用服务端公开投影，避免长期只依赖本地状态',
