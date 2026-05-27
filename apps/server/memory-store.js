@@ -27,6 +27,7 @@ class MemoryTournamentStore {
         createdAt: new Date().toISOString(),
         currentTeamId: teamIdFromInput(input),
         currentRound: safePositiveNumber(input.currentRound, 1, 8),
+        settings: normalizeSettings(input.settings),
         teams: normalizeTeams(input),
         players: normalizePlayers(input),
         tournament: normalizeTournament(input.tournament || (input.snapshot && input.snapshot.tournament)),
@@ -190,8 +191,43 @@ function normalizeTeams(input = {}) {
     team: Array.isArray(team.team)
       ? team.team.map(playerId => String(playerId || '').trim().slice(0, 80)).filter(Boolean).slice(0, 8)
       : (Array.isArray(team.memberIds) ? team.memberIds.map(playerId => String(playerId || '').trim().slice(0, 80)).filter(Boolean).slice(0, 8) : []),
+    economy: normalizeTeamEconomy(input, team),
     renameUsed: Boolean(team.renameUsed),
   }));
+}
+
+function normalizeTeamEconomy(input = {}, team = {}) {
+  const settings = input.settings && typeof input.settings === 'object' ? input.settings : {};
+  const source = team.economy && typeof team.economy === 'object' ? team.economy : {};
+  const initialGold = safePositiveNumber(settings.initialGold, 6, 99);
+  const roundState = source.roundState && typeof source.roundState === 'object'
+    ? Object.fromEntries(Object.entries(source.roundState).map(([round, state]) => [
+      String(safePositiveNumber(round, 1, 8)),
+      {
+        freeShopUsed: Boolean(state && state.freeShopUsed),
+        refreshCount: safePositiveNumber(state && state.refreshCount, 0, 99),
+        purchaseUsed: Boolean(state && state.purchaseUsed),
+        skipped: Boolean(state && state.skipped),
+        photographerRefreshUsed: Boolean(state && state.photographerRefreshUsed),
+      },
+    ]))
+    : {};
+  return {
+    gold: safePositiveNumber(source.gold ?? team.gold, initialGold, 999),
+    roundState,
+  };
+}
+
+function normalizeSettings(settings = {}) {
+  const source = settings && typeof settings === 'object' ? settings : {};
+  const refreshCosts = Array.isArray(source.refreshCosts) && source.refreshCosts.length
+    ? source.refreshCosts.slice(0, 4).map(cost => safePositiveNumber(cost, 1, 9))
+    : [1, 2, 3, 4];
+  return {
+    initialGold: safePositiveNumber(source.initialGold, 6, 99),
+    roundIncome: safePositiveNumber(source.roundIncome, 3, 99),
+    refreshCosts,
+  };
 }
 
 function normalizePlayers(input = {}) {

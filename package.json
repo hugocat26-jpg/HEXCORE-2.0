@@ -1,6 +1,6 @@
 {
   "name": "hexcore-2-referee-console",
-  "version": "2.0.14",
+  "version": "2.0.15",
   "private": true,
   "description": "HEXCORE 2.0 裁判控制台静态部署服务",
   "scripts": {

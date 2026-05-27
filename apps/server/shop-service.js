@@ -30,6 +30,13 @@ function roundRefreshCount(snapshot = {}, teamId = '', round = 1) {
   return safePositiveNumber(state.refreshCount, 0, 99);
 }
 
+function nextRefreshCost(snapshot = {}, teamId = '', round = 1) {
+  const settings = snapshot.settings && typeof snapshot.settings === 'object' ? snapshot.settings : {};
+  const costs = Array.isArray(settings.refreshCosts) && settings.refreshCosts.length ? settings.refreshCosts : [1, 2, 3, 4];
+  const refreshCount = roundRefreshCount(snapshot, teamId, round);
+  return safePositiveNumber(costs[Math.min(refreshCount, costs.length - 1)], 1, 99);
+}
+
 function shopPlayerCandidates(snapshot = {}, teamId = '') {
   const camp = teamCamp(snapshot, teamId);
   if (!camp) return [];
@@ -98,7 +105,7 @@ function createServerShop(snapshot = {}, command, roleBinding = {}, payload = {}
     round,
     generatedBy: command.type === COMMAND_TYPES.OPEN_SHOP ? 'server_free_shop' : 'server_refresh_shop',
     reason: cards.length ? '服务端从导入选手池生成商店' : '服务端生成商店：暂无可用选手',
-    refreshCostPaid: safePositiveNumber(payload.refreshCostPaid, 0, 99),
+    refreshCostPaid: command.type === COMMAND_TYPES.REFRESH_SHOP ? nextRefreshCost(snapshot, teamId, round) : 0,
     selectedSlot: 0,
     pickedThisTurn: false,
     cards,
@@ -109,9 +116,15 @@ function createAuthoritativeCommandPayload(state, command, roleBinding = {}) {
   const payload = command && command.payload && typeof command.payload === 'object' ? { ...command.payload } : {};
   delete payload._serverGeneratedProjection;
   if (!shouldGenerateServerShop(command, roleBinding, payload)) return payload;
+  const teamId = safeText(payload.teamId || command.teamId || roleBinding.teamId, '', 80);
+  const round = safePositiveNumber(payload.round || state.snapshot && state.snapshot.currentRound, 1, 8);
+  const refreshCount = command.type === COMMAND_TYPES.REFRESH_SHOP
+    ? roundRefreshCount(state.snapshot || {}, teamId, round) + 1
+    : 0;
   return {
     ...payload,
     currentShop: createServerShop(state.snapshot || {}, command, roleBinding, payload),
+    refreshCount,
     hexcoreActionWindows: [],
     _serverGeneratedProjection: true,
   };

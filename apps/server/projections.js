@@ -70,6 +70,11 @@ function publicTeams(snapshot = {}) {
     };
     if (team.playerId || team.captainPlayerId) projected.playerId = team.playerId || team.captainPlayerId || '';
     if (Array.isArray(team.team)) projected.team = team.team.map(playerId => String(playerId || '').trim()).filter(Boolean);
+    if (team.economy && typeof team.economy === 'object') {
+      projected.economy = {
+        gold: Math.max(0, Number(team.economy.gold) || 0),
+      };
+    }
     return projected;
   }) : [];
 }
@@ -128,6 +133,8 @@ function publicLastPurchase(purchase = null) {
     displayPlayerId: displayPlayerId || visiblePlayerId,
     round: Number(purchase.round) || 1,
     resolvedAt: String(purchase.resolvedAt || '').trim(),
+    pricePaid: Math.max(0, Number(purchase.pricePaid) || 0),
+    goldAfter: Math.max(0, Number(purchase.goldAfter) || 0),
     masked,
   };
 }

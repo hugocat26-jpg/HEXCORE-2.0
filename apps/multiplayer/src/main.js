@@ -1139,6 +1139,14 @@
         captain.renameUsed = Boolean(team.renameUsed);
         changed = true;
       }
+      if (team.economy && typeof team.economy === 'object') {
+        captain.economy = captain.economy || { gold: 0, roundState: {} };
+        const nextGold = Math.max(0, Math.round(Number(team.economy.gold) || 0));
+        if (captain.economy.gold !== nextGold) {
+          captain.economy.gold = nextGold;
+          changed = true;
+        }
+      }
       if (Array.isArray(team.team)) {
         const nextTeam = team.team.map(playerId => String(playerId || '')).filter(Boolean);
         if (JSON.stringify(captain.team || []) !== JSON.stringify(nextTeam)) {
@@ -1327,6 +1335,8 @@
         displayPlayerId: String(purchase.displayPlayerId || purchase.playerId || ''),
         round: Math.max(1, Math.min(8, Number(purchase.round) || Hexcore2.state.draft.round || 1)),
         resolvedAt: String(purchase.resolvedAt || ''),
+        pricePaid: Math.max(0, Number(purchase.pricePaid) || 0),
+        goldAfter: Math.max(0, Number(purchase.goldAfter) || 0),
         masked: Boolean(purchase.masked),
       }
       : null;

@@ -189,6 +189,79 @@ function setRoundState(snapshot, teamId, round, patch = {}) {
   return snapshot;
 }
 
+function roundStateFor(snapshot, teamId, round) {
+  const cleanTeamId = safeText(teamId, '', 80);
+  const roundKey = String(safePositiveNumber(round || snapshot.currentRound, 1, 8));
+  snapshot.roundStates = snapshot.roundStates && typeof snapshot.roundStates === 'object' ? snapshot.roundStates : {};
+  snapshot.roundStates[cleanTeamId] = snapshot.roundStates[cleanTeamId] && typeof snapshot.roundStates[cleanTeamId] === 'object'
+    ? snapshot.roundStates[cleanTeamId]
+    : {};
+  snapshot.roundStates[cleanTeamId][roundKey] = normalizeRoundState(snapshot.roundStates[cleanTeamId][roundKey] || {});
+  return snapshot.roundStates[cleanTeamId][roundKey];
+}
+
+function teamIndex(snapshot = {}, teamId = '') {
+  const cleanTeamId = safeText(teamId, '', 80);
+  return Array.isArray(snapshot.teams)
+    ? snapshot.teams.findIndex(team => safeText(team && (team.teamId || team.id), '', 80) === cleanTeamId)
+    : -1;
+}
+
+function ensureTeamEconomy(snapshot, teamId) {
+  const index = teamIndex(snapshot, teamId);
+  if (index < 0) return null;
+  const team = snapshot.teams[index];
+  const source = team.economy && typeof team.economy === 'object' ? team.economy : {};
+  const defaultGold = safePositiveNumber(snapshot.settings && snapshot.settings.initialGold, 6, 999);
+  const economy = {
+    gold: safePositiveNumber(source.gold, defaultGold, 999),
+    roundState: source.roundState && typeof source.roundState === 'object' ? source.roundState : {},
+  };
+  snapshot.teams[index] = { ...team, economy };
+  return snapshot.teams[index].economy;
+}
+
+function refreshCostFor(snapshot, teamId, round) {
+  const state = roundStateFor(snapshot, teamId, round);
+  const costs = snapshot.settings && Array.isArray(snapshot.settings.refreshCosts) && snapshot.settings.refreshCosts.length
+    ? snapshot.settings.refreshCosts
+    : [1, 2, 3, 4];
+  return safePositiveNumber(costs[Math.min(safePositiveNumber(state.refreshCount, 0, 99), costs.length - 1)], 1, 99);
+}
+
+function deductTeamGold(snapshot, teamId, amount, reason) {
+  const economy = ensureTeamEconomy(snapshot, teamId);
+  if (!economy) throw new Error('未找到队伍经济状态');
+  const cost = safePositiveNumber(amount, 0, 999);
+  if (economy.gold < cost) throw new Error(`${reason || '操作'}金币不足，需要 ${cost} 金币`);
+  economy.gold -= cost;
+  return economy.gold;
+}
+
+function purchasedCardFromShop(snapshot, teamId, slotId) {
+  const shop = snapshot.currentShop && typeof snapshot.currentShop === 'object' ? snapshot.currentShop : null;
+  if (!shop || safeText(shop.teamId || shop.captainId, '', 80) !== safeText(teamId, '', 80)) return null;
+  if (!Array.isArray(shop.cards)) return null;
+  return shop.cards.find(card => {
+    return safeText(card && (card.slotId || card.index), '', 64) === safeText(slotId, '', 64);
+  }) || null;
+}
+
+function nextTurnPointer(snapshot, teamId) {
+  const teams = Array.isArray(snapshot.teams) ? snapshot.teams : [];
+  if (!teams.length) return { nextTeamId: '', nextRound: safePositiveNumber(snapshot.currentRound, 1, 8) };
+  const currentIndex = Math.max(0, teamIndex(snapshot, teamId));
+  const nextIndex = (currentIndex + 1) % teams.length;
+  const nextRound = nextIndex === 0
+    ? safePositiveNumber(snapshot.currentRound, 1, 8) + 1
+    : safePositiveNumber(snapshot.currentRound, 1, 8);
+  const nextTeam = teams[nextIndex] || {};
+  return {
+    nextTeamId: safeText(nextTeam.teamId || nextTeam.id, '', 80),
+    nextRound: Math.min(8, nextRound),
+  };
+}
+
 function normalizeHexcoreActionWindow(input = {}) {
   return {
     windowId: safeText(input.windowId || input.id, '', 80),
@@ -295,10 +368,25 @@ function applyEventToSnapshot(snapshot, event) {
     const teamId = safeText(payload.teamId, '', 80);
     const round = safePositiveNumber(payload.round || next.currentRound, 1, 8);
     const trustedProjection = canApplyClientProjection(payload) || payload._serverGeneratedProjection === true;
+    const previousRoundState = roundStateFor(next, teamId, round);
+    let refreshCostPaid = 0;
+    let refreshCount = event.type === EVENT_TYPES.SHOP_REFRESHED
+      ? safePositiveNumber(previousRoundState.refreshCount, 0, 99) + 1
+      : 0;
+    if (event.type === EVENT_TYPES.SHOP_REFRESHED) {
+      refreshCostPaid = refreshCostFor(next, teamId, round);
+      deductTeamGold(next, teamId, refreshCostPaid, '刷新商店');
+    } else {
+      ensureTeamEconomy(next, teamId);
+    }
     next.currentTeamId = teamId || next.currentTeamId;
     next.currentRound = round;
     next.currentPhase = 'gold_shop';
-    next.currentShop = normalizeCurrentShop(trustedProjection ? (payload.currentShop || payload.shop || {}) : {}, {
+    const currentShopInput = trustedProjection ? (payload.currentShop || payload.shop || {}) : {};
+    next.currentShop = normalizeCurrentShop({
+      ...currentShopInput,
+      refreshCostPaid,
+    }, {
       teamId,
       round,
       generatedBy: event.type === EVENT_TYPES.SHOP_OPENED ? 'free_shop' : 'refresh_shop',
@@ -308,7 +396,7 @@ function applyEventToSnapshot(snapshot, event) {
       freeShopUsed: true,
       purchaseUsed: false,
       skipped: false,
-      refreshCount: event.type === EVENT_TYPES.SHOP_REFRESHED ? safePositiveNumber(payload.refreshCount, 1, 99) : 0,
+      refreshCount,
     });
     if (trustedProjection) applyHexcoreWindows(next, payload.hexcoreActionWindows);
   }
@@ -317,6 +405,18 @@ function applyEventToSnapshot(snapshot, event) {
     const round = safePositiveNumber(payload.round || next.currentRound, 1, 8);
     const slotId = safeText(payload.slotId, '', 64);
     let purchasedCard = null;
+    const currentRoundState = roundStateFor(next, teamId, round);
+    if (currentRoundState.purchaseUsed) throw new Error('本轮购买权已使用');
+    if (currentRoundState.skipped) throw new Error('本轮已跳过，不能购买');
+    const existingCard = purchasedCardFromShop(next, teamId, slotId);
+    if (existingCard && existingCard.purchased) throw new Error('该商店卡位已购买');
+    let pricePaid = 0;
+    if (existingCard) {
+      pricePaid = safePositiveNumber(existingCard.price || existingCard.tier, 1, 99);
+      deductTeamGold(next, teamId, pricePaid, '购买选手');
+    } else {
+      ensureTeamEconomy(next, teamId);
+    }
     if (next.currentShop && Array.isArray(next.currentShop.cards)) {
       next.currentShop.cards = next.currentShop.cards.map(card => {
         if (String(card.slotId || '') !== slotId && String(card.index ?? '') !== slotId) return card;
@@ -340,6 +440,8 @@ function applyEventToSnapshot(snapshot, event) {
       displayPlayerId: safeText(purchaseDisplayPlayerId, '', 80),
       round,
       resolvedAt: event.createdAt,
+      pricePaid,
+      goldAfter: ensureTeamEconomy(next, teamId) ? ensureTeamEconomy(next, teamId).gold : 0,
     };
     setRoundState(next, teamId, round, { freeShopUsed: true, purchaseUsed: true, skipped: false });
     if (canApplyClientProjection(payload)) applyHexcoreWindows(next, payload.hexcoreActionWindows);
@@ -347,10 +449,12 @@ function applyEventToSnapshot(snapshot, event) {
   if (event.type === EVENT_TYPES.TURN_SKIPPED) {
     const teamId = safeText(payload.teamId, '', 80);
     const round = safePositiveNumber(payload.round || next.currentRound, 1, 8);
+    ensureTeamEconomy(next, teamId);
     setRoundState(next, teamId, round, { freeShopUsed: true, purchaseUsed: false, skipped: true });
     next.currentShop = null;
-    if (payload.nextTeamId) next.currentTeamId = safeText(payload.nextTeamId, '', 80);
-    if (payload.nextRound) next.currentRound = safePositiveNumber(payload.nextRound, round, 8);
+    const nextPointer = nextTurnPointer(next, teamId);
+    next.currentTeamId = safeText(payload.nextTeamId || nextPointer.nextTeamId, '', 80);
+    next.currentRound = safePositiveNumber(payload.nextRound || nextPointer.nextRound, round, 8);
     if (canApplyClientProjection(payload)) applyHexcoreWindows(next, payload.hexcoreActionWindows);
   }
   if (event.type === EVENT_TYPES.HEXCORE_USED) {

@@ -1112,7 +1112,7 @@ function testSystemIntegrityCheck() {
   H.actions.setActiveView('settings');
   H.actions.runSystemCheck();
 
-  assert(H.meta.version === '2.0.14' && app.innerHTML.includes('HEXCORE 2.0 v2.0.14 裁判端'), '系统设置页应展示统一项目版本号');
+  assert(H.meta.version === '2.0.15' && app.innerHTML.includes('HEXCORE 2.0 v2.0.15 裁判端'), '系统设置页应展示统一项目版本号');
   assert(H.state.ui.systemCheckResult && !H.state.ui.systemCheckResult.ok, '状态检查应保存可视化结果');
   assert(H.state.ui.systemCheckResult.issues.some(issue => issue.type === '重复归属'), '状态检查应识别重复归属');
   assert(H.state.ui.systemCheckResult.issues.some(issue => issue.type === '跨阵营'), '状态检查应识别跨阵营');
@@ -3533,7 +3533,8 @@ async function testMultiplayerApiServer() {
       id: 't-shop',
       name: '服务端商店回归',
       actorId: 'referee-shop',
-      teams: [{ teamId: 'team-local', name: '本地队', camp: 'local', code: 'shop-captain-code' }],
+      settings: { initialGold: 6, refreshCosts: [1, 2, 3, 4] },
+      teams: [{ teamId: 'team-local', name: '本地队', camp: 'local', code: 'shop-captain-code', economy: { gold: 6 } }],
       players: [
         { id: 'local-1', name: '本地一号', gameId: 'L1', camp: 'local', tier: 1, score: 81, status: 'available', heroes: ['阿狸'] },
         { id: 'local-2', name: '本地二号', gameId: 'L2', camp: 'local', tier: 2, score: 82, status: 'available', heroes: ['蔚'] },
@@ -3576,6 +3577,7 @@ async function testMultiplayerApiServer() {
       generatedShop.status === 200
       && generatedShop.body.tournament.stateVersion === 2
       && generatedShop.body.event.payload.currentShop.cards.length === 5
+      && generatedShop.body.tournament.snapshot.teams[0].economy.gold === 6
       && generatedCards.length === 5
       && generatedCards.every(card => card.camp === 'local' && card.playerId.startsWith('local-') && card.name.startsWith('本地'))
       && !generatedShopText.includes('forged-shop-player')
@@ -3584,16 +3586,45 @@ async function testMultiplayerApiServer() {
       && !generatedShopText.includes('_serverGeneratedProjection'),
       '队长开店应由服务端从导入选手池生成同阵营商店，不能使用队长 payload 伪造卡面'
     );
-    const generatedPlayerId = generatedCards[0].playerId;
+    const generatedRefresh = await requestJson(port, 'POST', '/api/tournaments/t-shop/commands', {
+      sessionToken: shopCaptainJoin.body.session.sessionToken,
+      command: {
+        commandId: 'cmd-api-refresh-generated-shop',
+        type: multiplayerShared.COMMAND_TYPES.REFRESH_SHOP,
+        baseVersion: 2,
+        payload: {
+          teamId: 'team-local',
+          round: 1,
+          currentShop: {
+            cards: [{ slotId: 'slot-1', playerId: 'forged-refresh-player', tier: 5, camp: 'outsider' }],
+          },
+          refreshCostPaid: 0,
+          commandRole: multiplayerShared.ROLES.REFEREE,
+        },
+      },
+    });
+    const refreshedCards = generatedRefresh.body.tournament.snapshot.currentShop.cards;
+    assert(
+      generatedRefresh.status === 200
+      && generatedRefresh.body.tournament.stateVersion === 3
+      && generatedRefresh.body.tournament.snapshot.teams[0].economy.gold === 5
+      && generatedRefresh.body.tournament.snapshot.currentShop.refreshCostPaid === 1
+      && generatedRefresh.body.tournament.snapshot.roundStates['team-local']['1'].refreshCount === 1
+      && refreshedCards.length === 5
+      && !JSON.stringify(generatedRefresh.body).includes('forged-refresh-player'),
+      '队长刷新商店应由服务端扣除刷新金币、推进刷新次数，并忽略队长伪造卡面和费用'
+    );
+    const generatedPlayerId = refreshedCards[0].playerId;
+    const generatedPlayerPrice = refreshedCards[0].price;
     const generatedPurchase = await requestJson(port, 'POST', '/api/tournaments/t-shop/commands', {
       sessionToken: shopCaptainJoin.body.session.sessionToken,
       command: {
         commandId: 'cmd-api-purchase-generated-shop',
         type: multiplayerShared.COMMAND_TYPES.PURCHASE_SHOP_CARD,
-        baseVersion: 2,
+        baseVersion: 3,
         payload: {
           teamId: 'team-local',
-          slotId: generatedCards[0].slotId,
+          slotId: refreshedCards[0].slotId,
           playerId: 'forged-purchase-player',
         },
       },
@@ -3603,14 +3634,92 @@ async function testMultiplayerApiServer() {
     const generatedPurchaseText = JSON.stringify(generatedPurchase.body);
     assert(
       generatedPurchase.status === 200
-      && generatedPurchase.body.tournament.stateVersion === 3
+      && generatedPurchase.body.tournament.stateVersion === 4
       && purchasedCard.purchased === true
       && purchasedTeam.team.includes(generatedPlayerId)
+      && purchasedTeam.economy.gold === 5 - generatedPlayerPrice
       && generatedPurchase.body.tournament.snapshot.lastPurchase.playerId === generatedPlayerId
+      && generatedPurchase.body.tournament.snapshot.lastPurchase.pricePaid === generatedPlayerPrice
+      && generatedPurchase.body.tournament.snapshot.lastPurchase.goldAfter === 5 - generatedPlayerPrice
       && generatedPurchase.body.tournament.snapshot.roundStates['team-local']['1'].purchaseUsed
       && !generatedPurchase.body.tournament.snapshot.players
       && !generatedPurchaseText.includes('forged-purchase-player'),
-      '购买服务端生成商店卡后，应更新公开队伍成员和购买状态，但不公开完整私有选手池或伪造选手 ID'
+      '购买服务端生成商店卡后，应扣除服务端价格、更新公开队伍成员和购买状态，但不公开完整私有选手池或伪造选手 ID'
+    );
+
+    const poorCreated = await requestJson(port, 'POST', '/api/tournaments', {
+      id: 't-poor-refresh',
+      name: '刷新金币不足回归',
+      actorId: 'referee-poor',
+      settings: { initialGold: 0, refreshCosts: [1, 2, 3, 4] },
+      teams: [{ teamId: 'poor-team', name: '贫穷队', camp: 'local', code: 'poor-code', economy: { gold: 0 } }],
+      players: [
+        { id: 'poor-local-1', name: '贫穷一号', gameId: 'P1', camp: 'local', tier: 1, score: 70, status: 'available' },
+      ],
+    });
+    const poorJoin = await requestJson(port, 'POST', '/api/tournaments/t-poor-refresh/join', {
+      code: poorCreated.body.room.captainCodes[0].code,
+      displayName: '贫穷队长',
+    });
+    const poorOpen = await requestJson(port, 'POST', '/api/tournaments/t-poor-refresh/commands', {
+      sessionToken: poorJoin.body.session.sessionToken,
+      command: {
+        commandId: 'cmd-api-poor-open',
+        type: multiplayerShared.COMMAND_TYPES.OPEN_SHOP,
+        baseVersion: 1,
+        payload: { teamId: 'poor-team', round: 1 },
+      },
+    });
+    const poorRefresh = await requestJson(port, 'POST', '/api/tournaments/t-poor-refresh/commands', {
+      sessionToken: poorJoin.body.session.sessionToken,
+      command: {
+        commandId: 'cmd-api-poor-refresh',
+        type: multiplayerShared.COMMAND_TYPES.REFRESH_SHOP,
+        baseVersion: 2,
+        payload: { teamId: 'poor-team', round: 1 },
+      },
+    });
+    const poorAfterFailedRefresh = await requestJson(port, 'GET', '/api/tournaments/t-poor-refresh/snapshot');
+    assert(
+      poorOpen.status === 200
+      && poorRefresh.status === 400
+      && /金币不足/.test(poorRefresh.body.error)
+      && poorAfterFailedRefresh.body.tournament.stateVersion === 2
+      && poorAfterFailedRefresh.body.tournament.snapshot.teams[0].economy.gold === 0
+      && poorAfterFailedRefresh.body.tournament.snapshot.roundStates['poor-team']['1'].refreshCount === 0,
+      '服务端刷新金币不足时应拒绝 command，且不能推进版本、扣成负金币或增加刷新次数'
+    );
+
+    const skipCreated = await requestJson(port, 'POST', '/api/tournaments', {
+      id: 't-skip-turn',
+      name: '跳过推进回归',
+      actorId: 'referee-skip',
+      teams: [
+        { teamId: 'skip-a', name: '跳过A队', camp: 'local', code: 'skip-code-a', economy: { gold: 6 } },
+        { teamId: 'skip-b', name: '跳过B队', camp: 'local', code: 'skip-code-b', economy: { gold: 6 } },
+      ],
+    });
+    const skipJoin = await requestJson(port, 'POST', '/api/tournaments/t-skip-turn/join', {
+      code: skipCreated.body.room.captainCodes[0].code,
+      displayName: '跳过队长',
+    });
+    const skippedTurn = await requestJson(port, 'POST', '/api/tournaments/t-skip-turn/commands', {
+      sessionToken: skipJoin.body.session.sessionToken,
+      command: {
+        commandId: 'cmd-api-skip-turn',
+        type: multiplayerShared.COMMAND_TYPES.SKIP_TURN,
+        baseVersion: 1,
+        payload: { teamId: 'skip-a', round: 1 },
+      },
+    });
+    assert(
+      skippedTurn.status === 200
+      && skippedTurn.body.tournament.stateVersion === 2
+      && skippedTurn.body.tournament.snapshot.currentTeamId === 'skip-b'
+      && skippedTurn.body.tournament.snapshot.currentRound === 1
+      && skippedTurn.body.tournament.snapshot.currentShop === null
+      && skippedTurn.body.tournament.snapshot.roundStates['skip-a']['1'].skipped,
+      '服务端跳过本轮应清空当前商店、标记跳过并推进到下一队'
     );
 
     const trustedShop = await requestJson(port, 'POST', '/api/tournaments/t-api/commands', {
