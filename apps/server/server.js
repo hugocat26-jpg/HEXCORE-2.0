@@ -101,6 +101,11 @@ function sessionTokenFromRequest(req, parsed, body = {}) {
   return String(body.sessionToken || parsed.searchParams.get('sessionToken') || '').trim();
 }
 
+function bearerSessionTokenFromRequest(req) {
+  const auth = String(req.headers.authorization || '').trim();
+  return auth.toLowerCase().startsWith('bearer ') ? auth.slice(7).trim() : '';
+}
+
 function publicSnapshot(state) {
   return createReadOnlyProjection(state, 'public');
 }
@@ -124,6 +129,8 @@ function projectionOptionsFromRequest(req, parsed, store, tournamentId, view) {
 
 function createServer(options = {}) {
   const store = options.store || new MemoryTournamentStore();
+  const startedAtMs = Date.now();
+  const startedAt = new Date(startedAtMs).toISOString();
   return http.createServer(async (req, res) => {
     try {
       const parsed = new URL(req.url, `http://${host}:${port}`);
@@ -142,7 +149,14 @@ function createServer(options = {}) {
       }
 
       if (req.method === 'GET' && pathname === '/health') {
-        sendJson(res, 200, { ok: true, service: 'hexcore-multiplayer-server', rulesVersion: RULES_VERSION });
+        sendJson(res, 200, {
+          ok: true,
+          service: 'hexcore-multiplayer-server',
+          rulesVersion: RULES_VERSION,
+          startedAt,
+          uptimeSeconds: Math.max(0, Math.round((Date.now() - startedAtMs) / 1000)),
+          runtime: store.publicStats ? store.publicStats() : { storage: 'unknown' },
+        });
         return;
       }
 
@@ -206,6 +220,17 @@ function createServer(options = {}) {
           return;
         }
         sendJson(res, 200, { ok: true, auditLog });
+        return;
+      }
+
+      const exportTournamentId = req.method === 'GET' ? matchTournamentRoute(pathname, '/export') : null;
+      if (exportTournamentId) {
+        const backup = store.getTournamentBackup(exportTournamentId, bearerSessionTokenFromRequest(req));
+        if (!backup) {
+          sendJson(res, 404, { ok: false, error: '赛事不存在' });
+          return;
+        }
+        sendJson(res, 200, { ok: true, backup });
         return;
       }
 

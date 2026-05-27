@@ -9,7 +9,7 @@ const configuredAppRoot = process.env.MULTIPLAYER_APP_ROOT
   : localAppRoot;
 const appRoot = fs.existsSync(configuredAppRoot) ? configuredAppRoot : localAppRoot;
 const host = process.env.HOST || '127.0.0.1';
-const port = Number(process.env.PORT || 4186);
+const port = Number(process.env.MULTIPLAYER_APP_PORT || process.env.PORT || 4186);
 
 const contentTypes = {
   '.html': 'text/html; charset=utf-8',

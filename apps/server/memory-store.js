@@ -99,6 +99,30 @@ class MemoryTournamentStore {
     return clone(Array.isArray(state.auditLog) ? state.auditLog : []);
   }
 
+  getTournamentBackup(id, sessionToken) {
+    const state = this.tournaments.get(id);
+    if (!state) return null;
+    this.requireManagementSession(id, sessionToken, '赛事备份');
+    const tournament = clone(state);
+    return {
+      backupVersion: 'hexcore-multiplayer-backup-v1',
+      exportedAt: new Date().toISOString(),
+      storage: 'memory',
+      checksum: checksumJson(tournament),
+      tournament,
+    };
+  }
+
+  publicStats() {
+    const subscriberCount = Array.from(this.subscribers.values()).reduce((sum, bucket) => sum + bucket.size, 0);
+    return {
+      storage: 'memory',
+      tournamentCount: this.tournaments.size,
+      roomCount: this.roomAccess.size,
+      subscriberCount,
+    };
+  }
+
   joinTournament(id, input = {}) {
     const access = this.roomAccess.get(id);
     if (!access) throw new Error(`赛事不存在：${id}`);
@@ -310,6 +334,10 @@ function generateSecret(prefix) {
 
 function hashSecret(secret) {
   return crypto.createHash('sha256').update(String(secret || ''), 'utf8').digest('hex');
+}
+
+function checksumJson(value) {
+  return crypto.createHash('sha256').update(JSON.stringify(value), 'utf8').digest('hex');
 }
 
 function safeProvidedCode(value) {

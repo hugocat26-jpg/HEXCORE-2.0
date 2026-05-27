@@ -241,18 +241,22 @@ function closeServer(server) {
   return new Promise(resolve => server.close(resolve));
 }
 
-function requestJson(port, method, pathname, body) {
+function requestJson(port, method, pathname, body, options = {}) {
   return new Promise((resolve, reject) => {
     const payload = body === undefined ? '' : JSON.stringify(body);
+    const headers = {
+      ...(payload ? {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(payload),
+      } : {}),
+      ...(options.headers || {}),
+    };
     const req = http.request({
       hostname: '127.0.0.1',
       port,
       path: pathname,
       method,
-      headers: payload ? {
-        'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(payload),
-      } : {},
+      headers,
     }, res => {
       let data = '';
       res.on('data', chunk => { data += chunk; });
@@ -1108,7 +1112,7 @@ function testSystemIntegrityCheck() {
   H.actions.setActiveView('settings');
   H.actions.runSystemCheck();
 
-  assert(H.meta.version === '2.0.13' && app.innerHTML.includes('HEXCORE 2.0 v2.0.13 裁判端'), '系统设置页应展示统一项目版本号');
+  assert(H.meta.version === '2.0.14' && app.innerHTML.includes('HEXCORE 2.0 v2.0.14 裁判端'), '系统设置页应展示统一项目版本号');
   assert(H.state.ui.systemCheckResult && !H.state.ui.systemCheckResult.ok, '状态检查应保存可视化结果');
   assert(H.state.ui.systemCheckResult.issues.some(issue => issue.type === '重复归属'), '状态检查应识别重复归属');
   assert(H.state.ui.systemCheckResult.issues.some(issue => issue.type === '跨阵营'), '状态检查应识别跨阵营');
@@ -3306,7 +3310,17 @@ async function testMultiplayerApiServer() {
   let captainSse = null;
   try {
     const health = await requestJson(port, 'GET', '/health');
-    assert(health.status === 200 && health.body.ok && health.body.rulesVersion === multiplayerShared.RULES_VERSION, '多人端服务应提供健康检查和规则版本');
+    assert(
+      health.status === 200
+      && health.body.ok
+      && health.body.rulesVersion === multiplayerShared.RULES_VERSION
+      && health.body.startedAt
+      && Number.isInteger(Number(health.body.uptimeSeconds))
+      && health.body.runtime
+      && health.body.runtime.storage === 'memory'
+      && Number.isInteger(Number(health.body.runtime.tournamentCount)),
+      '多人端服务应提供健康检查、规则版本和基础运行状态'
+    );
 
     const created = await requestJson(port, 'POST', '/api/tournaments', {
       id: 't-api',
@@ -3393,6 +3407,38 @@ async function testMultiplayerApiServer() {
     assert(room.status === 200 && room.body.room.captainCodes[0].codeIssued === true, '裁判 session 应能读取房间码管理摘要');
     assert(!room.body.room.refereeCodeHash && !room.body.room.refereeCode.code && !room.body.room.captainCodes[0].code, '房间码管理摘要不应返回明文码或摘要');
     assert(!room.body.room.displayCode, '房间码管理摘要不应保留大屏端入口');
+
+    const healthAfterCreate = await requestJson(port, 'GET', '/health');
+    assert(
+      healthAfterCreate.status === 200
+      && healthAfterCreate.body.runtime.tournamentCount >= 1
+      && healthAfterCreate.body.runtime.roomCount >= 1,
+      '健康检查应暴露可用于本地运维的赛事和房间数量'
+    );
+    const anonymousExport = await requestJson(port, 'GET', '/api/tournaments/t-api/export');
+    assert(anonymousExport.status === 401 && !anonymousExport.body.backup, '匿名用户不应导出权威赛事备份');
+    const refereeQueryExport = await requestJson(port, 'GET', `/api/tournaments/t-api/export?sessionToken=${encodeURIComponent(refereeJoin.body.session.sessionToken)}`);
+    assert(refereeQueryExport.status === 401 && !refereeQueryExport.body.backup, '赛事备份导出不应接受 URL 查询参数中的 sessionToken');
+    const viewerExport = await requestJson(port, 'GET', '/api/tournaments/t-api/export', undefined, {
+      headers: { Authorization: `Bearer ${viewerJoin.body.session.sessionToken}` },
+    });
+    assert(viewerExport.status === 403 && !viewerExport.body.backup, '观众不应导出权威赛事备份');
+    const refereeExport = await requestJson(port, 'GET', '/api/tournaments/t-api/export', undefined, {
+      headers: { Authorization: `Bearer ${refereeJoin.body.session.sessionToken}` },
+    });
+    const exportText = JSON.stringify(refereeExport.body);
+    assert(
+      refereeExport.status === 200
+      && refereeExport.body.backup.backupVersion === 'hexcore-multiplayer-backup-v1'
+      && /^[a-f0-9]{64}$/.test(refereeExport.body.backup.checksum)
+      && refereeExport.body.backup.tournament.tournamentId === 't-api'
+      && Array.isArray(refereeExport.body.backup.tournament.events)
+      && !exportText.includes(refereeJoin.body.session.sessionToken)
+      && !exportText.includes('refereeCodeHash')
+      && !exportText.includes('viewerCodeHash')
+      && !exportText.includes('captain-code-1'),
+      '裁判导出的权威备份应包含校验和和赛事状态，但不能包含 sessionToken 或房间码凭据'
+    );
 
     const snapshot = await requestJson(port, 'GET', '/api/tournaments/t-api/snapshot');
     assert(snapshot.status === 200 && snapshot.body.tournament.snapshot.name === 'API 回归赛事', '多人端服务应读取赛事快照');
@@ -4493,6 +4539,8 @@ function testMultiplayerJoinGateAndCors() {
   const main = fs.readFileSync(path.join(root, 'apps/multiplayer/src/main.js'), 'utf8');
   const server = fs.readFileSync(path.join(root, 'apps/server/server.js'), 'utf8');
   const css = fs.readFileSync(path.join(root, 'apps/multiplayer/src/styles/main.css'), 'utf8');
+  const packageJson = fs.readFileSync(path.join(root, 'package.json'), 'utf8');
+  const stackScript = fs.readFileSync(path.join(root, 'scripts/start-multiplayer-stack.js'), 'utf8');
   assert(
     ui.includes('joinGatePage()')
     && ui.includes("classList.toggle('join-gate-root', shouldShowJoinGate())")
@@ -4551,6 +4599,15 @@ function testMultiplayerJoinGateAndCors() {
     && css.includes('.multiplayer-return-btn')
     && css.includes('@media (max-width: 760px)'),
     '加入页应脱离主控制台侧边栏栅格，居中显示完整表单，不能被压成窄列逐字换行',
+  );
+  assert(
+    packageJson.includes('"start:multiplayer:stack"')
+    && stackScript.includes('spawn(process.execPath')
+    && stackScript.includes('MULTIPLAYER_APP_PORT')
+    && stackScript.includes('MULTIPLAYER_API_PORT')
+    && stackScript.includes('windowsHide: true')
+    && !stackScript.includes('shell: true'),
+    '多人端应提供本地堆栈启动脚本，并避免通过 shell 拼接启动命令',
   );
 }
 

@@ -1,11 +1,12 @@
 {
   "name": "hexcore-2-referee-console",
-  "version": "2.0.13",
+  "version": "2.0.14",
   "private": true,
   "description": "HEXCORE 2.0 裁判控制台静态部署服务",
   "scripts": {
     "start": "node scripts/serve.js",
     "start:multiplayer": "node scripts/serve-multiplayer.js",
+    "start:multiplayer:stack": "node scripts/start-multiplayer-stack.js",
     "start:server": "node apps/server/server.js",
     "serve": "node scripts/serve.js",
     "test": "node scripts/regression.js",
