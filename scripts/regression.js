@@ -1108,7 +1108,7 @@ function testSystemIntegrityCheck() {
   H.actions.setActiveView('settings');
   H.actions.runSystemCheck();
 
-  assert(H.meta.version === '2.0.5' && app.innerHTML.includes('HEXCORE 2.0 v2.0.5 裁判端'), '系统设置页应展示统一项目版本号');
+  assert(H.meta.version === '2.0.6' && app.innerHTML.includes('HEXCORE 2.0 v2.0.6 裁判端'), '系统设置页应展示统一项目版本号');
   assert(H.state.ui.systemCheckResult && !H.state.ui.systemCheckResult.ok, '状态检查应保存可视化结果');
   assert(H.state.ui.systemCheckResult.issues.some(issue => issue.type === '重复归属'), '状态检查应识别重复归属');
   assert(H.state.ui.systemCheckResult.issues.some(issue => issue.type === '跨阵营'), '状态检查应识别跨阵营');
@@ -3069,6 +3069,62 @@ function testMultiplayerSharedRulePreflight() {
     ).ok,
     '队长本人回合应可提交开店 command'
   );
+  const shopProjected = multiplayerRules.acceptCommandAsEvent(
+    state,
+    openShopCommand,
+    { actorId: 'captain-user-1', role: multiplayerShared.ROLES.CAPTAIN, teamId: 'team-1' },
+    multiplayerShared.EVENT_TYPES.SHOP_OPENED,
+    {
+      teamId: 'team-1',
+      round: 1,
+      currentShop: {
+        id: 'shop-rule-1',
+        teamId: 'team-1',
+        round: 1,
+        cards: [{ slotId: 'slot-1', playerId: 'player-1', tier: 2, price: 2, camp: 'local' }],
+      },
+      hexcoreActionWindows: [{ teamId: 'team-2', hexcoreId: 'heavenly-descent', active: true }],
+    }
+  );
+  assert(
+    shopProjected.state.snapshot.currentShop.cards.length === 0
+    && shopProjected.state.snapshot.roundStates['team-1']['1'].freeShopUsed
+    && !shopProjected.state.snapshot.hexcoreActionWindows.some(window => window.hexcoreId === 'heavenly-descent'),
+    '队长端 command 不应通过 payload 伪造权威商店卡或海克斯窗口'
+  );
+  const refereeShopCommand = multiplayerShared.createCommand({
+    commandId: 'cmd-ref-shop',
+    tournamentId: 'tournament-test',
+    type: multiplayerShared.COMMAND_TYPES.OPEN_SHOP,
+    actorId: 'referee-user-1',
+    role: multiplayerShared.ROLES.REFEREE,
+    teamId: 'team-1',
+    baseVersion: 0,
+    payload: { teamId: 'team-1' },
+  });
+  const refereeShopProjected = multiplayerRules.acceptCommandAsEvent(
+    state,
+    refereeShopCommand,
+    { actorId: 'referee-user-1', role: multiplayerShared.ROLES.REFEREE, teamId: '' },
+    multiplayerShared.EVENT_TYPES.SHOP_OPENED,
+    {
+      teamId: 'team-1',
+      round: 1,
+      currentShop: {
+        id: 'shop-rule-referee',
+        teamId: 'team-1',
+        round: 1,
+        cards: [{ slotId: 'slot-1', playerId: 'player-1', tier: 2, price: 2, camp: 'local' }],
+      },
+      hexcoreActionWindows: [{ teamId: 'team-2', hexcoreId: 'heavenly-descent', active: true }],
+    }
+  );
+  assert(
+    refereeShopProjected.state.snapshot.currentShop.cards[0].playerId === 'player-1'
+    && refereeShopProjected.state.snapshot.roundStates['team-1']['1'].freeShopUsed
+    && refereeShopProjected.state.snapshot.hexcoreActionWindows[0].hexcoreId === 'heavenly-descent',
+    '裁判可信动作可以把公开商店、轮内状态和海克斯窗口落入快照，供多端同步投影使用'
+  );
   const duplicate = multiplayerRules.acceptCommandAsEvent(
     accepted.state,
     command,
@@ -3291,11 +3347,30 @@ async function testMultiplayerApiServer() {
         commandId: 'cmd-api-open-shop',
         type: multiplayerShared.COMMAND_TYPES.OPEN_SHOP,
         baseVersion: 2,
-        payload: { teamId: 'team-1' },
+        payload: {
+          teamId: 'team-1',
+          round: 1,
+          currentShop: {
+            id: 'shop-api-1',
+            teamId: 'team-1',
+            round: 1,
+            cards: [
+              { slotId: 'slot-1', playerId: 'hidden-player', displayPlayerId: 'visible-player', tier: 3, price: 3, camp: 'local', snowCatShuffled: true },
+            ],
+          },
+          hexcoreActionWindows: [{ teamId: 'team-1', hexcoreId: 'heavenly-descent', active: true, slotId: 'slot-1' }],
+        },
       },
     });
     assert(openShop.status === 200 && openShop.body.event.type === multiplayerShared.EVENT_TYPES.SHOP_OPENED, '队长本人回合应能通过 API 提交开店 command');
     assert(openShop.body.tournament.stateVersion === 3, '开店 command 应推进 stateVersion');
+    assert(
+      openShop.body.tournament.snapshot.currentShop.cards.length === 0
+      && !JSON.stringify(openShop.body.tournament).includes('hidden-player')
+      && openShop.body.tournament.snapshot.roundStates['team-1']['1'].freeShopUsed
+      && !openShop.body.tournament.snapshot.hexcoreActionWindows.length,
+      '队长 command 可推进开店状态，但不能伪造服务端公开商店卡或海克斯窗口'
+    );
 
     const duplicate = await requestJson(port, 'POST', '/api/tournaments/t-api/commands', {
       sessionToken: captainJoin.body.session.sessionToken,
@@ -3331,12 +3406,42 @@ async function testMultiplayerApiServer() {
     });
     assert(invalidSession.status === 400 && /sessionToken/.test(invalidSession.body.error), '无效 sessionToken 不应提交 command');
 
+    const trustedShop = await requestJson(port, 'POST', '/api/tournaments/t-api/commands', {
+      sessionToken: refereeJoin.body.session.sessionToken,
+      command: {
+        commandId: 'cmd-api-ref-shop',
+        type: multiplayerShared.COMMAND_TYPES.OPEN_SHOP,
+        baseVersion: 3,
+        payload: {
+          teamId: 'team-1',
+          round: 1,
+          currentShop: {
+            id: 'shop-api-referee',
+            teamId: 'team-1',
+            round: 1,
+            cards: [
+              { slotId: 'slot-1', playerId: 'hidden-player', displayPlayerId: 'visible-player', tier: 3, price: 3, camp: 'local', snowCatShuffled: true },
+            ],
+          },
+          hexcoreActionWindows: [{ teamId: 'team-1', hexcoreId: 'heavenly-descent', active: true, slotId: 'slot-1' }],
+        },
+      },
+    });
+    assert(
+      trustedShop.status === 200
+      && trustedShop.body.tournament.stateVersion === 4
+      && trustedShop.body.tournament.snapshot.currentShop.cards[0].playerId === 'visible-player'
+      && !JSON.stringify(trustedShop.body.tournament).includes('hidden-player')
+      && trustedShop.body.tournament.snapshot.hexcoreActionWindows[0].hexcoreId === 'heavenly-descent',
+      '裁判可信投影应输出商店和海克斯窗口，并隐藏被打乱商店的真实暗牌 ID'
+    );
+
     const importedSecret = await requestJson(port, 'POST', '/api/tournaments/t-api/commands', {
       sessionToken: refereeJoin.body.session.sessionToken,
       command: {
         commandId: 'cmd-api-secret',
         type: multiplayerShared.COMMAND_TYPES.IMPORT_STATE,
-        baseVersion: 3,
+        baseVersion: 4,
         payload: {
           checksum: 'checksum-public-projection',
           sourceVersion: 'legacy-local',
@@ -3347,7 +3452,7 @@ async function testMultiplayerApiServer() {
         },
       },
     });
-    assert(importedSecret.status === 200 && importedSecret.body.tournament.stateVersion === 4, '裁判导入命令应能推进公开投影测试状态');
+    assert(importedSecret.status === 200 && importedSecret.body.tournament.stateVersion === 5, '裁判导入命令应能推进公开投影测试状态');
     const viewerProjection = await requestJson(port, 'GET', '/api/tournaments/t-api/projection?view=viewer');
     const projectionText = JSON.stringify(viewerProjection.body);
     assert(viewerProjection.status === 200 && viewerProjection.body.tournament.view === 'viewer', '观众投影接口应返回 viewer 视图');
@@ -4120,6 +4225,9 @@ function testMultiplayerClientSubmitsAuthoritativeCommands() {
   );
   assert(
     main.includes('function applyRoomProjection(tournament)')
+    && main.includes('applyCurrentShopProjection(snapshot.currentShop)')
+    && main.includes('applyRoundStatesProjection(snapshot.roundStates)')
+    && main.includes('applyHexcoreWindowProjection(snapshot.hexcoreActionWindows)')
     && main.includes('connectRoomEventStream()')
     && main.includes('new global.EventSource')
     && main.includes('eventSource.addEventListener')

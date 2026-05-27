@@ -1143,11 +1143,126 @@
     return changed;
   }
 
+  function applyRoundStatesProjection(roundStates) {
+    if (!roundStates || typeof roundStates !== 'object') return false;
+    let changed = false;
+    Object.entries(roundStates).forEach(([teamId, rounds]) => {
+      const captain = Hexcore2.state.captains.find(item => item.id === teamId);
+      if (!captain || !rounds || typeof rounds !== 'object') return;
+      captain.economy = captain.economy || { gold: 0, roundState: {} };
+      captain.economy.roundState = captain.economy.roundState || {};
+      Object.entries(rounds).forEach(([round, state]) => {
+        const roundKey = String(Math.max(1, Math.min(8, Math.round(Number(round) || 1))));
+        const current = captain.economy.roundState[roundKey] || {};
+        const next = {
+          ...current,
+          freeShopUsed: Boolean(state.freeShopUsed),
+          refreshCount: Math.max(0, Number(state.refreshCount) || 0),
+          purchaseUsed: Boolean(state.purchaseUsed),
+          skipped: Boolean(state.skipped),
+          photographerRefreshUsed: Boolean(state.photographerRefreshUsed),
+        };
+        if (JSON.stringify(current) !== JSON.stringify(next)) {
+          captain.economy.roundState[roundKey] = next;
+          changed = true;
+        }
+      });
+    });
+    return changed;
+  }
+
+  function normalizeProjectedShopCard(card, index) {
+    return {
+      slotId: String(card.slotId || `slot_${index + 1}`),
+      playerId: String(card.playerId || card.displayPlayerId || ''),
+      displayPlayerId: String(card.displayPlayerId || card.playerId || ''),
+      tier: Math.max(1, Math.min(5, Number(card.tier) || 1)),
+      price: Math.max(0, Number(card.price) || Number(card.tier) || 1),
+      camp: String(card.camp || ''),
+      purchased: Boolean(card.purchased),
+      purchasedAt: String(card.purchasedAt || ''),
+      projectedFromServer: true,
+      masked: Boolean(card.masked),
+    };
+  }
+
+  function applyCurrentShopProjection(shop) {
+    if (shop === null) {
+      if (Hexcore2.state.draft.currentDraw) {
+        Hexcore2.state.draft.currentDraw = null;
+        Hexcore2.state.draft.pickedThisTurn = false;
+        Hexcore2.state.draft.selectedSlot = 0;
+        return true;
+      }
+      return false;
+    }
+    if (!shop || typeof shop !== 'object' || !Array.isArray(shop.cards)) return false;
+    const nextDraw = {
+      id: String(shop.id || `shop_${Date.now()}`),
+      captainId: String(shop.captainId || shop.teamId || ''),
+      round: Math.max(1, Math.min(8, Number(shop.round) || Hexcore2.state.draft.round || 1)),
+      tier: 0,
+      effectiveTier: 0,
+      pickMode: 'shop',
+      generatedBy: String(shop.generatedBy || 'server_projection'),
+      refreshCostPaid: Math.max(0, Number(shop.refreshCostPaid) || 0),
+      reason: String(shop.reason || '服务端同步商店'),
+      appliedEffects: [],
+      purchaseEffects: [],
+      cards: shop.cards.map(normalizeProjectedShopCard),
+    };
+    const previous = JSON.stringify({
+      draw: Hexcore2.state.draft.currentDraw || null,
+      selectedSlot: Hexcore2.state.draft.selectedSlot,
+      pickedThisTurn: Hexcore2.state.draft.pickedThisTurn,
+    });
+    Hexcore2.state.draft.currentDraw = nextDraw;
+    Hexcore2.state.draft.selectedSlot = Math.max(0, Number(shop.selectedSlot) || 0);
+    Hexcore2.state.draft.pickedThisTurn = Boolean(shop.pickedThisTurn);
+    return previous !== JSON.stringify({
+      draw: nextDraw,
+      selectedSlot: Hexcore2.state.draft.selectedSlot,
+      pickedThisTurn: Hexcore2.state.draft.pickedThisTurn,
+    });
+  }
+
+  function applyHexcoreWindowProjection(windows) {
+    if (!Array.isArray(windows)) return false;
+    Hexcore2.state.multiplayer = Hexcore2.state.multiplayer || {};
+    const previous = JSON.stringify(Hexcore2.state.multiplayer.hexcoreActionWindows || []);
+    Hexcore2.state.multiplayer.hexcoreActionWindows = windows;
+    const heavenly = windows.find(item => item && item.active !== false && item.hexcoreId === 'heavenly-descent');
+    if (heavenly) {
+      Hexcore2.state.draft.heavenlyWindow = {
+        active: true,
+        resolved: false,
+        projectedFromServer: true,
+        round: Number(heavenly.round) || Hexcore2.state.draft.round,
+        captainId: String(heavenly.sourceTeamId || ''),
+        playerId: '',
+        slotId: String(heavenly.slotId || ''),
+        price: 0,
+        expiresAt: Number(heavenly.expiresAt) || 0,
+        createdAt: Date.now(),
+      };
+    } else if (Hexcore2.state.draft.heavenlyWindow && Hexcore2.state.draft.heavenlyWindow.projectedFromServer) {
+      Hexcore2.state.draft.heavenlyWindow = null;
+    }
+    return previous !== JSON.stringify(windows);
+  }
+
   function applyRoomProjection(tournament) {
     if (!tournament || typeof tournament !== 'object') return false;
     const snapshot = tournament.snapshot || {};
     let changed = false;
     if (applyTeamProjection(snapshot.teams)) changed = true;
+    if (applyRoundStatesProjection(snapshot.roundStates)) changed = true;
+    if (Object.prototype.hasOwnProperty.call(snapshot, 'currentShop') && applyCurrentShopProjection(snapshot.currentShop)) changed = true;
+    if (applyHexcoreWindowProjection(snapshot.hexcoreActionWindows)) changed = true;
+    if (Number.isInteger(Number(snapshot.currentRound)) && Hexcore2.state.draft.round !== Number(snapshot.currentRound)) {
+      Hexcore2.state.draft.round = Number(snapshot.currentRound);
+      changed = true;
+    }
     const currentTeamId = String(snapshot.currentTeamId || '').trim();
     if (currentTeamId && Array.isArray(Hexcore2.state.draft.currentOrder)) {
       const index = Hexcore2.state.draft.currentOrder.indexOf(currentTeamId);
@@ -1221,6 +1336,18 @@
             name: event.payload.name,
             renameUsed: true,
           }],
+        },
+      });
+    }
+    if (event.payload && (event.payload.currentShop || event.payload.roundState || event.payload.hexcoreActionWindows)) {
+      return applyRoomProjection({
+        stateVersion: event.stateVersion,
+        snapshot: {
+          currentShop: Object.prototype.hasOwnProperty.call(event.payload, 'currentShop') ? event.payload.currentShop : undefined,
+          roundStates: event.payload.roundState || undefined,
+          hexcoreActionWindows: event.payload.hexcoreActionWindows || undefined,
+          currentTeamId: event.payload.teamId || '',
+          currentRound: event.payload.round || undefined,
         },
       });
     }
