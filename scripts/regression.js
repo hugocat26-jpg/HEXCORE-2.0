@@ -3950,6 +3950,15 @@ async function testMultiplayerApiServer() {
         payload: { teamId: 'wave-start-buyer', slotId: hungryStartShop.body.tournament.snapshot.currentShop.cards[0].slotId },
       },
     });
+    const hungryStartRefresh = await requestJson(port, 'POST', '/api/tournaments/t-hungry-wave-start/commands', {
+      sessionToken: hungryStartBuyerJoin.body.session.sessionToken,
+      command: {
+        commandId: 'cmd-api-hungry-start-free-refresh',
+        type: multiplayerShared.COMMAND_TYPES.REFRESH_SHOP,
+        baseVersion: 4,
+        payload: { teamId: 'wave-start-buyer', round: 1 },
+      },
+    });
     const hungryStartText = JSON.stringify(hungryStartPurchase.body);
     assert(
       hungryStartSkip.status === 200
@@ -3961,11 +3970,16 @@ async function testMultiplayerApiServer() {
       && hungryStartPurchase.body.tournament.snapshot.teams[0].team.includes('wave-start-local-1')
       && hungryStartPurchase.body.tournament.snapshot.teams[1].economy.gold === 9
       && hungryStartPurchase.body.tournament.snapshot.roundStates['wave-start-buyer']['1'].purchaseUsed === false
+      && hungryStartPurchase.body.tournament.snapshot.roundStates['wave-start-buyer']['1'].hungryWaveFreeRefreshes === 1
       && hungryStartPurchase.body.tournament.snapshot.lastHungryWave.type === 'same_camp_steal'
+      && hungryStartRefresh.status === 200
+      && hungryStartRefresh.body.tournament.snapshot.currentShop.refreshCostPaid === 0
+      && hungryStartRefresh.body.tournament.snapshot.teams[1].economy.gold === 9
+      && hungryStartRefresh.body.tournament.snapshot.roundStates['wave-start-buyer']['1'].hungryWaveFreeRefreshes === 0
       && !hungryStartText.includes('hungryWaveRound')
       && !hungryStartText.includes('hexcoreAssignments')
       && !hungryStartText.includes('"players"'),
-      '服务端应在海浪持有者本轮跳过时登记海浪监听并清零金币，后续购买命中仍由服务端权威结算'
+      '服务端应在海浪持有者本轮跳过时登记海浪监听并清零金币，后续购买命中仍由服务端权威结算且返还1次免费刷新'
     );
 
     const hungryOppositeCreated = await requestJson(port, 'POST', '/api/tournaments', {

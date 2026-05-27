@@ -167,6 +167,7 @@ function publicRoundStates(roundStates = {}) {
         purchaseUsed: Boolean(state && state.purchaseUsed),
         skipped: Boolean(state && state.skipped),
         photographerRefreshUsed: Boolean(state && state.photographerRefreshUsed),
+        hungryWaveFreeRefreshes: Number(state && state.hungryWaveFreeRefreshes) || 0,
       },
     ])),
   ]).filter(([teamId]) => teamId));

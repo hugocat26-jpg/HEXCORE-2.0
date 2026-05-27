@@ -171,6 +171,7 @@ function normalizeRoundState(input = {}) {
     purchaseUsed: safeBoolean(input.purchaseUsed),
     skipped: safeBoolean(input.skipped),
     photographerRefreshUsed: safeBoolean(input.photographerRefreshUsed),
+    hungryWaveFreeRefreshes: safePositiveNumber(input.hungryWaveFreeRefreshes, 0, 9),
   };
 }
 
@@ -224,6 +225,7 @@ function ensureTeamEconomy(snapshot, teamId) {
 
 function refreshCostFor(snapshot, teamId, round) {
   const state = roundStateFor(snapshot, teamId, round);
+  if (safePositiveNumber(state.hungryWaveFreeRefreshes, 0, 9) > 0) return 0;
   const costs = snapshot.settings && Array.isArray(snapshot.settings.refreshCosts) && snapshot.settings.refreshCosts.length
     ? snapshot.settings.refreshCosts
     : [1, 2, 3, 4];
@@ -519,6 +521,13 @@ function refundTeamGold(snapshot, teamId, amount) {
   return economy.gold;
 }
 
+function grantHungryWaveFreeRefresh(snapshot, teamId, round) {
+  const current = roundStateFor(snapshot, teamId, round);
+  setRoundState(snapshot, teamId, round, {
+    hungryWaveFreeRefreshes: safePositiveNumber(current.hungryWaveFreeRefreshes, 0, 9) + 1,
+  });
+}
+
 function clearTeamGold(snapshot, teamId) {
   const economy = ensureTeamEconomy(snapshot, teamId);
   if (!economy) return 0;
@@ -592,6 +601,7 @@ function resolveHungryWaveAfterPurchase(snapshot, buyerId, playerId, pricePaid, 
   refundTeamGold(snapshot, cleanBuyerId, pricePaid);
   removePlayerFromTeam(snapshot, cleanBuyerId, cleanPlayerId);
   setRoundState(snapshot, cleanBuyerId, round, { freeShopUsed: true, purchaseUsed: false, skipped: false });
+  grantHungryWaveFreeRefresh(snapshot, cleanBuyerId, round);
   const result = {
     type: sameCamp ? 'same_camp_steal' : 'opposite_camp_return',
     sourceTeamId: wave.captainId,
@@ -718,9 +728,11 @@ function applyEventToSnapshot(snapshot, event) {
     let refreshCount = event.type === EVENT_TYPES.SHOP_REFRESHED
       ? safePositiveNumber(previousRoundState.refreshCount, 0, 99) + 1
       : 0;
+    let hungryWaveFreeRefreshes = safePositiveNumber(previousRoundState.hungryWaveFreeRefreshes, 0, 9);
     if (event.type === EVENT_TYPES.SHOP_REFRESHED) {
       refreshCostPaid = refreshCostFor(next, teamId, round);
       deductTeamGold(next, teamId, refreshCostPaid, '刷新商店');
+      if (hungryWaveFreeRefreshes > 0) hungryWaveFreeRefreshes -= 1;
     } else {
       ensureTeamEconomy(next, teamId);
     }
@@ -742,6 +754,7 @@ function applyEventToSnapshot(snapshot, event) {
       purchaseUsed: false,
       skipped: false,
       refreshCount,
+      hungryWaveFreeRefreshes,
     });
     if (trustedProjection) applyHexcoreWindows(next, payload.hexcoreActionWindows);
     if (trustedProjection) applyShopDisturbances(next, payload.shopDisturbances);

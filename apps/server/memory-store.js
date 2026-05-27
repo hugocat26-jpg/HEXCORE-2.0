@@ -211,6 +211,7 @@ function normalizeTeamEconomy(input = {}, team = {}) {
         purchaseUsed: Boolean(state && state.purchaseUsed),
         skipped: Boolean(state && state.skipped),
         photographerRefreshUsed: Boolean(state && state.photographerRefreshUsed),
+        hungryWaveFreeRefreshes: safePositiveNumber(state && state.hungryWaveFreeRefreshes, 0, 9),
       },
     ]))
     : {};
