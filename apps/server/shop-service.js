@@ -80,6 +80,45 @@ function playerToShopCard(player, index) {
   };
 }
 
+function teamIds(snapshot = {}) {
+  return Array.isArray(snapshot.teams)
+    ? snapshot.teams.map(team => safeText(team && (team.teamId || team.id), '', 80)).filter(Boolean)
+    : [];
+}
+
+function teamHasHexcore(snapshot = {}, teamId = '', hexcoreId = '') {
+  const assignments = snapshot.hexcoreAssignments && typeof snapshot.hexcoreAssignments === 'object'
+    ? snapshot.hexcoreAssignments
+    : {};
+  const list = Array.isArray(assignments[safeText(teamId, '', 80)]) ? assignments[safeText(teamId, '', 80)] : [];
+  return list.some(item => {
+    const currentId = safeText(item && (item.id || item.hexcoreId) || item, '', 80);
+    const status = safeText(item && item.status, 'available', 40);
+    return currentId === safeText(hexcoreId, '', 80) && status !== 'used';
+  });
+}
+
+function selectedHungryWaveTeamId(snapshot = {}, round = 1) {
+  const existing = snapshot.hungryWaveRound && typeof snapshot.hungryWaveRound === 'object' ? snapshot.hungryWaveRound : null;
+  const cleanRound = safePositiveNumber(round, 1, 8);
+  if (existing && safePositiveNumber(existing.round, 1, 8) === cleanRound && safeText(existing.captainId || existing.teamId, '', 80)) {
+    return safeText(existing.captainId || existing.teamId, '', 80);
+  }
+  const candidates = teamIds(snapshot).filter(teamId => teamHasHexcore(snapshot, teamId, 'hungry-wave'));
+  if (!candidates.length) return '';
+  const seed = `${safeText(snapshot.tournamentId, 'local', 80)}:${cleanRound}:hungry-wave`;
+  const digest = crypto.createHash('sha256').update(seed).digest('hex');
+  const index = Number.parseInt(digest.slice(0, 8), 16) % candidates.length;
+  return candidates[index] || '';
+}
+
+function hungryWaveAlreadyStarted(snapshot = {}, round = 1) {
+  const wave = snapshot.hungryWaveRound && typeof snapshot.hungryWaveRound === 'object' ? snapshot.hungryWaveRound : null;
+  return Boolean(wave
+    && safePositiveNumber(wave.round, 1, 8) === safePositiveNumber(round, 1, 8)
+    && wave.active !== false);
+}
+
 function activeDisplayDisturbance(snapshot = {}, teamId = '') {
   const cleanTeamId = safeText(teamId, '', 80);
   return (Array.isArray(snapshot.shopDisturbances) ? snapshot.shopDisturbances : [])
@@ -169,6 +208,18 @@ function createAuthoritativeCommandPayload(state, command, roleBinding = {}) {
   if (!shouldGenerateServerShop(command, roleBinding, payload)) return payload;
   const teamId = safeText(payload.teamId || command.teamId || roleBinding.teamId, '', 80);
   const round = safePositiveNumber(payload.round || state.snapshot && state.snapshot.currentRound, 1, 8);
+  if (command.type === COMMAND_TYPES.OPEN_SHOP
+    && selectedHungryWaveTeamId(state.snapshot || {}, round) === teamId
+    && !hungryWaveAlreadyStarted(state.snapshot || {}, round)) {
+    return {
+      ...payload,
+      currentShop: null,
+      refreshCount: roundRefreshCount(state.snapshot || {}, teamId, round),
+      shopDisturbances: consumeShopDisturbance(state.snapshot || {}, teamId),
+      hexcoreActionWindows: [],
+      _serverGeneratedProjection: true,
+    };
+  }
   const refreshCount = command.type === COMMAND_TYPES.REFRESH_SHOP
     ? roundRefreshCount(state.snapshot || {}, teamId, round) + 1
     : 0;

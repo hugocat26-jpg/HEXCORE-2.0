@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const {
   COMMAND_TYPES,
   EVENT_TYPES,
@@ -376,6 +377,22 @@ function teamHasHexcore(snapshot, teamId, hexcoreId) {
   });
 }
 
+function teamIdsWithHexcore(snapshot = {}, hexcoreId = '') {
+  return teamIdsFrom(snapshot).filter(teamId => teamHasHexcore(snapshot, teamId, hexcoreId));
+}
+
+function selectedHungryWaveTeamId(snapshot = {}, round = 1) {
+  const existing = normalizeHungryWaveRound(snapshot.hungryWaveRound);
+  const cleanRound = safePositiveNumber(round, 1, 8);
+  if (existing && existing.round === cleanRound && existing.captainId) return existing.captainId;
+  const candidates = teamIdsWithHexcore(snapshot, 'hungry-wave');
+  if (!candidates.length) return '';
+  const seed = `${safeText(snapshot.tournamentId, 'local', 80)}:${cleanRound}:hungry-wave`;
+  const digest = crypto.createHash('sha256').update(seed).digest('hex');
+  const index = Number.parseInt(digest.slice(0, 8), 16) % candidates.length;
+  return candidates[index] || '';
+}
+
 function markHexcoreUsed(snapshot, teamId, hexcoreId) {
   const cleanTeamId = safeText(teamId, '', 80);
   const cleanHexcoreId = safeText(hexcoreId, '', 80);
@@ -433,7 +450,7 @@ function hungryWaveAlreadyStarted(snapshot = {}, round = 1) {
 function isHungryWaveImmuneTeam(snapshot = {}, teamId = '', round = 1) {
   const cleanTeamId = safeText(teamId, '', 80);
   if (!cleanTeamId) return false;
-  if (teamHasHexcore(snapshot, cleanTeamId, 'hungry-wave')) return true;
+  if (selectedHungryWaveTeamId(snapshot, round) === cleanTeamId) return true;
   const wave = normalizeHungryWaveRound(snapshot.hungryWaveRound);
   return Boolean(wave
     && wave.active
@@ -677,7 +694,7 @@ function startHungryWaveOnSkip(snapshot, teamId, round, event) {
   const cleanTeamId = safeText(teamId, '', 80);
   const cleanRound = safePositiveNumber(round, 1, 8);
   if (!cleanTeamId || hungryWaveAlreadyStarted(snapshot, cleanRound)) return null;
-  if (!teamHasHexcore(snapshot, cleanTeamId, 'hungry-wave')) return null;
+  if (selectedHungryWaveTeamId(snapshot, cleanRound) !== cleanTeamId) return null;
   const goldBefore = clearTeamGold(snapshot, cleanTeamId);
   const result = {
     type: 'round_start',
@@ -798,6 +815,21 @@ function applyEventToSnapshot(snapshot, event) {
     const refereeProjection = canApplyClientProjection(payload);
     const trustedProjection = refereeProjection || payload._serverGeneratedProjection === true;
     const previousRoundState = roundStateFor(next, teamId, round);
+    if (!refereeProjection
+      && event.type === EVENT_TYPES.SHOP_OPENED
+      && selectedHungryWaveTeamId(next, round) === teamId
+      && !hungryWaveAlreadyStarted(next, round)) {
+      ensureTeamEconomy(next, teamId);
+      startHungryWaveOnSkip(next, teamId, round, event);
+      setRoundState(next, teamId, round, { freeShopUsed: true, purchaseUsed: false, skipped: true });
+      next.currentShop = null;
+      const nextPointer = nextTurnPointer(next, teamId);
+      next.currentTeamId = nextPointer.nextTeamId;
+      next.currentRound = nextPointer.nextRound;
+      next.currentPhase = 'gold_shop';
+      if (next.currentRound > round) applyRoundIncome(next, next.currentRound);
+      return next;
+    }
     const currentShopForTeam = next.currentShop
       && typeof next.currentShop === 'object'
       && safeText(next.currentShop.teamId || next.currentShop.captainId, '', 80) === teamId;

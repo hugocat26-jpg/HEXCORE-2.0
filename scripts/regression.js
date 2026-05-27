@@ -3936,8 +3936,9 @@ async function testMultiplayerApiServer() {
       && stormHungryAShop.body.tournament.snapshot.currentShop.cards.some(card => card.masked)
       && stormHungrySkipA.status === 200
       && stormHungryWaveShop.status === 200
-      && stormHungryWaveShop.body.tournament.snapshot.currentShop.cards.every(card => !card.masked),
-      '骤雨血雾清风服务端权威目标应跳过海浪免疫队伍，且不能直接指定海浪免疫目标'
+      && stormHungryWaveShop.body.tournament.snapshot.currentShop === null
+      && stormHungryWaveShop.body.tournament.snapshot.roundStates['storm-h-wave']['1'].skipped,
+      '骤雨血雾清风服务端权威目标应跳过海浪免疫队伍，且海浪队伍开店时会被服务端自动跳过'
     );
 
     const hungrySameCreated = await requestJson(port, 'POST', '/api/tournaments', {
@@ -4094,6 +4095,63 @@ async function testMultiplayerApiServer() {
       && !hungryStartText.includes('hexcoreAssignments')
       && !hungryStartText.includes('"players"'),
       '服务端应在海浪持有者本轮跳过时登记海浪监听并清零金币，后续购买命中仍由服务端权威结算且返还1次免费刷新'
+    );
+
+    const hungryAutoCreated = await requestJson(port, 'POST', '/api/tournaments', {
+      id: 't-hungry-wave-auto',
+      name: '海浪自动跳过权威回归',
+      actorId: 'referee-hungry-auto',
+      settings: { initialGold: 9, refreshCosts: [1, 2, 3, 4] },
+      teams: [
+        { teamId: 'wave-auto-source', name: '自动海浪', camp: 'local', code: 'wave-auto-source-code', economy: { gold: 9 } },
+        { teamId: 'wave-auto-buyer', name: '自动购买者', camp: 'local', code: 'wave-auto-buyer-code', economy: { gold: 9 } },
+      ],
+      hexcoreAssignments: {
+        'wave-auto-source': [{ id: 'hungry-wave', status: 'passive' }],
+      },
+      players: [
+        { id: 'wave-auto-local-1', name: '自动本地一号', gameId: 'HA1', camp: 'local', tier: 2, score: 82, status: 'available' },
+      ],
+    });
+    const hungryAutoSourceJoin = await requestJson(port, 'POST', '/api/tournaments/t-hungry-wave-auto/join', {
+      code: hungryAutoCreated.body.room.captainCodes[0].code,
+      displayName: '自动海浪队长',
+    });
+    const hungryAutoBuyerJoin = await requestJson(port, 'POST', '/api/tournaments/t-hungry-wave-auto/join', {
+      code: hungryAutoCreated.body.room.captainCodes[1].code,
+      displayName: '自动购买队长',
+    });
+    const hungryAutoOpen = await requestJson(port, 'POST', '/api/tournaments/t-hungry-wave-auto/commands', {
+      sessionToken: hungryAutoSourceJoin.body.session.sessionToken,
+      command: {
+        commandId: 'cmd-api-hungry-auto-open',
+        type: multiplayerShared.COMMAND_TYPES.OPEN_SHOP,
+        baseVersion: 1,
+        payload: { teamId: 'wave-auto-source', round: 1 },
+      },
+    });
+    const hungryAutoOpenText = JSON.stringify(hungryAutoOpen.body);
+    const hungryAutoShop = await requestJson(port, 'POST', '/api/tournaments/t-hungry-wave-auto/commands', {
+      sessionToken: hungryAutoBuyerJoin.body.session.sessionToken,
+      command: {
+        commandId: 'cmd-api-hungry-auto-shop',
+        type: multiplayerShared.COMMAND_TYPES.OPEN_SHOP,
+        baseVersion: 2,
+        payload: { teamId: 'wave-auto-buyer', round: 1 },
+      },
+    });
+    assert(
+      hungryAutoOpen.status === 200
+      && hungryAutoOpen.body.tournament.snapshot.currentTeamId === 'wave-auto-buyer'
+      && hungryAutoOpen.body.tournament.snapshot.currentShop === null
+      && hungryAutoOpen.body.tournament.snapshot.teams[0].economy.gold === 0
+      && hungryAutoOpen.body.tournament.snapshot.roundStates['wave-auto-source']['1'].skipped
+      && hungryAutoOpen.body.tournament.snapshot.lastHungryWave.type === 'round_start'
+      && !hungryAutoOpenText.includes('wave-auto-local-1')
+      && !hungryAutoOpenText.includes('hungryWaveRound')
+      && hungryAutoShop.status === 200
+      && hungryAutoShop.body.tournament.snapshot.currentShop.cards.length === 1,
+      '海浪触发队伍尝试开店时服务端应自动登记海浪并跳过，不生成或泄漏该队商店'
     );
 
     const hungryOppositeCreated = await requestJson(port, 'POST', '/api/tournaments', {
