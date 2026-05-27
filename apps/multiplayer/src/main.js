@@ -1088,6 +1088,28 @@
     global.location.href = `${global.location.pathname || '/'}?${query}`;
   }
 
+  function clearMultiplayerSession() {
+    try {
+      if (Hexcore2.roomEventSource && Hexcore2.roomEventSource.close) Hexcore2.roomEventSource.close();
+    } catch (error) {}
+    Hexcore2.roomEventSource = null;
+    try {
+      if (global.localStorage) global.localStorage.removeItem(MULTIPLAYER_SESSION_KEY);
+    } catch (error) {}
+    if (Hexcore2.state && Hexcore2.state.ui) delete Hexcore2.state.ui.roomSyncStatus;
+    if (Hexcore2.state && Hexcore2.state.multiplayer) delete Hexcore2.state.multiplayer.stateVersion;
+  }
+
+  function returnToMultiplayerGate() {
+    const path = global.location && global.location.pathname ? global.location.pathname : '/';
+    if (global.history && global.history.replaceState) {
+      global.history.replaceState({}, '', path);
+      if (Hexcore2.ui && Hexcore2.ui.render) Hexcore2.ui.render();
+      return;
+    }
+    if (global.location) global.location.href = path;
+  }
+
   async function joinRoomWithCode(apiBase, tournamentId, code) {
     const response = await fetch(`${apiBase}/api/tournaments/${encodeURIComponent(tournamentId)}/join`, {
       method: 'POST',
@@ -1249,6 +1271,12 @@
   }
 
   Hexcore2.actions = {
+    leaveMultiplayerRoom() {
+      clearMultiplayerSession();
+      Hexcore2.eventStore.append('多人房间', '已返回多人房间入口，可重新创建或加入赛事', 'info');
+      returnToMultiplayerGate();
+    },
+
     async joinRoom() {
       const apiBaseInput = document.getElementById('join-api-base');
       const tournamentInput = document.getElementById('join-tournament-id');

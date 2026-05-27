@@ -1108,7 +1108,7 @@ function testSystemIntegrityCheck() {
   H.actions.setActiveView('settings');
   H.actions.runSystemCheck();
 
-  assert(H.meta.version === '2.0.4' && app.innerHTML.includes('HEXCORE 2.0 v2.0.4 裁判端'), '系统设置页应展示统一项目版本号');
+  assert(H.meta.version === '2.0.5' && app.innerHTML.includes('HEXCORE 2.0 v2.0.5 裁判端'), '系统设置页应展示统一项目版本号');
   assert(H.state.ui.systemCheckResult && !H.state.ui.systemCheckResult.ok, '状态检查应保存可视化结果');
   assert(H.state.ui.systemCheckResult.issues.some(issue => issue.type === '重复归属'), '状态检查应识别重复归属');
   assert(H.state.ui.systemCheckResult.issues.some(issue => issue.type === '跨阵营'), '状态检查应识别跨阵营');
@@ -4046,6 +4046,8 @@ function testMultiplayerJoinGateAndCors() {
     && ui.includes('create-tournament-name')
     && ui.includes('createdRoomPanel()')
     && ui.includes('window.hexcoreUI.enterCreatedRefereeRoom()')
+    && ui.includes('返回多人房间')
+    && ui.includes('window.hexcoreUI.leaveMultiplayerRoom()')
     && ui.includes('房间码明文只显示一次'),
     '多人端无角色会话时应显示房间加入页，而不是直接暴露裁判控制台',
   );
@@ -4058,10 +4060,14 @@ function testMultiplayerJoinGateAndCors() {
     && main.includes("role=captain&teamId=")
     && main.includes('createTournamentRoom()')
     && main.includes('enterCreatedRefereeRoom()')
+    && main.includes('leaveMultiplayerRoom()')
+    && main.includes('localStorage.removeItem(MULTIPLAYER_SESSION_KEY)')
+    && main.includes('Hexcore2.roomEventSource.close')
+    && main.includes('history.replaceState({}, \'\', path)')
     && main.includes('/api/tournaments')
     && main.includes('persistJoinedSession(apiBase, tournamentId, payload)')
     && main.includes('房间码明文只显示一次'),
-    '加入房间应调用服务端 join 接口，保存 sessionToken，并按返回角色进入对应端',
+    '加入房间应调用服务端 join 接口，保存 sessionToken，按返回角色进入对应端，并能清理会话返回多人房间',
   );
   assert(
     server.includes('Access-Control-Allow-Origin')
@@ -4081,6 +4087,7 @@ function testMultiplayerJoinGateAndCors() {
     && css.includes('.join-gate-grid')
     && css.includes('.created-room-panel')
     && css.includes('.room-code-row')
+    && css.includes('.multiplayer-return-btn')
     && css.includes('@media (max-width: 760px)'),
     '加入页应脱离主控制台侧边栏栅格，居中显示完整表单，不能被压成窄列逐字换行',
   );

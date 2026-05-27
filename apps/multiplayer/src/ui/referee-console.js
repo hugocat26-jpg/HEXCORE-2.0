@@ -1660,9 +1660,11 @@
       : Hexcore2.state.draft.phase === 'completed'
       ? '选人已完成'
       : '选人进行中';
+    const showRoomReturn = hasExplicitClientRole() || storedMultiplayerSession();
     return `
       <header class="topbar">
         <div class="mode">${isReadonlyClient() ? '观众端' : (isCaptainClient() ? '队长端' : '裁判代执行')}</div>
+        ${showRoomReturn ? '<button class="ghost-btn multiplayer-return-btn" onclick="window.hexcoreUI.leaveMultiplayerRoom()">返回多人房间</button>' : ''}
         <div class="phase">当前阶段：<strong>第 ${Hexcore2.state.draft.round} 轮 / 金币商店</strong></div>
         <div class="captain-title">当前队长：<strong>${captain ? escapeHtml(captain.name) : '无'}</strong></div>
         <div class="captain-title">金币：<strong>${economy ? economy.gold : 0}</strong></div>
