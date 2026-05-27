@@ -1108,7 +1108,7 @@ function testSystemIntegrityCheck() {
   H.actions.setActiveView('settings');
   H.actions.runSystemCheck();
 
-  assert(H.meta.version === '2.0.11' && app.innerHTML.includes('HEXCORE 2.0 v2.0.11 裁判端'), '系统设置页应展示统一项目版本号');
+  assert(H.meta.version === '2.0.12' && app.innerHTML.includes('HEXCORE 2.0 v2.0.12 裁判端'), '系统设置页应展示统一项目版本号');
   assert(H.state.ui.systemCheckResult && !H.state.ui.systemCheckResult.ok, '状态检查应保存可视化结果');
   assert(H.state.ui.systemCheckResult.issues.some(issue => issue.type === '重复归属'), '状态检查应识别重复归属');
   assert(H.state.ui.systemCheckResult.issues.some(issue => issue.type === '跨阵营'), '状态检查应识别跨阵营');
@@ -3689,6 +3689,80 @@ async function testMultiplayerApiServer() {
     assert(projectionText.includes('公开摘要'), '观众投影应保留允许公开的摘要字段');
     assert(projectionText.includes('裁判公告：本轮按现场判定继续') && projectionText.includes('仅公告，不直接改写队伍或选手状态'), '观众投影应展示裁判强制裁决公告');
     assert(!projectionText.includes('should-not-leak') && !projectionText.includes('hidden-player') && !projectionText.includes('hidden-seed') && !projectionText.includes('ruling-hidden-seed') && !projectionText.includes('should-not-leak-player'), '观众投影不应泄漏房间码、真实暗牌、内部随机字段或裁决 payload 额外字段');
+    const rollback = await requestJson(port, 'POST', '/api/tournaments/t-api/commands', {
+      sessionToken: refereeJoin.body.session.sessionToken,
+      command: {
+        commandId: 'cmd-api-rollback',
+        type: multiplayerShared.COMMAND_TYPES.ROLLBACK_TO_VERSION,
+        baseVersion: 9,
+        payload: {
+          targetStateVersion: 8,
+          reason: '回滚到裁判公告前',
+        },
+      },
+    });
+    const rollbackText = JSON.stringify(rollback.body);
+    assert(
+      rollback.status === 200
+      && rollback.body.event.type === multiplayerShared.EVENT_TYPES.STATE_ROLLED_BACK
+      && rollback.body.tournament.stateVersion === 10
+      && rollback.body.tournament.snapshot.lastRollback.targetStateVersion === 8
+      && rollback.body.tournament.snapshot.lastRollback.reason === '回滚到裁判公告前'
+      && rollback.body.tournament.snapshot.lastRefereeRuling === null
+      && !rollbackText.includes('auditLog')
+      && !rollbackText.includes('should-not-leak-player'),
+      '裁判回滚应恢复到目标版本快照，公开回滚提示，不暴露私有检查点或审计日志'
+    );
+    const viewerAfterRollback = await requestJson(port, 'GET', '/api/tournaments/t-api/projection?view=viewer');
+    assert(
+      JSON.stringify(viewerAfterRollback.body).includes('回滚到裁判公告前')
+      && !JSON.stringify(viewerAfterRollback.body).includes('裁判公告：本轮按现场判定继续'),
+      '回滚后观众投影应同步新版本快照，并移除被回滚掉的裁判公告'
+    );
+    const auditAfterRollback = await requestJson(port, 'GET', `/api/tournaments/t-api/audit?sessionToken=${encodeURIComponent(refereeJoin.body.session.sessionToken)}`);
+    assert(
+      auditAfterRollback.body.auditLog.some(entry => entry.eventType === multiplayerShared.EVENT_TYPES.STATE_ROLLED_BACK && entry.targetStateVersion === 8 && entry.restoredStateVersion === 8),
+      '回滚动作应进入裁判审计摘要'
+    );
+    const captainRollback = await requestJson(port, 'POST', '/api/tournaments/t-api/commands', {
+      sessionToken: captainJoin.body.session.sessionToken,
+      command: {
+        commandId: 'cmd-api-captain-rollback',
+        type: multiplayerShared.COMMAND_TYPES.ROLLBACK_TO_VERSION,
+        baseVersion: 10,
+        payload: {
+          targetStateVersion: 8,
+          reason: '队长越权回滚',
+        },
+      },
+    });
+    assert(captainRollback.status === 400 && /无权/.test(captainRollback.body.error), '队长端不应能提交回滚命令');
+    const viewerRollback = await requestJson(port, 'POST', '/api/tournaments/t-api/commands', {
+      sessionToken: viewerJoin.body.session.sessionToken,
+      command: {
+        commandId: 'cmd-api-viewer-rollback',
+        type: multiplayerShared.COMMAND_TYPES.ROLLBACK_TO_VERSION,
+        baseVersion: 10,
+        payload: {
+          targetStateVersion: 8,
+          reason: '观众越权回滚',
+        },
+      },
+    });
+    assert(viewerRollback.status === 400 && /无权/.test(viewerRollback.body.error), '观众端不应能提交回滚命令');
+    const badRollback = await requestJson(port, 'POST', '/api/tournaments/t-api/commands', {
+      sessionToken: refereeJoin.body.session.sessionToken,
+      command: {
+        commandId: 'cmd-api-bad-rollback',
+        type: multiplayerShared.COMMAND_TYPES.ROLLBACK_TO_VERSION,
+        baseVersion: 10,
+        payload: {
+          targetStateVersion: 10,
+          reason: '无效回滚',
+        },
+      },
+    });
+    assert(badRollback.status === 400 && /早于当前版本/.test(badRollback.body.error), '回滚目标必须早于当前服务端版本');
     const badProjection = await requestJson(port, 'GET', '/api/tournaments/t-api/projection?view=referee');
     assert(badProjection.status === 400 && /未知只读投影视图/.test(badProjection.body.error), '只读投影接口不应接受裁判视图参数');
 

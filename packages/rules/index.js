@@ -29,7 +29,8 @@ function safeBoolean(value) {
 function createAuthorityState(input = {}) {
   const tournamentId = String(input.tournamentId || 'tournament-local-dev').trim();
   if (!tournamentId) throw new Error('tournamentId 不能为空');
-  return {
+  const createdAt = safeText(input.createdAt, new Date().toISOString(), 40);
+  const state = {
     schemaVersion: STATE_SCHEMA_VERSION,
     rulesVersion: input.rulesVersion || RULES_VERSION,
     tournamentId,
@@ -41,6 +42,12 @@ function createAuthorityState(input = {}) {
     auditLog: [],
     snapshot: input.snapshot ? clone(input.snapshot) : {},
   };
+  state.checkpoints = [checkpointFromState(state, {
+    eventSeq: 0,
+    type: 'InitialState',
+    createdAt,
+  })];
+  return state;
 }
 
 function normalizeRoleBinding(binding = {}) {
@@ -368,11 +375,53 @@ function applyEventToSnapshot(snapshot, event) {
   return next;
 }
 
+function checkpointFromState(state, event = {}) {
+  return {
+    stateVersion: state.stateVersion,
+    eventSeq: state.eventSeq,
+    eventType: safeText(event.type, 'InitialState', 80),
+    sourceCommandId: safeText(event.sourceCommandId, '', 80),
+    actorId: safeText(event.actorId, '', 80),
+    createdAt: safeText(event.createdAt, new Date().toISOString(), 40),
+    paused: Boolean(state.paused),
+    snapshot: clone(state.snapshot || {}),
+  };
+}
+
+function rollbackCheckpointFor(state, payload = {}) {
+  const targetStateVersion = Number(payload.targetStateVersion);
+  if (!Number.isInteger(targetStateVersion) || targetStateVersion < 0) {
+    throw new Error('回滚目标版本必须是非负整数');
+  }
+  if (targetStateVersion >= state.stateVersion) {
+    throw new Error('回滚目标版本必须早于当前版本');
+  }
+  const checkpoints = Array.isArray(state.checkpoints) ? state.checkpoints : [];
+  const checkpoint = checkpoints.find(item => Number(item.stateVersion) === targetStateVersion);
+  if (!checkpoint) throw new Error(`未找到可回滚的状态版本：${targetStateVersion}`);
+  return checkpoint;
+}
+
+function applyRollbackCheckpoint(state, event, checkpoint) {
+  const payload = event.payload || {};
+  state.snapshot = clone(checkpoint.snapshot || {});
+  state.paused = Boolean(checkpoint.paused);
+  state.snapshot.lastRollback = {
+    eventSeq: event.eventSeq,
+    targetStateVersion: Number(checkpoint.stateVersion) || 0,
+    restoredStateVersion: Number(checkpoint.stateVersion) || 0,
+    reason: safeText(payload.reason, '', 160),
+    createdAt: event.createdAt,
+  };
+  return state;
+}
+
 const AUDITED_EVENT_TYPES = new Set([
   EVENT_TYPES.STATE_IMPORTED,
   EVENT_TYPES.TOURNAMENT_PAUSED,
   EVENT_TYPES.TOURNAMENT_RESUMED,
   EVENT_TYPES.REFEREE_RULING_FORCED,
+  EVENT_TYPES.STATE_ROLLED_BACK,
   EVENT_TYPES.MATCH_SCORE_RECORDED,
 ]);
 
@@ -392,6 +441,8 @@ function auditEntryFromEvent(event, auditSeq) {
     matchId: safeText(payload.matchId, '', 80),
     reason: safeText(payload.reason, '', 160),
     patchSummary: safeText(payload.patchSummary, '', 240),
+    targetStateVersion: Number.isInteger(Number(payload.targetStateVersion)) ? Number(payload.targetStateVersion) : null,
+    restoredStateVersion: Number.isInteger(Number(payload.restoredStateVersion)) ? Number(payload.restoredStateVersion) : null,
     scoreA: Number.isFinite(Number(payload.scoreA)) ? Number(payload.scoreA) : null,
     scoreB: Number.isFinite(Number(payload.scoreB)) ? Number(payload.scoreB) : null,
     winnerTeamId: safeText(payload.winnerTeamId, '', 80),
@@ -402,8 +453,19 @@ function auditEntryFromEvent(event, auditSeq) {
 function appendEvent(state, eventInput) {
   assertAuthorityState(state);
   const next = clone(state);
+  const rollbackCheckpoint = eventInput.type === EVENT_TYPES.STATE_ROLLED_BACK
+    ? rollbackCheckpointFor(state, eventInput.payload || {})
+    : null;
+  const payload = rollbackCheckpoint
+    ? {
+      ...(eventInput.payload || {}),
+      targetStateVersion: Number(rollbackCheckpoint.stateVersion) || 0,
+      restoredStateVersion: Number(rollbackCheckpoint.stateVersion) || 0,
+    }
+    : (eventInput.payload || {});
   const event = createEventEnvelope({
     ...eventInput,
+    payload,
     eventSeq: next.eventSeq + 1,
     stateVersion: next.stateVersion + 1,
     tournamentId: next.tournamentId,
@@ -414,12 +476,21 @@ function appendEvent(state, eventInput) {
   next.auditLog = Array.isArray(next.auditLog) ? next.auditLog : [];
   const auditEntry = auditEntryFromEvent(event, next.auditLog.length + 1);
   if (auditEntry) next.auditLog.push(auditEntry);
-  next.snapshot = applyEventToSnapshot(next.snapshot, event);
+  if (rollbackCheckpoint) {
+    applyRollbackCheckpoint(next, event, rollbackCheckpoint);
+  } else {
+    next.snapshot = applyEventToSnapshot(next.snapshot, event);
+  }
   if (event.sourceCommandId) {
     next.processedCommands[event.sourceCommandId] = event;
   }
-  if (event.type === EVENT_TYPES.TOURNAMENT_PAUSED) next.paused = true;
-  if (event.type === EVENT_TYPES.TOURNAMENT_RESUMED) next.paused = false;
+  if (!rollbackCheckpoint) {
+    if (event.type === EVENT_TYPES.TOURNAMENT_PAUSED) next.paused = true;
+    if (event.type === EVENT_TYPES.TOURNAMENT_RESUMED) next.paused = false;
+  }
+  next.checkpoints = Array.isArray(next.checkpoints) ? next.checkpoints : [];
+  next.checkpoints.push(checkpointFromState(next, event));
+  next.checkpoints = next.checkpoints.slice(-60);
   return next;
 }
 

@@ -29,6 +29,8 @@ const EVENT_PUBLIC_PAYLOAD_FIELDS = [
   'phase',
   'summary',
   'message',
+  'targetStateVersion',
+  'restoredStateVersion',
 ];
 
 const VIEW_TYPES = Object.freeze({
@@ -171,6 +173,17 @@ function publicRefereeRuling(ruling = null) {
   };
 }
 
+function publicRollback(rollback = null) {
+  if (!rollback || typeof rollback !== 'object') return null;
+  return {
+    eventSeq: Number(rollback.eventSeq) || 0,
+    targetStateVersion: Number(rollback.targetStateVersion) || 0,
+    restoredStateVersion: Number(rollback.restoredStateVersion) || 0,
+    reason: String(rollback.reason || '').trim().slice(0, 160),
+    createdAt: String(rollback.createdAt || '').trim().slice(0, 40),
+  };
+}
+
 function resolvePerspectiveTeamId(snapshot = {}, requestedTeamId = '') {
   const currentTeamId = String(snapshot.currentTeamId || '').trim();
   const teamId = String(requestedTeamId || '').trim();
@@ -185,6 +198,7 @@ function projectSnapshotData(snapshot = {}, view = VIEW_TYPES.PUBLIC, options = 
     currentShop: publicCurrentShop(snapshot.currentShop),
     lastPurchase: publicLastPurchase(snapshot.lastPurchase),
     lastRefereeRuling: publicRefereeRuling(snapshot.lastRefereeRuling),
+    lastRollback: publicRollback(snapshot.lastRollback),
     roundStates: publicRoundStates(snapshot.roundStates),
     hexcoreActionWindows: publicHexcoreWindows(snapshot.hexcoreActionWindows),
     perspectiveTeamId: resolvePerspectiveTeamId(snapshot, options.teamId),

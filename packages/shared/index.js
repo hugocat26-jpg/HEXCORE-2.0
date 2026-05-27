@@ -25,6 +25,7 @@ const COMMAND_TYPES = Object.freeze({
   PAUSE_TOURNAMENT: 'PauseTournament',
   RESUME_TOURNAMENT: 'ResumeTournament',
   FORCE_REFEREE_RULING: 'ForceRefereeRuling',
+  ROLLBACK_TO_VERSION: 'RollbackToVersion',
   RECORD_MATCH_SCORE: 'RecordMatchScore',
 });
 
@@ -43,6 +44,7 @@ const EVENT_TYPES = Object.freeze({
   TOURNAMENT_PAUSED: 'TournamentPaused',
   TOURNAMENT_RESUMED: 'TournamentResumed',
   REFEREE_RULING_FORCED: 'RefereeRulingForced',
+  STATE_ROLLED_BACK: 'StateRolledBack',
   MATCH_SCORE_RECORDED: 'MatchScoreRecorded',
 });
 
@@ -53,6 +55,7 @@ const ROLE_COMMANDS = Object.freeze({
     COMMAND_TYPES.IMPORT_STATE,
     COMMAND_TYPES.PAUSE_TOURNAMENT,
     COMMAND_TYPES.RESUME_TOURNAMENT,
+    COMMAND_TYPES.ROLLBACK_TO_VERSION,
   ],
   [ROLES.REFEREE]: [
     COMMAND_TYPES.IMPORT_STATE,
@@ -68,6 +71,7 @@ const ROLE_COMMANDS = Object.freeze({
     COMMAND_TYPES.PAUSE_TOURNAMENT,
     COMMAND_TYPES.RESUME_TOURNAMENT,
     COMMAND_TYPES.FORCE_REFEREE_RULING,
+    COMMAND_TYPES.ROLLBACK_TO_VERSION,
     COMMAND_TYPES.RECORD_MATCH_SCORE,
   ],
   [ROLES.SUPERVISOR]: [],
@@ -100,6 +104,7 @@ const REQUIRED_PAYLOAD_FIELDS = Object.freeze({
   [COMMAND_TYPES.PAUSE_TOURNAMENT]: ['reason'],
   [COMMAND_TYPES.RESUME_TOURNAMENT]: ['reason'],
   [COMMAND_TYPES.FORCE_REFEREE_RULING]: ['reason', 'patchSummary'],
+  [COMMAND_TYPES.ROLLBACK_TO_VERSION]: ['targetStateVersion', 'reason'],
   [COMMAND_TYPES.RECORD_MATCH_SCORE]: ['matchId', 'scoreA', 'scoreB'],
 });
 
