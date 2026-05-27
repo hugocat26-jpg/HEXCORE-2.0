@@ -1108,7 +1108,7 @@ function testSystemIntegrityCheck() {
   H.actions.setActiveView('settings');
   H.actions.runSystemCheck();
 
-  assert(H.meta.version === '2.0.7' && app.innerHTML.includes('HEXCORE 2.0 v2.0.7 裁判端'), '系统设置页应展示统一项目版本号');
+  assert(H.meta.version === '2.0.8' && app.innerHTML.includes('HEXCORE 2.0 v2.0.8 裁判端'), '系统设置页应展示统一项目版本号');
   assert(H.state.ui.systemCheckResult && !H.state.ui.systemCheckResult.ok, '状态检查应保存可视化结果');
   assert(H.state.ui.systemCheckResult.issues.some(issue => issue.type === '重复归属'), '状态检查应识别重复归属');
   assert(H.state.ui.systemCheckResult.issues.some(issue => issue.type === '跨阵营'), '状态检查应识别跨阵营');
@@ -3077,6 +3077,7 @@ function testMultiplayerSharedRulePreflight() {
     {
       teamId: 'team-1',
       round: 1,
+      commandRole: multiplayerShared.ROLES.REFEREE,
       currentShop: {
         id: 'shop-rule-1',
         teamId: 'team-1',
@@ -3301,6 +3302,7 @@ function testMultiplayerSharedRulePreflight() {
 async function testMultiplayerApiServer() {
   const server = multiplayerApiServer.createServer();
   const port = await listen(server);
+  let sse = null;
   try {
     const health = await requestJson(port, 'GET', '/health');
     assert(health.status === 200 && health.body.ok && health.body.rulesVersion === multiplayerShared.RULES_VERSION, '多人端服务应提供健康检查和规则版本');
@@ -3350,7 +3352,7 @@ async function testMultiplayerApiServer() {
     const snapshot = await requestJson(port, 'GET', '/api/tournaments/t-api/snapshot');
     assert(snapshot.status === 200 && snapshot.body.tournament.snapshot.name === 'API 回归赛事', '多人端服务应读取赛事快照');
 
-    const sse = await subscribeSse(port, '/api/tournaments/t-api/events');
+    sse = await subscribeSse(port, '/api/tournaments/t-api/events');
     assert(sse.initial.includes('event: snapshot') && sse.initial.includes('"tournamentId":"t-api"'), 'SSE 应先推送当前快照');
 
     const command = await requestJson(port, 'POST', '/api/tournaments/t-api/commands', {
@@ -3374,6 +3376,7 @@ async function testMultiplayerApiServer() {
         payload: {
           teamId: 'team-1',
           round: 1,
+          commandRole: multiplayerShared.ROLES.REFEREE,
           currentShop: {
             id: 'shop-api-1',
             teamId: 'team-1',
@@ -3429,6 +3432,62 @@ async function testMultiplayerApiServer() {
       },
     });
     assert(invalidSession.status === 400 && /sessionToken/.test(invalidSession.body.error), '无效 sessionToken 不应提交 command');
+
+    const shopCreated = await requestJson(port, 'POST', '/api/tournaments', {
+      id: 't-shop',
+      name: '服务端商店回归',
+      actorId: 'referee-shop',
+      teams: [{ teamId: 'team-local', name: '本地队', camp: 'local', code: 'shop-captain-code' }],
+      players: [
+        { id: 'local-1', name: '本地一号', gameId: 'L1', camp: 'local', tier: 1, score: 81, status: 'available', heroes: ['阿狸'] },
+        { id: 'local-2', name: '本地二号', gameId: 'L2', camp: 'local', tier: 2, score: 82, status: 'available', heroes: ['蔚'] },
+        { id: 'local-3', name: '本地三号', gameId: 'L3', camp: 'local', tier: 3, score: 83, status: 'available', heroes: ['发条'] },
+        { id: 'local-4', name: '本地四号', gameId: 'L4', camp: 'local', tier: 4, score: 84, status: 'available', heroes: ['奥恩'] },
+        { id: 'local-5', name: '本地五号', gameId: 'L5', camp: 'local', tier: 5, score: 85, status: 'available', heroes: ['卡莎'] },
+        { id: 'local-captain', name: '本地队长', gameId: 'LC', camp: 'local', tier: 5, score: 99, status: 'captain', isCaptain: true },
+        { id: 'outsider-1', name: '外地一号', gameId: 'O1', camp: 'outsider', tier: 1, score: 80, status: 'available' },
+      ],
+    });
+    assert(
+      shopCreated.status === 201
+      && !JSON.stringify(shopCreated.body.tournament.snapshot).includes('local-1')
+      && shopCreated.body.tournament.snapshot.teams[0].camp === 'local',
+      '创建赛事可保存服务端私有选手池，但公开快照只返回必要队伍信息'
+    );
+    const shopCaptainJoin = await requestJson(port, 'POST', '/api/tournaments/t-shop/join', {
+      code: shopCreated.body.room.captainCodes[0].code,
+      displayName: '商店队长',
+    });
+    const generatedShop = await requestJson(port, 'POST', '/api/tournaments/t-shop/commands', {
+      sessionToken: shopCaptainJoin.body.session.sessionToken,
+      command: {
+        commandId: 'cmd-api-generated-shop',
+        type: multiplayerShared.COMMAND_TYPES.OPEN_SHOP,
+        baseVersion: 1,
+        payload: {
+          teamId: 'team-local',
+          round: 1,
+          currentShop: {
+            cards: [{ slotId: 'slot-1', playerId: 'forged-shop-player', tier: 5, camp: 'outsider' }],
+          },
+          commandRole: multiplayerShared.ROLES.REFEREE,
+        },
+      },
+    });
+    const generatedCards = generatedShop.body.tournament.snapshot.currentShop.cards;
+    const generatedShopText = JSON.stringify(generatedShop.body);
+    assert(
+      generatedShop.status === 200
+      && generatedShop.body.tournament.stateVersion === 2
+      && generatedShop.body.event.payload.currentShop.cards.length === 5
+      && generatedCards.length === 5
+      && generatedCards.every(card => card.camp === 'local' && card.playerId.startsWith('local-') && card.name.startsWith('本地'))
+      && !generatedShopText.includes('forged-shop-player')
+      && !generatedShopText.includes('outsider-1')
+      && !generatedShopText.includes('local-captain')
+      && !generatedShopText.includes('_serverGeneratedProjection'),
+      '队长开店应由服务端从导入选手池生成同阵营商店，不能使用队长 payload 伪造卡面'
+    );
 
     const trustedShop = await requestJson(port, 'POST', '/api/tournaments/t-api/commands', {
       sessionToken: refereeJoin.body.session.sessionToken,
@@ -3525,8 +3584,8 @@ async function testMultiplayerApiServer() {
     });
     assert(guessedRefereeJoin.status === 400 && /房间码无效/.test(guessedRefereeJoin.body.error), '旧攻击路径第二步应失败：默认裁判码不再可预测');
     assert(riskCreated.body.room.refereeCode && riskCreated.body.room.refereeCode !== 'risk-demo-referee', '创建赛事返回的裁判码应为随机码而非旧默认格式');
-    sse.req.destroy();
   } finally {
+    if (sse && sse.req) sse.req.destroy();
     await closeServer(server);
   }
 }
@@ -4277,6 +4336,7 @@ function testMultiplayerClientSubmitsAuthoritativeCommands() {
   assert(
     main.includes('function applyRoomProjection(tournament)')
     && main.includes('applyCurrentShopProjection(snapshot.currentShop)')
+    && main.includes('applyProjectedShopPlayers(normalizedCards)')
     && main.includes('applyLastPurchaseProjection(snapshot.lastPurchase)')
     && main.includes('applyRoundStatesProjection(snapshot.roundStates)')
     && main.includes('applyHexcoreWindowProjection(snapshot.hexcoreActionWindows)')

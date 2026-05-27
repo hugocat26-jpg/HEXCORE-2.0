@@ -120,6 +120,16 @@ function normalizeShopCard(card = {}, index = 0) {
     slotId: safeText(card.slotId, `slot_${index + 1}`, 64),
     playerId: safeText(card.playerId, '', 80),
     displayPlayerId: safeText(card.displayPlayerId, '', 80),
+    name: safeText(card.name || card.playerName, '', 40),
+    gameId: safeText(card.gameId, '', 80),
+    lane: safeText(card.lane, '', 40),
+    score: safePositiveNumber(card.score, 0, 999),
+    heroes: Array.isArray(card.heroes) ? card.heroes.map(hero => safeText(hero, '', 24)).filter(Boolean).slice(0, 3) : [],
+    displayName: safeText(card.displayName, '', 40),
+    displayGameId: safeText(card.displayGameId, '', 80),
+    displayLane: safeText(card.displayLane, '', 40),
+    displayScore: safePositiveNumber(card.displayScore, 0, 999),
+    displayHeroes: Array.isArray(card.displayHeroes) ? card.displayHeroes.map(hero => safeText(hero, '', 24)).filter(Boolean).slice(0, 3) : [],
     tier: safePositiveNumber(card.tier, 1, 5),
     price: safePositiveNumber(card.price, card.tier || 1, 99),
     camp: safeText(card.camp, '', 40),
@@ -239,7 +249,7 @@ function applyEventToSnapshot(snapshot, event) {
   if (event.type === EVENT_TYPES.SHOP_OPENED || event.type === EVENT_TYPES.SHOP_REFRESHED) {
     const teamId = safeText(payload.teamId, '', 80);
     const round = safePositiveNumber(payload.round || next.currentRound, 1, 8);
-    const trustedProjection = canApplyClientProjection(payload);
+    const trustedProjection = canApplyClientProjection(payload) || payload._serverGeneratedProjection === true;
     next.currentTeamId = teamId || next.currentTeamId;
     next.currentRound = round;
     next.currentPhase = 'gold_shop';
@@ -343,9 +353,9 @@ function acceptCommandAsEvent(state, command, roleBinding, eventType, payload = 
     actorId: command.actorId,
     sourceCommandId: command.commandId,
     payload: {
+      ...payload,
       commandType: command.type,
       commandRole: command.role,
-      ...payload,
     },
   });
   return {

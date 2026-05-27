@@ -26,7 +26,9 @@ class MemoryTournamentStore {
         name: String(input.name || 'HEXCORE 多人测试赛事').trim().slice(0, 80),
         createdAt: new Date().toISOString(),
         currentTeamId: teamIdFromInput(input),
+        currentRound: safePositiveNumber(input.currentRound, 1, 8),
         teams: normalizeTeams(input),
+        players: normalizePlayers(input),
       },
     });
     this.tournaments.set(id, state);
@@ -145,8 +147,28 @@ function normalizeTeams(input = {}) {
   return teams.map((team, index) => ({
     teamId: String(team.teamId || team.id || `team-${index + 1}`).trim(),
     name: String(team.name || `队伍${index + 1}`).trim().slice(0, 40),
+    camp: String(team.camp || '').trim().slice(0, 40),
     renameUsed: Boolean(team.renameUsed),
   }));
+}
+
+function normalizePlayers(input = {}) {
+  const players = Array.isArray(input.players)
+    ? input.players
+    : (input.snapshot && Array.isArray(input.snapshot.players) ? input.snapshot.players : []);
+  return players.map((player, index) => ({
+    id: String(player.id || player.playerId || `player-${index + 1}`).trim().slice(0, 80),
+    name: String(player.name || `选手${index + 1}`).trim().slice(0, 40),
+    gameId: String(player.gameId || player.id || '').trim().slice(0, 80),
+    camp: String(player.camp || '').trim().slice(0, 40),
+    lane: String(player.lane || '').trim().slice(0, 40),
+    tier: safePositiveNumber(player.tier || player.price || player.score, 1, 5),
+    score: safePositiveNumber(player.score || player.tier, 0, 999),
+    heroes: Array.isArray(player.heroes) ? player.heroes.map(hero => String(hero || '').trim().slice(0, 24)).filter(Boolean).slice(0, 3) : [],
+    status: String(player.status || 'available').trim().slice(0, 40),
+    teamId: String(player.teamId || '').trim().slice(0, 80),
+    isCaptain: Boolean(player.isCaptain),
+  })).filter(player => player.id);
 }
 
 function teamIdFromInput(input = {}) {
@@ -208,6 +230,12 @@ function hashSecret(secret) {
 function safeProvidedCode(value) {
   const text = String(value || '').trim();
   return text ? text.slice(0, 120) : '';
+}
+
+function safePositiveNumber(value, fallback = 0, max = Number.MAX_SAFE_INTEGER) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return fallback;
+  return Math.max(0, Math.min(max, Math.round(number)));
 }
 
 function roomAccessSummary(access) {

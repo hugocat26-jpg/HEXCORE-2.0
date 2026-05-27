@@ -1176,6 +1176,11 @@
       slotId: String(card.slotId || `slot_${index + 1}`),
       playerId: String(card.playerId || card.displayPlayerId || ''),
       displayPlayerId: String(card.displayPlayerId || card.playerId || ''),
+      name: String(card.name || card.playerName || ''),
+      gameId: String(card.gameId || card.playerId || card.displayPlayerId || ''),
+      lane: String(card.lane || ''),
+      score: Math.max(0, Number(card.score) || 0),
+      heroes: Array.isArray(card.heroes) ? card.heroes.map(hero => String(hero || '')).filter(Boolean).slice(0, 3) : [],
       tier: Math.max(1, Math.min(5, Number(card.tier) || 1)),
       price: Math.max(0, Number(card.price) || Number(card.tier) || 1),
       camp: String(card.camp || ''),
@@ -1184,6 +1189,42 @@
       projectedFromServer: true,
       masked: Boolean(card.masked),
     };
+  }
+
+  function applyProjectedShopPlayers(cards) {
+    if (!Array.isArray(cards) || !cards.length) return false;
+    let changed = false;
+    cards.forEach(card => {
+      if (!card || !card.playerId) return;
+      const existing = Hexcore2.state.players.find(player => player.id === card.playerId);
+      const next = {
+        id: card.playerId,
+        name: card.name || card.playerId,
+        gameId: card.gameId || card.playerId,
+        lane: card.lane || '未知位置',
+        camp: card.camp || '',
+        tier: card.tier,
+        score: card.score || card.tier,
+        heroes: card.heroes && card.heroes.length ? card.heroes : ['暂无', '暂无', '暂无'],
+        status: 'available',
+        projectedFromServer: true,
+      };
+      if (!existing) {
+        Hexcore2.state.players.push(next);
+        changed = true;
+        return;
+      }
+      ['name', 'gameId', 'lane', 'camp', 'tier', 'score', 'heroes'].forEach(field => {
+        const currentValue = JSON.stringify(existing[field] || null);
+        const nextValue = JSON.stringify(next[field] || null);
+        if (currentValue !== nextValue) {
+          existing[field] = next[field];
+          existing.projectedFromServer = true;
+          changed = true;
+        }
+      });
+    });
+    return changed;
   }
 
   function applyCurrentShopProjection(shop) {
@@ -1197,6 +1238,8 @@
       return false;
     }
     if (!shop || typeof shop !== 'object' || !Array.isArray(shop.cards)) return false;
+    const normalizedCards = shop.cards.map(normalizeProjectedShopCard);
+    const playersChanged = applyProjectedShopPlayers(normalizedCards);
     const nextDraw = {
       id: String(shop.id || `shop_${Date.now()}`),
       captainId: String(shop.captainId || shop.teamId || ''),
@@ -1209,7 +1252,7 @@
       reason: String(shop.reason || '服务端同步商店'),
       appliedEffects: [],
       purchaseEffects: [],
-      cards: shop.cards.map(normalizeProjectedShopCard),
+      cards: normalizedCards,
     };
     const previous = JSON.stringify({
       draw: Hexcore2.state.draft.currentDraw || null,
@@ -1219,7 +1262,7 @@
     Hexcore2.state.draft.currentDraw = nextDraw;
     Hexcore2.state.draft.selectedSlot = Math.max(0, Number(shop.selectedSlot) || 0);
     Hexcore2.state.draft.pickedThisTurn = Boolean(shop.pickedThisTurn);
-    return previous !== JSON.stringify({
+    return playersChanged || previous !== JSON.stringify({
       draw: nextDraw,
       selectedSlot: Hexcore2.state.draft.selectedSlot,
       pickedThisTurn: Hexcore2.state.draft.pickedThisTurn,

@@ -63,6 +63,7 @@ function publicTeams(snapshot = {}) {
   return Array.isArray(snapshot.teams) ? snapshot.teams.map(team => ({
     teamId: team.teamId || team.id || '',
     name: team.name || '',
+    camp: team.camp || '',
   })) : [];
 }
 
@@ -75,6 +76,13 @@ function publicShopCard(card = {}) {
     slotId: String(card.slotId || '').trim(),
     playerId: visiblePlayerId,
     displayPlayerId: displayPlayerId || visiblePlayerId,
+    name: String(masked ? (card.displayName || '') : (card.name || card.playerName || '')).trim(),
+    gameId: String(masked ? (card.displayGameId || '') : (card.gameId || '')).trim(),
+    lane: String(masked ? (card.displayLane || '') : (card.lane || '')).trim(),
+    score: Number(masked ? card.displayScore : card.score) || 0,
+    heroes: Array.isArray(masked ? card.displayHeroes : card.heroes)
+      ? (masked ? card.displayHeroes : card.heroes).map(hero => String(hero || '').trim()).filter(Boolean).slice(0, 3)
+      : [],
     tier: Number(card.tier) || 1,
     price: Number(card.price) || Number(card.tier) || 1,
     camp: String(card.camp || '').trim(),
@@ -188,7 +196,8 @@ function projectedRoundStateForCommand(payload = {}) {
 }
 
 function canProjectCommandPayload(payload = {}) {
-  return [ROLES.SUPER_ADMIN, ROLES.TOURNAMENT_ADMIN, ROLES.REFEREE].includes(payload.commandRole);
+  return payload._serverGeneratedProjection === true
+    || [ROLES.SUPER_ADMIN, ROLES.TOURNAMENT_ADMIN, ROLES.REFEREE].includes(payload.commandRole);
 }
 
 function projectEventPayload(payload = {}) {

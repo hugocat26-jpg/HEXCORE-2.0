@@ -13,6 +13,7 @@ const {
   createCommand,
 } = require('../../packages/shared');
 const { acceptCommandAsEvent, appendEvent } = require('../../packages/rules');
+const { createAuthoritativeCommandPayload } = require('./shop-service');
 
 const host = process.env.HOST || '127.0.0.1';
 const port = Number(process.env.MULTIPLAYER_API_PORT || process.env.PORT || 4196);
@@ -226,12 +227,13 @@ function createServer(options = {}) {
         });
         const eventType = commandEventMap[command.type];
         if (!eventType) throw new Error(`暂不支持 command 类型：${command.type}`);
+        const roleBinding = roleBindingFromRequest({ ...body, resolvedRoleBinding: binding });
         const result = acceptCommandAsEvent(
           state,
           command,
-          roleBindingFromRequest({ ...body, resolvedRoleBinding: binding }),
+          roleBinding,
           eventType,
-          command.payload
+          createAuthoritativeCommandPayload(state, command, roleBinding)
         );
         if (!result.duplicate) store.replaceTournament(commandTournamentId, result.state);
         sendJson(res, 200, {
