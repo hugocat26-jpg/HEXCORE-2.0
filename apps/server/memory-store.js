@@ -30,6 +30,7 @@ class MemoryTournamentStore {
         settings: normalizeSettings(input.settings),
         teams: normalizeTeams(input),
         players: normalizePlayers(input),
+        hexcoreAssignments: normalizeHexcoreAssignments(input),
         tournament: normalizeTournament(input.tournament || (input.snapshot && input.snapshot.tournament)),
       },
     });
@@ -247,6 +248,19 @@ function normalizePlayers(input = {}) {
     teamId: String(player.teamId || '').trim().slice(0, 80),
     isCaptain: Boolean(player.isCaptain),
   })).filter(player => player.id);
+}
+
+function normalizeHexcoreAssignments(input = {}) {
+  const source = input.hexcoreAssignments && typeof input.hexcoreAssignments === 'object'
+    ? input.hexcoreAssignments
+    : (input.snapshot && input.snapshot.hexcoreAssignments && typeof input.snapshot.hexcoreAssignments === 'object' ? input.snapshot.hexcoreAssignments : {});
+  return Object.fromEntries(Object.entries(source).map(([teamId, list]) => [
+    String(teamId || '').trim().slice(0, 80),
+    (Array.isArray(list) ? list : []).map(item => ({
+      id: String((item && (item.id || item.hexcoreId)) || item || '').trim().slice(0, 80),
+      status: String((item && item.status) || 'available').trim().slice(0, 40),
+    })).filter(item => item.id).slice(0, 4),
+  ]).filter(([teamId]) => teamId));
 }
 
 function normalizeTournament(input = {}) {

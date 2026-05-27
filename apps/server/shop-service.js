@@ -80,6 +80,51 @@ function playerToShopCard(player, index) {
   };
 }
 
+function activeSnowCatDisturbance(snapshot = {}, teamId = '') {
+  const cleanTeamId = safeText(teamId, '', 80);
+  return (Array.isArray(snapshot.shopDisturbances) ? snapshot.shopDisturbances : [])
+    .find(item => item
+      && item.active !== false
+      && safeText(item.type, '', 40) === 'snow_cat'
+      && safeText(item.targetTeamId || item.targetCaptainId, '', 80) === cleanTeamId) || null;
+}
+
+function applySnowCatDisplayShuffle(cards = [], seed = '') {
+  if (!Array.isArray(cards) || cards.length < 2) return cards;
+  const ranked = [...cards].sort((left, right) => {
+    const leftKey = crypto.createHash('sha256').update(`${seed}:display:${left.playerId}`).digest('hex');
+    const rightKey = crypto.createHash('sha256').update(`${seed}:display:${right.playerId}`).digest('hex');
+    return leftKey.localeCompare(rightKey);
+  });
+  const displayById = new Map();
+  ranked.forEach((card, index) => {
+    displayById.set(card.playerId, ranked[(index + 1) % ranked.length]);
+  });
+  return cards.map(card => {
+    const display = displayById.get(card.playerId);
+    if (!display || display.playerId === card.playerId) return card;
+    return {
+      ...card,
+      displayPlayerId: display.playerId,
+      displayName: display.name,
+      displayGameId: display.gameId,
+      displayLane: display.lane,
+      displayScore: display.score,
+      displayHeroes: display.heroes,
+      snowCatShuffled: true,
+    };
+  });
+}
+
+function consumeShopDisturbance(snapshot = {}, teamId = '', consumedAt = new Date().toISOString()) {
+  const cleanTeamId = safeText(teamId, '', 80);
+  return (Array.isArray(snapshot.shopDisturbances) ? snapshot.shopDisturbances : []).map(item => {
+    if (!item || safeText(item.type, '', 40) !== 'snow_cat') return item;
+    if (safeText(item.targetTeamId || item.targetCaptainId, '', 80) !== cleanTeamId || item.active === false) return item;
+    return { ...item, active: false, consumedAt };
+  });
+}
+
 function shouldGenerateServerShop(command, roleBinding, payload = {}) {
   if (![COMMAND_TYPES.OPEN_SHOP, COMMAND_TYPES.REFRESH_SHOP].includes(command.type)) return false;
   if ([ROLES.REFEREE, ROLES.TOURNAMENT_ADMIN, ROLES.SUPER_ADMIN].includes(roleBinding.role)
@@ -97,7 +142,11 @@ function createServerShop(snapshot = {}, command, roleBinding = {}, payload = {}
     : 0;
   const seed = safeText(payload.seed || payload.clientSeed || command.commandId, command.commandId, 120);
   const candidates = rankedCandidates(shopPlayerCandidates(snapshot, teamId), `${snapshot.tournamentId || command.tournamentId}:${teamId}:${round}:${refreshCount}:${seed}`);
-  const cards = candidates.slice(0, 5).map(playerToShopCard);
+  const disturbance = activeSnowCatDisturbance(snapshot, teamId);
+  const baseCards = candidates.slice(0, 5).map(playerToShopCard);
+  const cards = disturbance
+    ? applySnowCatDisplayShuffle(baseCards, `${snapshot.tournamentId || command.tournamentId}:${teamId}:${round}:${refreshCount}:${seed}:snow-cat`)
+    : baseCards;
   return {
     id: safeText(`shop_${teamId}_${round}_${command.commandId}`, `shop_${Date.now()}`, 80),
     teamId,
@@ -108,6 +157,7 @@ function createServerShop(snapshot = {}, command, roleBinding = {}, payload = {}
     refreshCostPaid: command.type === COMMAND_TYPES.REFRESH_SHOP ? nextRefreshCost(snapshot, teamId, round) : 0,
     selectedSlot: 0,
     pickedThisTurn: false,
+    appliedDisturbance: disturbance ? { type: 'snow_cat', sourceTeamId: safeText(disturbance.sourceTeamId, '', 80) } : null,
     cards,
   };
 }
@@ -121,10 +171,12 @@ function createAuthoritativeCommandPayload(state, command, roleBinding = {}) {
   const refreshCount = command.type === COMMAND_TYPES.REFRESH_SHOP
     ? roundRefreshCount(state.snapshot || {}, teamId, round) + 1
     : 0;
+  const currentShop = createServerShop(state.snapshot || {}, command, roleBinding, payload);
   return {
     ...payload,
-    currentShop: createServerShop(state.snapshot || {}, command, roleBinding, payload),
+    currentShop,
     refreshCount,
+    shopDisturbances: consumeShopDisturbance(state.snapshot || {}, teamId),
     hexcoreActionWindows: [],
     _serverGeneratedProjection: true,
   };
@@ -133,5 +185,6 @@ function createAuthoritativeCommandPayload(state, command, roleBinding = {}) {
 module.exports = {
   createAuthoritativeCommandPayload,
   createServerShop,
+  consumeShopDisturbance,
   shopPlayerCandidates,
 };

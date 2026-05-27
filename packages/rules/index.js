@@ -315,6 +315,57 @@ function applyHexcoreWindows(snapshot, windows) {
   return snapshot;
 }
 
+function normalizeShopDisturbance(input = {}) {
+  return {
+    type: safeText(input.type, '', 40),
+    sourceTeamId: safeText(input.sourceTeamId || input.sourceCaptainId, '', 80),
+    targetTeamId: safeText(input.targetTeamId || input.targetCaptainId, '', 80),
+    hexcoreId: safeText(input.hexcoreId, '', 80),
+    active: input.active === false ? false : true,
+    createdAt: safeText(input.createdAt, '', 40),
+    consumedAt: safeText(input.consumedAt, '', 40),
+  };
+}
+
+function applyShopDisturbances(snapshot, disturbances) {
+  if (!Array.isArray(disturbances)) return snapshot;
+  snapshot.shopDisturbances = disturbances.map(normalizeShopDisturbance)
+    .filter(item => item.type && item.sourceTeamId && item.targetTeamId);
+  return snapshot;
+}
+
+function teamExists(snapshot, teamId) {
+  return teamIndex(snapshot, teamId) >= 0;
+}
+
+function teamHasHexcore(snapshot, teamId, hexcoreId) {
+  const assignments = snapshot.hexcoreAssignments && typeof snapshot.hexcoreAssignments === 'object'
+    ? snapshot.hexcoreAssignments
+    : {};
+  const list = Array.isArray(assignments[safeText(teamId, '', 80)]) ? assignments[safeText(teamId, '', 80)] : [];
+  return list.some(item => {
+    const currentId = safeText(item && (item.id || item.hexcoreId) || item, '', 80);
+    const status = safeText(item && item.status, 'available', 40);
+    return currentId === safeText(hexcoreId, '', 80) && status !== 'used';
+  });
+}
+
+function markHexcoreUsed(snapshot, teamId, hexcoreId) {
+  const cleanTeamId = safeText(teamId, '', 80);
+  const cleanHexcoreId = safeText(hexcoreId, '', 80);
+  if (!cleanTeamId || !cleanHexcoreId || !snapshot.hexcoreAssignments || typeof snapshot.hexcoreAssignments !== 'object') return snapshot;
+  const list = Array.isArray(snapshot.hexcoreAssignments[cleanTeamId]) ? snapshot.hexcoreAssignments[cleanTeamId] : [];
+  snapshot.hexcoreAssignments = {
+    ...snapshot.hexcoreAssignments,
+    [cleanTeamId]: list.map(item => {
+      const currentId = safeText(item && (item.id || item.hexcoreId) || item, '', 80);
+      if (currentId !== cleanHexcoreId) return item;
+      return { ...(typeof item === 'object' ? item : { id: currentId }), status: 'used' };
+    }),
+  };
+  return snapshot;
+}
+
 function assignPurchasedPlayer(snapshot, teamId, playerId) {
   const cleanTeamId = safeText(teamId, '', 80);
   const cleanPlayerId = safeText(playerId, '', 80);
@@ -444,6 +495,7 @@ function applyEventToSnapshot(snapshot, event) {
       refreshCount,
     });
     if (trustedProjection) applyHexcoreWindows(next, payload.hexcoreActionWindows);
+    if (trustedProjection) applyShopDisturbances(next, payload.shopDisturbances);
   }
   if (event.type === EVENT_TYPES.SHOP_CARD_PURCHASED) {
     const teamId = safeText(payload.teamId, '', 80);
@@ -505,6 +557,30 @@ function applyEventToSnapshot(snapshot, event) {
     if (trustedProjection) applyHexcoreWindows(next, payload.hexcoreActionWindows);
   }
   if (event.type === EVENT_TYPES.HEXCORE_USED) {
+    const teamId = safeText(payload.teamId, '', 80);
+    const hexcoreId = safeText(payload.hexcoreId, '', 80);
+    if (hexcoreId === 'snow-cat') {
+      const targetTeamId = safeText(payload.targetTeamId || payload.targetCaptainId, '', 80);
+      if (!targetTeamId || !teamExists(next, targetTeamId)) throw new Error('雪定饿的喵需要选择有效目标队伍');
+      if (targetTeamId === teamId) throw new Error('雪定饿的喵不能对自己使用');
+      if (!canApplyClientProjection(payload) && !teamHasHexcore(next, teamId, hexcoreId)) {
+        throw new Error('当前队伍未持有雪定饿的喵');
+      }
+      const current = Array.isArray(next.shopDisturbances) ? next.shopDisturbances.map(normalizeShopDisturbance) : [];
+      next.shopDisturbances = [
+        ...current.filter(item => item.active && !(item.type === 'snow_cat' && item.targetTeamId === targetTeamId)),
+        {
+          type: 'snow_cat',
+          sourceTeamId: teamId,
+          targetTeamId,
+          hexcoreId,
+          active: true,
+          createdAt: event.createdAt,
+          consumedAt: '',
+        },
+      ];
+      markHexcoreUsed(next, teamId, hexcoreId);
+    }
     if (canApplyClientProjection(payload)) applyHexcoreWindows(next, payload.hexcoreActionWindows);
     if (!Array.isArray(payload.hexcoreActionWindows) && Array.isArray(next.hexcoreActionWindows)) {
       const teamId = safeText(payload.teamId, '', 80);

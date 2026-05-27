@@ -3665,6 +3665,86 @@ async function testMultiplayerApiServer() {
       '服务端购买后应固化本轮权限，不能再通过刷新重置购买状态或再次扣费'
     );
 
+    const snowCreated = await requestJson(port, 'POST', '/api/tournaments', {
+      id: 't-snow-cat',
+      name: '雪定饿的喵权威回归',
+      actorId: 'referee-snow',
+      settings: { initialGold: 9, refreshCosts: [1, 2, 3, 4] },
+      teams: [
+        { teamId: 'snow-source', name: '雪猫来源', camp: 'local', code: 'snow-source-code', economy: { gold: 9 } },
+        { teamId: 'snow-target', name: '雪猫目标', camp: 'local', code: 'snow-target-code', economy: { gold: 9 } },
+      ],
+      hexcoreAssignments: {
+        'snow-source': [{ id: 'snow-cat', status: 'available' }],
+      },
+      players: [
+        { id: 'snow-local-1', name: '雪猫一号', gameId: 'S1', camp: 'local', tier: 1, score: 71, status: 'available' },
+        { id: 'snow-local-2', name: '雪猫二号', gameId: 'S2', camp: 'local', tier: 2, score: 72, status: 'available' },
+        { id: 'snow-local-3', name: '雪猫三号', gameId: 'S3', camp: 'local', tier: 3, score: 73, status: 'available' },
+        { id: 'snow-local-4', name: '雪猫四号', gameId: 'S4', camp: 'local', tier: 4, score: 74, status: 'available' },
+        { id: 'snow-local-5', name: '雪猫五号', gameId: 'S5', camp: 'local', tier: 5, score: 75, status: 'available' },
+      ],
+    });
+    const snowSourceJoin = await requestJson(port, 'POST', '/api/tournaments/t-snow-cat/join', {
+      code: snowCreated.body.room.captainCodes[0].code,
+      displayName: '雪猫来源队长',
+    });
+    const snowTargetJoin = await requestJson(port, 'POST', '/api/tournaments/t-snow-cat/join', {
+      code: snowCreated.body.room.captainCodes[1].code,
+      displayName: '雪猫目标队长',
+    });
+    const snowUsed = await requestJson(port, 'POST', '/api/tournaments/t-snow-cat/commands', {
+      sessionToken: snowSourceJoin.body.session.sessionToken,
+      command: {
+        commandId: 'cmd-api-use-snow-cat',
+        type: multiplayerShared.COMMAND_TYPES.USE_HEXCORE,
+        baseVersion: 1,
+        payload: { teamId: 'snow-source', hexcoreId: 'snow-cat', targetTeamId: 'snow-target' },
+      },
+    });
+    const snowUsedAgain = await requestJson(port, 'POST', '/api/tournaments/t-snow-cat/commands', {
+      sessionToken: snowSourceJoin.body.session.sessionToken,
+      command: {
+        commandId: 'cmd-api-use-snow-cat-again',
+        type: multiplayerShared.COMMAND_TYPES.USE_HEXCORE,
+        baseVersion: 2,
+        payload: { teamId: 'snow-source', hexcoreId: 'snow-cat', targetTeamId: 'snow-target' },
+      },
+    });
+    const snowSkip = await requestJson(port, 'POST', '/api/tournaments/t-snow-cat/commands', {
+      sessionToken: snowSourceJoin.body.session.sessionToken,
+      command: {
+        commandId: 'cmd-api-snow-source-skip',
+        type: multiplayerShared.COMMAND_TYPES.SKIP_TURN,
+        baseVersion: 2,
+        payload: { teamId: 'snow-source', round: 1 },
+      },
+    });
+    const snowTargetShop = await requestJson(port, 'POST', '/api/tournaments/t-snow-cat/commands', {
+      sessionToken: snowTargetJoin.body.session.sessionToken,
+      command: {
+        commandId: 'cmd-api-snow-target-shop',
+        type: multiplayerShared.COMMAND_TYPES.OPEN_SHOP,
+        baseVersion: 3,
+        payload: { teamId: 'snow-target', round: 1 },
+      },
+    });
+    const snowCards = snowTargetShop.body.tournament.snapshot.currentShop.cards;
+    const snowText = JSON.stringify(snowTargetShop.body);
+    assert(
+      snowUsed.status === 200
+      && snowUsedAgain.status === 400
+      && /未持有/.test(snowUsedAgain.body.error)
+      && snowSkip.status === 200
+      && snowTargetShop.status === 200
+      && snowCards.length === 5
+      && snowCards.some(card => card.masked)
+      && snowCards.every(card => Number(card.price) === Number(card.tier))
+      && !snowText.includes('shopDisturbances')
+      && !snowText.includes('hexcoreAssignments'),
+      '雪定饿的喵应由服务端登记并在目标下一次商店扰乱公开信息，费用和真实槽位仍由服务端控制且不泄漏内部扰乱状态'
+    );
+
     const poorCreated = await requestJson(port, 'POST', '/api/tournaments', {
       id: 't-poor-refresh',
       name: '刷新金币不足回归',
