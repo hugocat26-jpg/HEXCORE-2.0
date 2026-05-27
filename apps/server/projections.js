@@ -150,6 +150,7 @@ function publicHungryWaveSummary(summary = null) {
     round: Number(summary.round) || 1,
     priceRefunded: Math.max(0, Number(summary.priceRefunded) || 0),
     pendingRoundReward: Boolean(summary.pendingRoundReward),
+    goldBefore: Math.max(0, Number(summary.goldBefore) || 0),
     resolvedAt: String(summary.resolvedAt || '').trim().slice(0, 40),
   };
 }

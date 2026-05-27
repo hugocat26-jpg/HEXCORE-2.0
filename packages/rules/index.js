@@ -420,6 +420,11 @@ function activeHungryWave(snapshot = {}, round = 1) {
   return wave;
 }
 
+function hungryWaveAlreadyStarted(snapshot = {}, round = 1) {
+  const wave = normalizeHungryWaveRound(snapshot.hungryWaveRound);
+  return Boolean(wave && wave.round === safePositiveNumber(round, 1, 8) && wave.active);
+}
+
 function stormFogTargetIds(snapshot, sourceTeamId, startTeamId) {
   const order = teamIdsFrom(snapshot);
   const source = safeText(sourceTeamId, '', 80);
@@ -514,6 +519,14 @@ function refundTeamGold(snapshot, teamId, amount) {
   return economy.gold;
 }
 
+function clearTeamGold(snapshot, teamId) {
+  const economy = ensureTeamEconomy(snapshot, teamId);
+  if (!economy) return 0;
+  const goldBefore = safePositiveNumber(economy.gold, 0, 999);
+  economy.gold = 0;
+  return goldBefore;
+}
+
 function releasePlayerToPool(snapshot, playerId) {
   const cleanPlayerId = safeText(playerId, '', 80);
   if (!cleanPlayerId || !Array.isArray(snapshot.players)) return snapshot;
@@ -602,6 +615,38 @@ function resolveHungryWaveAfterPurchase(snapshot, buyerId, playerId, pricePaid, 
     triggered: true,
     pendingRoundReward: !sameCamp,
     resolvedAt: event.createdAt,
+  };
+  snapshot.lastHungryWave = result;
+  return result;
+}
+
+function startHungryWaveOnSkip(snapshot, teamId, round, event) {
+  const cleanTeamId = safeText(teamId, '', 80);
+  const cleanRound = safePositiveNumber(round, 1, 8);
+  if (!cleanTeamId || hungryWaveAlreadyStarted(snapshot, cleanRound)) return null;
+  if (!teamHasHexcore(snapshot, cleanTeamId, 'hungry-wave')) return null;
+  const goldBefore = clearTeamGold(snapshot, cleanTeamId);
+  const result = {
+    type: 'round_start',
+    sourceTeamId: cleanTeamId,
+    buyerTeamId: '',
+    playerId: '',
+    round: cleanRound,
+    priceRefunded: 0,
+    pendingRoundReward: false,
+    goldBefore,
+    resolvedAt: event.createdAt,
+  };
+  snapshot.hungryWaveRound = {
+    type: 'hungry_wave_round',
+    captainId: cleanTeamId,
+    round: cleanRound,
+    active: true,
+    consumed: false,
+    triggered: false,
+    pendingRoundReward: false,
+    checkedTeamIds: [],
+    resolvedAt: '',
   };
   snapshot.lastHungryWave = result;
   return result;
@@ -755,6 +800,7 @@ function applyEventToSnapshot(snapshot, event) {
     const teamId = safeText(payload.teamId, '', 80);
     const round = safePositiveNumber(payload.round || next.currentRound, 1, 8);
     ensureTeamEconomy(next, teamId);
+    startHungryWaveOnSkip(next, teamId, round, event);
     setRoundState(next, teamId, round, { freeShopUsed: true, purchaseUsed: false, skipped: true });
     next.currentShop = null;
     const nextPointer = nextTurnPointer(next, teamId);
