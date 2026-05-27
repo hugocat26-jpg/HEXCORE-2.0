@@ -261,22 +261,27 @@ function applyEventToSnapshot(snapshot, event) {
     const teamId = safeText(payload.teamId, '', 80);
     const round = safePositiveNumber(payload.round || next.currentRound, 1, 8);
     const slotId = safeText(payload.slotId, '', 64);
+    let purchasedCard = null;
     if (next.currentShop && Array.isArray(next.currentShop.cards)) {
       next.currentShop.cards = next.currentShop.cards.map(card => {
         if (String(card.slotId || '') !== slotId && String(card.index ?? '') !== slotId) return card;
-        return {
+        purchasedCard = card;
+        const markedCard = {
           ...card,
           purchased: true,
           purchasedAt: safeText(payload.purchasedAt, event.createdAt || new Date().toISOString(), 40),
         };
+        return markedCard;
       });
       next.currentShop.pickedThisTurn = true;
     }
+    const purchasePlayerId = purchasedCard ? purchasedCard.playerId : '';
+    const purchaseDisplayPlayerId = purchasedCard ? purchasedCard.displayPlayerId : '';
     next.lastPurchase = {
       teamId,
       slotId,
-      playerId: safeText(payload.playerId, '', 80),
-      displayPlayerId: safeText(payload.displayPlayerId, '', 80),
+      playerId: safeText(purchasePlayerId, '', 80),
+      displayPlayerId: safeText(purchaseDisplayPlayerId, '', 80),
       round,
       resolvedAt: event.createdAt,
     };

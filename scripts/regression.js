@@ -1108,7 +1108,7 @@ function testSystemIntegrityCheck() {
   H.actions.setActiveView('settings');
   H.actions.runSystemCheck();
 
-  assert(H.meta.version === '2.0.6' && app.innerHTML.includes('HEXCORE 2.0 v2.0.6 裁判端'), '系统设置页应展示统一项目版本号');
+  assert(H.meta.version === '2.0.7' && app.innerHTML.includes('HEXCORE 2.0 v2.0.7 裁判端'), '系统设置页应展示统一项目版本号');
   assert(H.state.ui.systemCheckResult && !H.state.ui.systemCheckResult.ok, '状态检查应保存可视化结果');
   assert(H.state.ui.systemCheckResult.issues.some(issue => issue.type === '重复归属'), '状态检查应识别重复归属');
   assert(H.state.ui.systemCheckResult.issues.some(issue => issue.type === '跨阵营'), '状态检查应识别跨阵营');
@@ -3125,6 +3125,30 @@ function testMultiplayerSharedRulePreflight() {
     && refereeShopProjected.state.snapshot.hexcoreActionWindows[0].hexcoreId === 'heavenly-descent',
     '裁判可信动作可以把公开商店、轮内状态和海克斯窗口落入快照，供多端同步投影使用'
   );
+  const trustedPurchaseCommand = multiplayerShared.createCommand({
+    commandId: 'cmd-purchase-from-trusted-shop',
+    tournamentId: 'tournament-test',
+    type: multiplayerShared.COMMAND_TYPES.PURCHASE_SHOP_CARD,
+    actorId: 'captain-user-1',
+    role: multiplayerShared.ROLES.CAPTAIN,
+    teamId: 'team-1',
+    baseVersion: 1,
+    payload: { teamId: 'team-1', slotId: 'slot-1', playerId: 'forged-player', displayPlayerId: 'forged-visible' },
+  });
+  const trustedPurchase = multiplayerRules.acceptCommandAsEvent(
+    refereeShopProjected.state,
+    trustedPurchaseCommand,
+    { actorId: 'captain-user-1', role: multiplayerShared.ROLES.CAPTAIN, teamId: 'team-1' },
+    multiplayerShared.EVENT_TYPES.SHOP_CARD_PURCHASED,
+    trustedPurchaseCommand.payload
+  );
+  assert(
+    trustedPurchase.state.snapshot.currentShop.cards[0].purchased === true
+    && trustedPurchase.state.snapshot.lastPurchase.playerId === 'player-1'
+    && trustedPurchase.state.snapshot.lastPurchase.displayPlayerId === ''
+    && trustedPurchase.state.snapshot.roundStates['team-1']['1'].purchaseUsed,
+    '购买权威商店卡时应从服务端商店槽位推导选手信息，不能信任队长 payload 里的 playerId'
+  );
   const duplicate = multiplayerRules.acceptCommandAsEvent(
     accepted.state,
     command,
@@ -3436,12 +3460,39 @@ async function testMultiplayerApiServer() {
       '裁判可信投影应输出商店和海克斯窗口，并隐藏被打乱商店的真实暗牌 ID'
     );
 
+    const trustedPurchase = await requestJson(port, 'POST', '/api/tournaments/t-api/commands', {
+      sessionToken: captainJoin.body.session.sessionToken,
+      command: {
+        commandId: 'cmd-api-purchase-trusted-shop',
+        type: multiplayerShared.COMMAND_TYPES.PURCHASE_SHOP_CARD,
+        baseVersion: 4,
+        payload: {
+          teamId: 'team-1',
+          slotId: 'slot-1',
+          playerId: 'forged-player',
+          displayPlayerId: 'forged-visible',
+        },
+      },
+    });
+    const trustedPurchaseText = JSON.stringify(trustedPurchase.body);
+    assert(
+      trustedPurchase.status === 200
+      && trustedPurchase.body.tournament.stateVersion === 5
+      && trustedPurchase.body.tournament.snapshot.currentShop.cards[0].purchased === true
+      && trustedPurchase.body.tournament.snapshot.lastPurchase.playerId === 'visible-player'
+      && trustedPurchase.body.tournament.snapshot.roundStates['team-1']['1'].purchaseUsed
+      && !trustedPurchaseText.includes('hidden-player')
+      && !trustedPurchaseText.includes('forged-player')
+      && !trustedPurchaseText.includes('forged-visible'),
+      '队长购买可信商店卡时只能按槽位购买，公开投影不应泄漏真实暗牌或伪造选手 ID'
+    );
+
     const importedSecret = await requestJson(port, 'POST', '/api/tournaments/t-api/commands', {
       sessionToken: refereeJoin.body.session.sessionToken,
       command: {
         commandId: 'cmd-api-secret',
         type: multiplayerShared.COMMAND_TYPES.IMPORT_STATE,
-        baseVersion: 4,
+        baseVersion: 5,
         payload: {
           checksum: 'checksum-public-projection',
           sourceVersion: 'legacy-local',
@@ -3452,7 +3503,7 @@ async function testMultiplayerApiServer() {
         },
       },
     });
-    assert(importedSecret.status === 200 && importedSecret.body.tournament.stateVersion === 5, '裁判导入命令应能推进公开投影测试状态');
+    assert(importedSecret.status === 200 && importedSecret.body.tournament.stateVersion === 6, '裁判导入命令应能推进公开投影测试状态');
     const viewerProjection = await requestJson(port, 'GET', '/api/tournaments/t-api/projection?view=viewer');
     const projectionText = JSON.stringify(viewerProjection.body);
     assert(viewerProjection.status === 200 && viewerProjection.body.tournament.view === 'viewer', '观众投影接口应返回 viewer 视图');
@@ -4226,6 +4277,7 @@ function testMultiplayerClientSubmitsAuthoritativeCommands() {
   assert(
     main.includes('function applyRoomProjection(tournament)')
     && main.includes('applyCurrentShopProjection(snapshot.currentShop)')
+    && main.includes('applyLastPurchaseProjection(snapshot.lastPurchase)')
     && main.includes('applyRoundStatesProjection(snapshot.roundStates)')
     && main.includes('applyHexcoreWindowProjection(snapshot.hexcoreActionWindows)')
     && main.includes('connectRoomEventStream()')

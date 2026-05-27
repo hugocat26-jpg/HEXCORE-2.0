@@ -237,7 +237,7 @@ function createServer(options = {}) {
         sendJson(res, 200, {
           ok: true,
           duplicate: result.duplicate,
-          event: result.event,
+          event: projectEvent(result.event, 'public'),
           tournament: publicSnapshot(result.state),
         });
         return;

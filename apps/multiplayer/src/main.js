@@ -1251,6 +1251,23 @@
     return previous !== JSON.stringify(windows);
   }
 
+  function applyLastPurchaseProjection(purchase) {
+    Hexcore2.state.multiplayer = Hexcore2.state.multiplayer || {};
+    const previous = JSON.stringify(Hexcore2.state.multiplayer.lastPurchase || null);
+    Hexcore2.state.multiplayer.lastPurchase = purchase && typeof purchase === 'object'
+      ? {
+        teamId: String(purchase.teamId || ''),
+        slotId: String(purchase.slotId || ''),
+        playerId: String(purchase.playerId || purchase.displayPlayerId || ''),
+        displayPlayerId: String(purchase.displayPlayerId || purchase.playerId || ''),
+        round: Math.max(1, Math.min(8, Number(purchase.round) || Hexcore2.state.draft.round || 1)),
+        resolvedAt: String(purchase.resolvedAt || ''),
+        masked: Boolean(purchase.masked),
+      }
+      : null;
+    return previous !== JSON.stringify(Hexcore2.state.multiplayer.lastPurchase || null);
+  }
+
   function applyRoomProjection(tournament) {
     if (!tournament || typeof tournament !== 'object') return false;
     const snapshot = tournament.snapshot || {};
@@ -1258,6 +1275,7 @@
     if (applyTeamProjection(snapshot.teams)) changed = true;
     if (applyRoundStatesProjection(snapshot.roundStates)) changed = true;
     if (Object.prototype.hasOwnProperty.call(snapshot, 'currentShop') && applyCurrentShopProjection(snapshot.currentShop)) changed = true;
+    if (Object.prototype.hasOwnProperty.call(snapshot, 'lastPurchase') && applyLastPurchaseProjection(snapshot.lastPurchase)) changed = true;
     if (applyHexcoreWindowProjection(snapshot.hexcoreActionWindows)) changed = true;
     if (Number.isInteger(Number(snapshot.currentRound)) && Hexcore2.state.draft.round !== Number(snapshot.currentRound)) {
       Hexcore2.state.draft.round = Number(snapshot.currentRound);

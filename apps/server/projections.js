@@ -100,6 +100,23 @@ function publicCurrentShop(shop = null) {
   };
 }
 
+function publicLastPurchase(purchase = null) {
+  if (!purchase || typeof purchase !== 'object') return null;
+  const realPlayerId = String(purchase.playerId || '').trim();
+  const displayPlayerId = String(purchase.displayPlayerId || '').trim();
+  const masked = Boolean(displayPlayerId && realPlayerId && displayPlayerId !== realPlayerId);
+  const visiblePlayerId = masked ? displayPlayerId : realPlayerId;
+  return {
+    teamId: String(purchase.teamId || '').trim(),
+    slotId: String(purchase.slotId || '').trim(),
+    playerId: visiblePlayerId,
+    displayPlayerId: displayPlayerId || visiblePlayerId,
+    round: Number(purchase.round) || 1,
+    resolvedAt: String(purchase.resolvedAt || '').trim(),
+    masked,
+  };
+}
+
 function publicRoundStates(roundStates = {}) {
   if (!roundStates || typeof roundStates !== 'object') return {};
   return Object.fromEntries(Object.entries(roundStates).map(([teamId, rounds]) => [
@@ -143,6 +160,7 @@ function projectSnapshotData(snapshot = {}, view = VIEW_TYPES.PUBLIC, options = 
     ...publicSnapshot,
     teams: publicTeams(snapshot),
     currentShop: publicCurrentShop(snapshot.currentShop),
+    lastPurchase: publicLastPurchase(snapshot.lastPurchase),
     roundStates: publicRoundStates(snapshot.roundStates),
     hexcoreActionWindows: publicHexcoreWindows(snapshot.hexcoreActionWindows),
     perspectiveTeamId: resolvePerspectiveTeamId(snapshot, options.teamId),
@@ -242,4 +260,5 @@ module.exports = {
   projectEvent,
   projectSnapshotData,
   publicCurrentShop,
+  publicLastPurchase,
 };
