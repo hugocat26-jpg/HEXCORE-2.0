@@ -292,6 +292,7 @@
 
   Hexcore2.exportService = {
     filteredEvents,
+    downloadText,
 
     exportEvents() {
       const lines = eventLines(filteredEvents());

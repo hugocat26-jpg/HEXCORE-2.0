@@ -3,6 +3,7 @@
   const HEXCORE_CANDIDATE_COUNT = 5;
   const HEXCORE_PICK_LIMIT = 1;
   const MULTIPLAYER_SESSION_KEY = 'hexcore2_multiplayer_session_v1';
+  const MULTIPLAYER_API_BASE_KEY = 'hexcore2_multiplayer_api_base_v1';
   let hexDetailHideTimer = null;
 
   if (global.location && global.location.protocol === 'file:') {
@@ -1068,6 +1069,21 @@
     global.localStorage.setItem(MULTIPLAYER_SESSION_KEY, JSON.stringify(session));
   }
 
+  function recentMultiplayerApiBase() {
+    try {
+      const value = global.localStorage && global.localStorage.getItem(MULTIPLAYER_API_BASE_KEY);
+      return String(value || 'http://127.0.0.1:4196').trim() || 'http://127.0.0.1:4196';
+    } catch (error) {
+      return 'http://127.0.0.1:4196';
+    }
+  }
+
+  function rememberMultiplayerApiBase(apiBase) {
+    try {
+      if (global.localStorage && apiBase) global.localStorage.setItem(MULTIPLAYER_API_BASE_KEY, apiBase);
+    } catch (error) {}
+  }
+
   function persistJoinedSession(apiBase, tournamentId, payload) {
     const session = {
       ...payload.session,
@@ -1111,16 +1127,64 @@
   }
 
   async function joinRoomWithCode(apiBase, tournamentId, code) {
-    const response = await fetch(`${apiBase}/api/tournaments/${encodeURIComponent(tournamentId)}/join`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ code }),
-    });
-    const payload = await response.json();
+    let response;
+    try {
+      response = await fetch(`${apiBase}/api/tournaments/${encodeURIComponent(tournamentId)}/join`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code }),
+      });
+    } catch (error) {
+      throw new Error('服务地址无法连接，请确认 API 地址是裁判电脑 IP 且服务已启动');
+    }
+    let payload = {};
+    try {
+      payload = await response.json();
+    } catch (error) {
+      throw new Error('服务返回格式异常，请确认填写的是多人端 API 地址');
+    }
     if (!response.ok || !payload.ok || !payload.session || !payload.session.sessionToken) {
+      if (response.status === 404) throw new Error('赛事 ID 不存在，请确认裁判提供的赛事 ID');
+      if (response.status === 401 || response.status === 403) throw new Error('当前会话无权限或已过期，请重新输入加入码');
+      if (response.status === 400 && payload && /房间码无效/.test(payload.error || '')) throw new Error('加入码无效，请确认复制的是对应身份的房间码');
       throw new Error(payload && payload.error ? payload.error : '加入失败');
     }
     return payload;
+  }
+
+  function createdRoomText(kind = 'all') {
+    const created = Hexcore2.state.ui && Hexcore2.state.ui.createdRoom;
+    const room = created && created.room;
+    if (!room) return '';
+    const captainCodes = Array.isArray(room.captainCodes) ? room.captainCodes : [];
+    const lines = [`赛事 ID：${created.tournamentId || room.tournamentId || ''}`];
+    if (kind === 'all' || kind === 'referee') lines.push(`裁判码：${room.refereeCode || ''}`);
+    if (kind === 'all' || kind === 'viewer') lines.push(`观众码：${room.viewerCode || ''}`);
+    if (kind === 'all' || kind === 'captains') {
+      lines.push('', '队长码：');
+      captainCodes.forEach(item => lines.push(`${item.teamName || item.teamId || '队伍'}：${item.code || ''}`));
+    }
+    return lines.join('\n').trim();
+  }
+
+  async function copyTextToClipboard(text) {
+    if (!text) return false;
+    if (global.navigator && global.navigator.clipboard && global.navigator.clipboard.writeText) {
+      try {
+        await global.navigator.clipboard.writeText(text);
+        return true;
+      } catch (error) {}
+    }
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.setAttribute('readonly', 'readonly');
+    textarea.style.position = 'fixed';
+    textarea.style.left = '-9999px';
+    document.body.appendChild(textarea);
+    textarea.select();
+    const ok = document.execCommand && document.execCommand('copy');
+    textarea.remove();
+    return Boolean(ok);
   }
 
   function applyTeamProjection(teams) {
@@ -1538,6 +1602,34 @@
       returnToMultiplayerGate();
     },
 
+    recentMultiplayerApiBase,
+
+    async copyCreatedRoomCodes(kind = 'all') {
+      try {
+        const text = createdRoomText(kind);
+        if (!text) throw new Error('当前没有可复制的房间码');
+        const ok = await copyTextToClipboard(text);
+        Hexcore2.eventStore.append(ok ? '房间码已复制' : '房间码复制失败', ok ? '已复制到剪贴板' : '当前浏览器不允许访问剪贴板，请手动选中文本复制', ok ? 'success' : 'warn');
+      } catch (error) {
+        Hexcore2.eventStore.append('房间码复制失败', error && error.message ? error.message : String(error), 'warn');
+      }
+      Hexcore2.ui.render();
+    },
+
+    downloadCreatedRoomCodes() {
+      const text = createdRoomText('all');
+      if (!text || !Hexcore2.exportService || !Hexcore2.exportService.downloadText) {
+        Hexcore2.eventStore.append('房间码下载失败', '当前没有可下载的房间码', 'warn');
+        Hexcore2.ui.render();
+        return;
+      }
+      const created = Hexcore2.state.ui && Hexcore2.state.ui.createdRoom;
+      const tournamentId = created && created.tournamentId ? created.tournamentId : `hexcore-${Date.now()}`;
+      const ok = Hexcore2.exportService.downloadText(`HEXCORE2_房间码_${tournamentId}.txt`, text, 'text/plain;charset=utf-8');
+      Hexcore2.eventStore.append(ok ? '房间码已下载' : '房间码下载失败', ok ? '已生成房间码 TXT' : '当前环境不支持下载文件', ok ? 'success' : 'warn');
+      Hexcore2.ui.render();
+    },
+
     async joinRoom() {
       const apiBaseInput = document.getElementById('join-api-base');
       const tournamentInput = document.getElementById('join-tournament-id');
@@ -1546,16 +1638,22 @@
       const tournamentId = String(tournamentInput && tournamentInput.value ? tournamentInput.value : '').trim();
       const code = String(codeInput && codeInput.value ? codeInput.value : '').trim();
       if (!tournamentId || !code) {
+        Hexcore2.state.ui = Hexcore2.state.ui || {};
+        Hexcore2.state.ui.joinGateMessage = { level: 'warn', text: '请填写赛事 ID 和加入码。' };
         Hexcore2.eventStore.append('加入房间失败', '请填写赛事 ID 和加入码', 'warn');
         Hexcore2.ui.render();
         return;
       }
       try {
+        rememberMultiplayerApiBase(apiBase);
         const payload = await joinRoomWithCode(apiBase, tournamentId, code);
         const session = persistJoinedSession(apiBase, tournamentId, payload);
         redirectForSession(session);
       } catch (error) {
-        Hexcore2.eventStore.append('加入房间失败', error && error.message ? error.message : String(error), 'warn');
+        const message = error && error.message ? error.message : String(error);
+        Hexcore2.state.ui = Hexcore2.state.ui || {};
+        Hexcore2.state.ui.joinGateMessage = { level: 'warn', text: message };
+        Hexcore2.eventStore.append('加入房间失败', message, 'warn');
         Hexcore2.ui.render();
       }
     },
@@ -1574,6 +1672,7 @@
         return;
       }
       try {
+        rememberMultiplayerApiBase(apiBase);
         const response = await fetch(`${apiBase}/api/tournaments`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1590,9 +1689,13 @@
           room: payload.room,
           createdAt: new Date().toISOString(),
         };
+        Hexcore2.state.ui.joinGateMessage = { level: 'success', text: '赛事已创建，请复制或下载房间码并分发给对应身份。' };
         Hexcore2.eventStore.append('创建赛事成功', '房间码明文只显示一次，请立即分发给对应身份', 'success');
       } catch (error) {
-        Hexcore2.eventStore.append('创建赛事失败', error && error.message ? error.message : String(error), 'warn');
+        const message = error && error.message ? error.message : String(error);
+        Hexcore2.state.ui = Hexcore2.state.ui || {};
+        Hexcore2.state.ui.joinGateMessage = { level: 'warn', text: message };
+        Hexcore2.eventStore.append('创建赛事失败', message, 'warn');
       }
       Hexcore2.ui.render();
     },

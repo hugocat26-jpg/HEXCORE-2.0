@@ -127,6 +127,23 @@
     return isViewerClient() ? '观众端只读，无法操作' : '';
   }
 
+  function createdRoomText(kind = 'all') {
+    const created = Hexcore2.state.ui && Hexcore2.state.ui.createdRoom;
+    const room = created && created.room;
+    if (!room) return '';
+    const captainCodes = Array.isArray(room.captainCodes) ? room.captainCodes : [];
+    const lines = [
+      `赛事 ID：${created.tournamentId || room.tournamentId || ''}`,
+    ];
+    if (kind === 'all' || kind === 'referee') lines.push(`裁判码：${room.refereeCode || ''}`);
+    if (kind === 'all' || kind === 'viewer') lines.push(`观众码：${room.viewerCode || ''}`);
+    if (kind === 'all' || kind === 'captains') {
+      lines.push('', '队长码：');
+      captainCodes.forEach(item => lines.push(`${item.teamName || item.teamId || '队伍'}：${item.code || ''}`));
+    }
+    return lines.join('\n').trim();
+  }
+
   function createdRoomPanel() {
     const created = Hexcore2.state.ui && Hexcore2.state.ui.createdRoom;
     const room = created && created.room;
@@ -142,6 +159,13 @@
           <button class="primary-btn" onclick="window.hexcoreUI.enterCreatedRefereeRoom()">用裁判码进入裁判端</button>
         </div>
         <div class="room-code-warning">房间码明文只显示一次；刷新页面后将无法再次查看，请立即分发给对应身份。</div>
+        <div class="room-code-actions">
+          <button class="subtle-btn" onclick="window.hexcoreUI.copyCreatedRoomCodes('all')">复制全部</button>
+          <button class="subtle-btn" onclick="window.hexcoreUI.copyCreatedRoomCodes('captains')">复制队长码</button>
+          <button class="subtle-btn" onclick="window.hexcoreUI.copyCreatedRoomCodes('viewer')">复制观众码</button>
+          <button class="subtle-btn" onclick="window.hexcoreUI.downloadCreatedRoomCodes()">下载 TXT</button>
+        </div>
+        <textarea class="room-code-copy-source" readonly aria-label="房间码文本">${escapeHtml(createdRoomText('all'))}</textarea>
         <div class="room-code-grid">
           <div class="room-code-row">
             <span>裁判码</span>
@@ -178,7 +202,7 @@
               <div class="settings-form">
                 <label>
                   <span>服务地址</span>
-                  <input id="join-api-base" value="http://127.0.0.1:4196" aria-label="服务地址">
+                  <input id="join-api-base" value="${escapeHtml((Hexcore2.actions && Hexcore2.actions.recentMultiplayerApiBase && Hexcore2.actions.recentMultiplayerApiBase()) || 'http://127.0.0.1:4196')}" aria-label="服务地址">
                 </label>
                 <label>
                   <span>赛事 ID</span>
@@ -208,6 +232,7 @@
           </div>
           ${createdRoomPanel()}
           <div class="empty-log">已加入的会话会保存在本机；需要切换身份时可清理浏览器本地数据后重新加入。</div>
+          ${Hexcore2.state.ui && Hexcore2.state.ui.joinGateMessage ? `<div class="join-gate-message ${escapeHtml(Hexcore2.state.ui.joinGateMessage.level || 'warn')}">${escapeHtml(Hexcore2.state.ui.joinGateMessage.text || '')}</div>` : ''}
         </section>
       </main>
     `;
@@ -1695,10 +1720,26 @@
       ? '选人已完成'
       : '选人进行中';
     const showRoomReturn = hasExplicitClientRole() || storedMultiplayerSession();
+    const ownCaptain = clientCaptain();
+    const roleStatus = isCaptainClient()
+      ? (captainCanOperateCurrentTurn()
+        ? '可操作'
+        : (Hexcore2.state.multiplayer && Array.isArray(Hexcore2.state.multiplayer.hexcoreActionWindows)
+          && Hexcore2.state.multiplayer.hexcoreActionWindows.some(window => window && window.active !== false && window.teamId === clientTeamId())
+          ? '可发动海克斯'
+          : '只读观看'))
+      : (isViewerClient() ? '只读模式' : '最高权限');
     return `
       <header class="topbar">
         <div class="mode">${isReadonlyClient() ? '观众端' : (isCaptainClient() ? '队长端' : '裁判代执行')}</div>
         ${showRoomReturn ? '<button class="ghost-btn multiplayer-return-btn" onclick="window.hexcoreUI.leaveMultiplayerRoom()">返回多人房间</button>' : ''}
+        ${isCaptainClient() || isViewerClient() ? `
+          <div class="role-status-strip">
+            ${isCaptainClient() ? `<span>我的队伍：<strong>${escapeHtml(ownCaptain ? ownCaptain.name : '未绑定')}</strong></span>` : '<span>观众端：<strong>只读</strong></span>'}
+            <span>当前回合：<strong>${captain ? escapeHtml(captain.name) : '无'}</strong></span>
+            <span>当前权限：<strong>${escapeHtml(roleStatus)}</strong></span>
+          </div>
+        ` : ''}
         <div class="phase">当前阶段：<strong>第 ${Hexcore2.state.draft.round} 轮 / 金币商店</strong></div>
         <div class="captain-title">当前队长：<strong>${captain ? escapeHtml(captain.name) : '无'}</strong></div>
         <div class="captain-title">金币：<strong>${economy ? economy.gold : 0}</strong></div>

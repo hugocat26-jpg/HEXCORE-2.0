@@ -527,6 +527,27 @@ body:has(.join-gate-page) {
   color: #ffe2a3;
 }
 
+.role-status-strip {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.role-status-strip span {
+  min-width: 0;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.role-status-strip strong {
+  color: var(--cyan);
+}
+
 .live-status,
 .clock {
   color: #c5d5df;
@@ -708,6 +729,45 @@ body:has(.join-gate-page) {
   color: var(--muted);
   font-size: 12px;
   line-height: 1.6;
+}
+
+.room-code-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.room-code-actions .subtle-btn {
+  min-height: 30px;
+  padding: 6px 10px;
+}
+
+.room-code-copy-source {
+  width: 100%;
+  min-height: 96px;
+  resize: vertical;
+  color: var(--text);
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: rgba(5, 12, 17, 0.62);
+  padding: 10px;
+  font: 12px/1.55 "Consolas", "SFMono-Regular", monospace;
+}
+
+.join-gate-message {
+  margin-top: 14px;
+  padding: 10px 12px;
+  border: 1px solid rgba(245, 158, 11, 0.42);
+  border-radius: 8px;
+  background: rgba(245, 158, 11, 0.1);
+  color: var(--amber);
+  line-height: 1.6;
+}
+
+.join-gate-message.success {
+  border-color: rgba(34, 197, 94, 0.42);
+  background: rgba(34, 197, 94, 0.1);
+  color: var(--green);
 }
 
 .room-code-grid,
