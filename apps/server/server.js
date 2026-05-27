@@ -21,6 +21,7 @@ const port = Number(process.env.MULTIPLAYER_API_PORT || process.env.PORT || 4196
 
 const commandEventMap = {
   [COMMAND_TYPES.IMPORT_STATE]: EVENT_TYPES.STATE_IMPORTED,
+  [COMMAND_TYPES.SET_HEXCORE_DRAW_ORDER]: EVENT_TYPES.HEXCORE_DRAW_ORDER_SET,
   [COMMAND_TYPES.START_HEXCORE_DRAW]: EVENT_TYPES.HEXCORE_CANDIDATES_CREATED,
   [COMMAND_TYPES.REFRESH_HEXCORE_CANDIDATE]: EVENT_TYPES.HEXCORE_CANDIDATE_REFRESHED,
   [COMMAND_TYPES.PICK_HEXCORE]: EVENT_TYPES.HEXCORE_PICKED,
@@ -270,7 +271,10 @@ function createServer(options = {}) {
           'Access-Control-Allow-Origin': '*',
         });
         res.write(`event: snapshot\ndata: ${JSON.stringify(createReadOnlyProjection(state, view, projectionOptions))}\n\n`);
-        const unsubscribe = store.subscribe(eventTournamentId, res, event => projectEvent(event, view));
+        const unsubscribe = store.subscribe(eventTournamentId, res, (event, nextState) => ({
+          ...projectEvent(event, view),
+          tournament: nextState ? createReadOnlyProjection(nextState, view, projectionOptions) : null,
+        }));
         req.on('close', unsubscribe);
         return;
       }

@@ -1,6 +1,36 @@
 const RULES_VERSION = 'hexcore-2.0-gold-shop-v1';
 const STATE_SCHEMA_VERSION = 1;
 
+const HEXCORE_IDS = Object.freeze([
+  'camp-scout',
+  'discount-coupon',
+  'reserved-seat',
+  'urgent-restock',
+  'camp-blockade',
+  'price-interference',
+  'steady-reinforce',
+  'donation',
+  'sponsor-flow',
+  'hungry-wave',
+  'last-stand',
+  'open-feast',
+  'vampiric-habit',
+  'giant-slayer',
+  'ballroom-queen',
+  'photographer',
+  'wise-benevolence',
+  'origin-sage',
+  'mystery-box',
+  'transmute-gold',
+  'transmute-prismatic',
+  'decompose-knowledge',
+  'stuck-together',
+  'storm-fog',
+  'snow-cat',
+  'charged-cannon',
+  'heavenly-descent',
+]);
+
 const ROLES = Object.freeze({
   SUPER_ADMIN: 'super_admin',
   TOURNAMENT_ADMIN: 'tournament_admin',
@@ -13,6 +43,7 @@ const ROLES = Object.freeze({
 const COMMAND_TYPES = Object.freeze({
   CREATE_TOURNAMENT: 'CreateTournament',
   IMPORT_STATE: 'ImportState',
+  SET_HEXCORE_DRAW_ORDER: 'SetHexcoreDrawOrder',
   START_HEXCORE_DRAW: 'StartHexcoreDraw',
   REFRESH_HEXCORE_CANDIDATE: 'RefreshHexcoreCandidate',
   PICK_HEXCORE: 'PickHexcore',
@@ -32,6 +63,7 @@ const COMMAND_TYPES = Object.freeze({
 const EVENT_TYPES = Object.freeze({
   TOURNAMENT_CREATED: 'TournamentCreated',
   STATE_IMPORTED: 'StateImported',
+  HEXCORE_DRAW_ORDER_SET: 'HexcoreDrawOrderSet',
   HEXCORE_CANDIDATES_CREATED: 'HexcoreCandidatesCreated',
   HEXCORE_CANDIDATE_REFRESHED: 'HexcoreCandidateRefreshed',
   HEXCORE_PICKED: 'HexcorePicked',
@@ -59,6 +91,7 @@ const ROLE_COMMANDS = Object.freeze({
   ],
   [ROLES.REFEREE]: [
     COMMAND_TYPES.IMPORT_STATE,
+    COMMAND_TYPES.SET_HEXCORE_DRAW_ORDER,
     COMMAND_TYPES.START_HEXCORE_DRAW,
     COMMAND_TYPES.REFRESH_HEXCORE_CANDIDATE,
     COMMAND_TYPES.PICK_HEXCORE,
@@ -92,6 +125,7 @@ const ROLE_COMMANDS = Object.freeze({
 const REQUIRED_PAYLOAD_FIELDS = Object.freeze({
   [COMMAND_TYPES.CREATE_TOURNAMENT]: ['name', 'rulesVersion'],
   [COMMAND_TYPES.IMPORT_STATE]: ['checksum', 'sourceVersion'],
+  [COMMAND_TYPES.SET_HEXCORE_DRAW_ORDER]: ['teamIds'],
   [COMMAND_TYPES.START_HEXCORE_DRAW]: ['teamId'],
   [COMMAND_TYPES.REFRESH_HEXCORE_CANDIDATE]: ['teamId', 'candidateSlot'],
   [COMMAND_TYPES.PICK_HEXCORE]: ['teamId', 'hexcoreId'],
@@ -208,6 +242,7 @@ function validateEventEnvelope(event) {
 module.exports = {
   COMMAND_TYPES,
   EVENT_TYPES,
+  HEXCORE_IDS,
   REQUIRED_PAYLOAD_FIELDS,
   ROLE_COMMANDS,
   ROLES,

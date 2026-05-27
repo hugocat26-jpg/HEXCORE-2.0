@@ -3646,6 +3646,106 @@ async function testMultiplayerApiServer() {
     });
     assert(invalidSession.status === 400 && /sessionToken/.test(invalidSession.body.error), '无效 sessionToken 不应提交 command');
 
+    const hexCreated = await requestJson(port, 'POST', '/api/tournaments', {
+      id: 't-hex-sync',
+      name: '海克斯同步回归',
+      actorId: 'referee-hex',
+      settings: { initialGold: 6 },
+      teams: [
+        { teamId: 'team-1', name: '海克斯1队', code: 'hex-captain-1', camp: 'local', economy: { gold: 6 } },
+        { teamId: 'team-2', name: '海克斯2队', code: 'hex-captain-2', camp: 'outsider', economy: { gold: 6 } },
+      ],
+      viewerCode: 'hex-viewer-code',
+    });
+    const hexCaptainJoin = await requestJson(port, 'POST', '/api/tournaments/t-hex-sync/join', {
+      code: hexCreated.body.room.captainCodes[0].code,
+      displayName: '海克斯队长',
+    });
+    const hexViewerJoin = await requestJson(port, 'POST', '/api/tournaments/t-hex-sync/join', {
+      code: hexCreated.body.room.viewerCode,
+      displayName: '海克斯观众',
+    });
+    const hexRefereeJoin = await requestJson(port, 'POST', '/api/tournaments/t-hex-sync/join', {
+      code: hexCreated.body.room.refereeCode,
+      displayName: '海克斯裁判',
+    });
+    const hexOrder = await requestJson(port, 'POST', '/api/tournaments/t-hex-sync/commands', {
+      sessionToken: hexRefereeJoin.body.session.sessionToken,
+      command: {
+        commandId: 'cmd-hex-order',
+        type: multiplayerShared.COMMAND_TYPES.SET_HEXCORE_DRAW_ORDER,
+        baseVersion: 1,
+        payload: { teamIds: ['team-1', 'team-2'] },
+      },
+    });
+    assert(
+      hexOrder.status === 200
+      && hexOrder.body.event.type === multiplayerShared.EVENT_TYPES.HEXCORE_DRAW_ORDER_SET
+      && hexOrder.body.tournament.snapshot.currentTeamId === 'team-1'
+      && hexOrder.body.tournament.snapshot.hexcoreDraft.drawOrder.join('|') === 'team-1|team-2',
+      '裁判制定海克斯抽取顺序应写入服务端，使队长端和观众端知道当前海克斯操作队伍'
+    );
+    const hexDraw = await requestJson(port, 'POST', '/api/tournaments/t-hex-sync/commands', {
+      sessionToken: hexCaptainJoin.body.session.sessionToken,
+      command: {
+        commandId: 'cmd-hex-draw',
+        type: multiplayerShared.COMMAND_TYPES.START_HEXCORE_DRAW,
+        baseVersion: 2,
+        payload: {
+          teamId: 'team-1',
+          slots: ['donation', 'storm-fog', 'snow-cat'],
+          candidateIds: ['donation', 'storm-fog', 'snow-cat'],
+          seenIds: ['donation', 'storm-fog', 'snow-cat'],
+        },
+      },
+    });
+    assert(
+      hexDraw.status === 200
+      && hexDraw.body.event.type === multiplayerShared.EVENT_TYPES.HEXCORE_CANDIDATES_CREATED
+      && hexDraw.body.tournament.snapshot.hexcoreDraft.captainId === 'team-1'
+      && hexDraw.body.tournament.snapshot.hexcoreDraft.slots.includes('donation'),
+      '队长抽取海克斯候选应写入服务端权威会话并返回公开投影'
+    );
+    const hexRefresh = await requestJson(port, 'POST', '/api/tournaments/t-hex-sync/commands', {
+      sessionToken: hexCaptainJoin.body.session.sessionToken,
+      command: {
+        commandId: 'cmd-hex-refresh',
+        type: multiplayerShared.COMMAND_TYPES.REFRESH_HEXCORE_CANDIDATE,
+        baseVersion: 3,
+        payload: {
+          teamId: 'team-1',
+          candidateSlot: 1,
+          replacementId: 'origin-sage',
+          hexcoreId: 'origin-sage',
+        },
+      },
+    });
+    assert(
+      hexRefresh.status === 200
+      && hexRefresh.body.tournament.snapshot.hexcoreDraft.refreshUsed
+      && hexRefresh.body.tournament.snapshot.hexcoreDraft.slots[1] === 'origin-sage',
+      '刷新海克斯候选应同步候选槽和刷新使用状态'
+    );
+    const hexPick = await requestJson(port, 'POST', '/api/tournaments/t-hex-sync/commands', {
+      sessionToken: hexCaptainJoin.body.session.sessionToken,
+      command: {
+        commandId: 'cmd-hex-pick',
+        type: multiplayerShared.COMMAND_TYPES.PICK_HEXCORE,
+        baseVersion: 4,
+        payload: { teamId: 'team-1', hexcoreId: 'donation', hexcoreStatus: 'passive' },
+      },
+    });
+    const hexViewerProjection = await requestJson(port, 'GET', `/api/tournaments/t-hex-sync/projection?view=viewer&sessionToken=${encodeURIComponent(hexViewerJoin.body.session.sessionToken)}`);
+    assert(
+      hexPick.status === 200
+      && hexPick.body.event.type === multiplayerShared.EVENT_TYPES.HEXCORE_PICKED
+      && hexPick.body.tournament.snapshot.hexcoreAssignments['team-1'][0].id === 'donation'
+      && hexPick.body.tournament.snapshot.teams[0].economy.gold === 8
+      && hexViewerProjection.status === 200
+      && hexViewerProjection.body.tournament.snapshot.hexcoreAssignments['team-1'][0].id === 'donation',
+      '队长选择海克斯后裁判端和观众端公开投影都应看到已持有海克斯，并同步被动经济效果'
+    );
+
     const shopCreated = await requestJson(port, 'POST', '/api/tournaments', {
       id: 't-shop',
       name: '服务端商店回归',
@@ -3870,8 +3970,7 @@ async function testMultiplayerApiServer() {
       && snowCards.length === 5
       && snowCards.some(card => card.masked)
       && snowCards.every(card => Number(card.price) === Number(card.tier))
-      && !snowText.includes('shopDisturbances')
-      && !snowText.includes('hexcoreAssignments'),
+      && !snowText.includes('shopDisturbances'),
       '雪定饿的喵应由服务端登记并在目标下一次商店扰乱公开信息，费用和真实槽位仍由服务端控制且不泄漏内部扰乱状态'
     );
 
@@ -3951,8 +4050,7 @@ async function testMultiplayerApiServer() {
       && stormCards.length === 5
       && stormCards.some(card => card.masked)
       && stormCards.every(card => Number(card.price) === Number(card.tier))
-      && !stormText.includes('shopDisturbances')
-      && !stormText.includes('hexcoreAssignments'),
+      && !stormText.includes('shopDisturbances'),
       '骤雨血雾清风应由服务端登记最多3名目标的商店扰乱，目标公开商店隐藏身份但不泄漏内部扰乱状态'
     );
 
@@ -4126,7 +4224,6 @@ async function testMultiplayerApiServer() {
       && hungrySamePurchase.body.tournament.snapshot.lastHungryWave.type === 'same_camp_steal'
       && hungrySamePurchase.body.tournament.snapshot.lastPurchase.hungryWave.type === 'same_camp_steal'
       && !hungrySameText.includes('hungryWaveRound')
-      && !hungrySameText.includes('hexcoreAssignments')
       && !hungrySameText.includes('"players"'),
       '服务端海浪同阵营命中时应夺取真实购买选手、返还购买者金币和购买权，并且公开投影不泄漏内部海浪监听状态'
     );
@@ -4209,7 +4306,6 @@ async function testMultiplayerApiServer() {
       && hungryStartRefresh.body.tournament.snapshot.teams[1].economy.gold === 9
       && hungryStartRefresh.body.tournament.snapshot.roundStates['wave-start-buyer']['1'].hungryWaveFreeRefreshes === 0
       && !hungryStartText.includes('hungryWaveRound')
-      && !hungryStartText.includes('hexcoreAssignments')
       && !hungryStartText.includes('"players"'),
       '服务端应在海浪持有者本轮跳过时登记海浪监听并清零金币，后续购买命中仍由服务端权威结算且返还1次免费刷新'
     );
@@ -4469,7 +4565,6 @@ async function testMultiplayerApiServer() {
       && hungryOppositeRoundEnd.body.tournament.snapshot.lastHungryWave.type === 'round_reward'
       && hungryOppositeRoundEnd.body.tournament.snapshot.lastHungryWave.playerId === 'wave-local-reward-1'
       && !hungryOppositeText.includes('hungryWaveRound')
-      && !hungryOppositeText.includes('hexcoreAssignments')
       && !hungryOppositeText.includes('"players"'),
       '服务端海浪异阵营命中时应退回真实购买选手、返还购买者金币和购买权，并在轮末发放同阵营补偿'
     );
@@ -5630,8 +5725,12 @@ function testMultiplayerClientSubmitsAuthoritativeCommands() {
     && main.includes("await submitRoomCommand('RefreshShop'")
     && main.includes("await submitRoomCommand('PurchaseShopCard'")
     && main.includes("await submitRoomCommand('SkipTurn'")
-    && main.includes("await submitRoomCommand('RenameTeam'"),
-    '开店、刷新、购买、跳过和改名应在有房间 session 时先提交服务端 command，再执行本地 UI 过渡动作',
+    && main.includes("await submitRoomCommand('RenameTeam'")
+    && main.includes("await submitRoomCommand('SetHexcoreDrawOrder'")
+    && main.includes("await submitRoomCommand('StartHexcoreDraw'")
+    && main.includes("await submitRoomCommand('RefreshHexcoreCandidate'")
+    && main.includes("await submitRoomCommand('PickHexcore'"),
+    '开店、刷新、购买、跳过、改名、海克斯抽取顺序和海克斯抽选应在有房间 session 时提交服务端 command，再同步公开投影',
   );
   assert(
     main.includes('syncSessionFromTournament(responsePayload.tournament)')
@@ -5650,6 +5749,9 @@ function testMultiplayerClientSubmitsAuthoritativeCommands() {
     && main.includes('hungryWaveFreeRefreshes')
     && main.includes('applyRoundStatesProjection(snapshot.roundStates)')
     && main.includes('applyHexcoreWindowProjection(snapshot.hexcoreActionWindows)')
+    && main.includes('applyHexcoreAssignmentsProjection(snapshot.hexcoreAssignments)')
+    && main.includes('applyHexcoreDraftProjection(snapshot.hexcoreDraft)')
+    && main.includes('if (event.tournament)')
     && main.includes('applyTournamentProjection(snapshot.tournament)')
     && main.includes('connectRoomEventStream()')
     && main.includes('new global.EventSource')
@@ -5657,6 +5759,19 @@ function testMultiplayerClientSubmitsAuthoritativeCommands() {
     && main.includes('eventSource.addEventListener')
     && main.includes('applyRoomProjection(responsePayload.tournament)'),
     '多人端应在 command 成功和 SSE 快照/事件到达时应用服务端公开投影，避免长期只依赖本地状态',
+  );
+  const rules = fs.readFileSync(path.join(root, 'packages/rules/index.js'), 'utf8');
+  const projections = fs.readFileSync(path.join(root, 'apps/server/projections.js'), 'utf8');
+  const server = fs.readFileSync(path.join(root, 'apps/server/server.js'), 'utf8');
+  assert(
+    rules.includes('EVENT_TYPES.HEXCORE_CANDIDATES_CREATED')
+    && rules.includes('EVENT_TYPES.HEXCORE_DRAW_ORDER_SET')
+    && rules.includes('EVENT_TYPES.HEXCORE_CANDIDATE_REFRESHED')
+    && rules.includes('EVENT_TYPES.HEXCORE_PICKED')
+    && projections.includes('publicHexcoreAssignments')
+    && projections.includes('publicHexcoreDraft')
+    && server.includes('createReadOnlyProjection(nextState, view, projectionOptions)'),
+    '服务端应把海克斯候选、刷新和选择写入权威状态，并通过公开投影/SSE 同步给裁判、队长和观众',
   );
   const refereeConsole = fs.readFileSync(path.join(root, 'apps/multiplayer/src/ui/referee-console.js'), 'utf8');
   assert(

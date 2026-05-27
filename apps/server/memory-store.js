@@ -59,7 +59,7 @@ class MemoryTournamentStore {
     this.tournaments.set(id, clone(nextState));
     this.persistToDisk();
     const event = nextState.events[nextState.events.length - 1] || null;
-    if (event) this.publish(id, event);
+    if (event) this.publish(id, event, nextState);
     return clone(nextState);
   }
 
@@ -74,12 +74,12 @@ class MemoryTournamentStore {
     };
   }
 
-  publish(id, event) {
+  publish(id, event, state = null) {
     const bucket = this.subscribers.get(id);
     if (!bucket || !bucket.size) return;
     for (const subscriber of bucket) {
       try {
-        const projected = subscriber.projectEvent(event);
+        const projected = subscriber.projectEvent(event, state);
         if (!projected) continue;
         const message = `event: ${projected.type}\nid: ${projected.eventSeq}\ndata: ${JSON.stringify(projected)}\n\n`;
         subscriber.res.write(message);

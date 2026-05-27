@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const {
   COMMAND_TYPES,
   EVENT_TYPES,
+  HEXCORE_IDS,
   ROLES,
   RULES_VERSION,
   STATE_SCHEMA_VERSION,
@@ -406,6 +407,68 @@ function markHexcoreUsed(snapshot, teamId, hexcoreId) {
       return { ...(typeof item === 'object' ? item : { id: currentId }), status: 'used' };
     }),
   };
+  return snapshot;
+}
+
+function normalizeHexcoreDraft(input = {}) {
+  const allowedHexcoreIds = new Set(HEXCORE_IDS);
+  const teamId = safeText(input.teamId || input.captainId, '', 80);
+  const rawSlots = Array.isArray(input.slots || input.candidateIds)
+    ? (input.slots || input.candidateIds).map(item => safeText(item, '', 80)).filter(item => item && allowedHexcoreIds.has(item)).slice(0, 5)
+    : [];
+  const slots = [...new Set(rawSlots)];
+  const chosen = Array.isArray(input.chosen)
+    ? input.chosen.map(item => safeText(item, '', 80)).filter(Boolean).slice(0, 5)
+    : [];
+  const seenIds = Array.isArray(input.seenIds)
+    ? input.seenIds.map(item => safeText(item, '', 80)).filter(Boolean).slice(0, 40)
+    : slots;
+  const drawOrder = Array.isArray(input.drawOrder)
+    ? input.drawOrder.map(item => safeText(item, '', 80)).filter(Boolean).slice(0, 40)
+    : [];
+  return {
+    captainId: teamId,
+    teamId,
+    slots,
+    chosen,
+    seenIds: [...new Set([...seenIds, ...slots])],
+    refreshUsed: Boolean(input.refreshUsed),
+    drawOrder,
+  };
+}
+
+function ensureHexcoreAssignments(snapshot) {
+  snapshot.hexcoreAssignments = snapshot.hexcoreAssignments && typeof snapshot.hexcoreAssignments === 'object'
+    ? { ...snapshot.hexcoreAssignments }
+    : {};
+  return snapshot.hexcoreAssignments;
+}
+
+function assignHexcore(snapshot, teamId, hexcoreId, status = 'available') {
+  const cleanTeamId = safeText(teamId, '', 80);
+  const cleanHexcoreId = safeText(hexcoreId, '', 80);
+  if (!cleanTeamId || !cleanHexcoreId) return snapshot;
+  if (!HEXCORE_IDS.includes(cleanHexcoreId)) throw new Error('未知海克斯，不能写入队伍');
+  const assignments = ensureHexcoreAssignments(snapshot);
+  const occupiedByOther = Object.entries(assignments).some(([currentTeamId, list]) => {
+    if (currentTeamId === cleanTeamId || !Array.isArray(list)) return false;
+    return list.some(item => safeText(item && (item.id || item.hexcoreId) || item, '', 80) === cleanHexcoreId);
+  });
+  if (occupiedByOther) throw new Error('该海克斯已被其它队长选择');
+  const current = Array.isArray(assignments[cleanTeamId]) ? assignments[cleanTeamId] : [];
+  if (current.some(item => safeText(item && (item.id || item.hexcoreId) || item, '', 80) === cleanHexcoreId)) return snapshot;
+  if (current.length >= 1) throw new Error('该队长已完成海克斯选择');
+  assignments[cleanTeamId] = [
+    ...current,
+    {
+      id: cleanHexcoreId,
+      status: safeText(status, 'available', 40) || 'available',
+    },
+  ];
+  if (cleanHexcoreId === 'donation' || cleanHexcoreId === 'origin-sage') {
+    const economy = ensureTeamEconomy(snapshot, cleanTeamId);
+    if (economy) economy.gold += 2;
+  }
   return snapshot;
 }
 
@@ -831,6 +894,82 @@ function applyEventToSnapshot(snapshot, event) {
       if (currentId !== teamId) return team;
       return { ...team, name, renameUsed: true };
     }) : [];
+  }
+  if (event.type === EVENT_TYPES.HEXCORE_DRAW_ORDER_SET) {
+    const validTeamIds = new Set(teamIdsFrom(next));
+    const teamIds = Array.isArray(payload.teamIds)
+      ? payload.teamIds.map(item => safeText(item, '', 80)).filter(teamId => teamId && validTeamIds.has(teamId))
+      : [];
+    const drawOrder = [...new Set(teamIds)];
+    next.hexcoreAssignments = {};
+    drawOrder.forEach(teamId => {
+      next.hexcoreAssignments[teamId] = [];
+    });
+    next.hexcoreDraft = {
+      captainId: '',
+      teamId: '',
+      slots: [],
+      chosen: [],
+      seenIds: [],
+      refreshUsed: false,
+      drawOrder,
+    };
+    next.currentTeamId = drawOrder[0] || next.currentTeamId || '';
+    next.currentPhase = drawOrder.length ? 'hexcore_draw' : next.currentPhase;
+  }
+  if (event.type === EVENT_TYPES.HEXCORE_CANDIDATES_CREATED) {
+    const draft = normalizeHexcoreDraft(payload);
+    if (!draft.teamId || !teamExists(next, draft.teamId)) throw new Error('海克斯抽取需要有效队长');
+    if (!draft.slots.length) throw new Error('海克斯候选不能为空');
+    const currentList = Array.isArray(next.hexcoreAssignments && next.hexcoreAssignments[draft.teamId])
+      ? next.hexcoreAssignments[draft.teamId]
+      : [];
+    if (currentList.length >= 1) throw new Error('该队长已完成海克斯选择');
+    next.hexcoreDraft = draft;
+    next.currentTeamId = draft.teamId;
+    next.currentPhase = 'hexcore_draw';
+  }
+  if (event.type === EVENT_TYPES.HEXCORE_CANDIDATE_REFRESHED) {
+    const teamId = safeText(payload.teamId || payload.captainId, '', 80);
+    const draft = normalizeHexcoreDraft(next.hexcoreDraft || {});
+    const candidateSlot = Number(payload.candidateSlot);
+    const replacementId = safeText(payload.replacementId || payload.hexcoreId, '', 80);
+    if (!teamId || draft.teamId !== teamId || !draft.slots.length) throw new Error('当前没有该队长的海克斯抽取会话');
+    if (!Number.isInteger(candidateSlot) || candidateSlot < 0 || candidateSlot >= draft.slots.length) throw new Error('海克斯候选槽无效');
+    if (draft.refreshUsed) throw new Error('本次海克斯抽取已使用过刷新');
+    if (!replacementId) throw new Error('刷新后的海克斯不能为空');
+    draft.slots[candidateSlot] = replacementId;
+    draft.seenIds = [...new Set([...(draft.seenIds || []), replacementId])];
+    draft.refreshUsed = true;
+    next.hexcoreDraft = draft;
+    next.currentTeamId = teamId;
+    next.currentPhase = 'hexcore_draw';
+  }
+  if (event.type === EVENT_TYPES.HEXCORE_PICKED) {
+    const teamId = safeText(payload.teamId || payload.captainId, '', 80);
+    const hexcoreId = safeText(payload.hexcoreId, '', 80);
+    const draft = normalizeHexcoreDraft(next.hexcoreDraft || {});
+    if (!teamId || !hexcoreId || draft.teamId !== teamId || !draft.slots.includes(hexcoreId)) {
+      throw new Error('当前海克斯抽取会话无效');
+    }
+    assignHexcore(next, teamId, hexcoreId, payload.hexcoreStatus || payload.status || 'available');
+    next.hexcoreDraft = {
+      ...draft,
+      captainId: '',
+      teamId: '',
+      slots: [],
+      chosen: [...new Set([...(draft.chosen || []), hexcoreId])],
+      seenIds: [...new Set([...(draft.seenIds || []), hexcoreId])],
+      refreshUsed: false,
+    };
+    const order = Array.isArray(draft.drawOrder) ? draft.drawOrder : [];
+    const nextTeamId = order.find(id => {
+      const cleanId = safeText(id, '', 80);
+      const list = Array.isArray(next.hexcoreAssignments && next.hexcoreAssignments[cleanId]) ? next.hexcoreAssignments[cleanId] : [];
+      return cleanId && cleanId !== teamId && list.length < 1;
+    });
+    next.currentTeamId = nextTeamId || teamId;
+    next.currentPhase = nextTeamId ? 'hexcore_draw' : 'gold_shop';
   }
   if (event.type === EVENT_TYPES.SHOP_OPENED || event.type === EVENT_TYPES.SHOP_REFRESHED) {
     const teamId = safeText(payload.teamId, '', 80);

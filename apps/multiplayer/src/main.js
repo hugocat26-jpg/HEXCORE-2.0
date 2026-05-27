@@ -1415,6 +1415,56 @@
     return previous !== JSON.stringify(windows);
   }
 
+  function projectedHexcoreById(hexcoreId, status = 'available') {
+    const id = String(hexcoreId || '').trim();
+    const source = Hexcore2.sampleData.hexcores.find(item => item.id === id);
+    return source
+      ? { ...source, status }
+      : { id, name: id || '未知海克斯', mode: 'manual', tags: [], description: '', status };
+  }
+
+  function applyHexcoreAssignmentsProjection(assignments) {
+    if (!assignments || typeof assignments !== 'object') return false;
+    const nextAssignments = {};
+    Object.entries(assignments).forEach(([teamId, list]) => {
+      const cleanTeamId = String(teamId || '').trim();
+      if (!cleanTeamId) return;
+      nextAssignments[cleanTeamId] = (Array.isArray(list) ? list : [])
+        .map(item => {
+          const hexcoreId = String((item && (item.id || item.hexcoreId)) || item || '').trim();
+          if (!hexcoreId) return null;
+          return projectedHexcoreById(hexcoreId, String((item && item.status) || 'available').trim() || 'available');
+        })
+        .filter(Boolean);
+    });
+    const previous = JSON.stringify(Hexcore2.state.hexcoreAssignments || {});
+    Hexcore2.state.hexcoreAssignments = nextAssignments;
+    return previous !== JSON.stringify(nextAssignments);
+  }
+
+  function applyHexcoreDraftProjection(draft) {
+    if (!draft || typeof draft !== 'object') return false;
+    Hexcore2.state.hexcoreDraft = Hexcore2.state.hexcoreDraft || {};
+    const current = Hexcore2.state.hexcoreDraft;
+    const previous = JSON.stringify(current);
+    const captainId = String(draft.captainId || draft.teamId || '').trim();
+    current.captainId = captainId;
+    current.slots = Array.isArray(draft.slots || draft.candidateIds)
+      ? (draft.slots || draft.candidateIds).map(item => String(item || '').trim()).filter(Boolean)
+      : [];
+    current.chosen = Array.isArray(draft.chosen)
+      ? draft.chosen.map(item => String(item || '').trim()).filter(Boolean)
+      : [];
+    current.seenIds = Array.isArray(draft.seenIds)
+      ? draft.seenIds.map(item => String(item || '').trim()).filter(Boolean)
+      : [...current.slots];
+    current.refreshUsed = Boolean(draft.refreshUsed);
+    current.drawOrder = Array.isArray(draft.drawOrder)
+      ? draft.drawOrder.map(item => String(item || '').trim()).filter(Boolean)
+      : (Array.isArray(current.drawOrder) ? current.drawOrder : []);
+    return previous !== JSON.stringify(current);
+  }
+
   function applyLastPurchaseProjection(purchase) {
     Hexcore2.state.multiplayer = Hexcore2.state.multiplayer || {};
     const previous = JSON.stringify(Hexcore2.state.multiplayer.lastPurchase || null);
@@ -1481,6 +1531,8 @@
     if (Object.prototype.hasOwnProperty.call(snapshot, 'lastHungryWave') && applyLastHungryWaveProjection(snapshot.lastHungryWave)) changed = true;
     if (Object.prototype.hasOwnProperty.call(snapshot, 'tournament') && applyTournamentProjection(snapshot.tournament)) changed = true;
     if (applyHexcoreWindowProjection(snapshot.hexcoreActionWindows)) changed = true;
+    if (Object.prototype.hasOwnProperty.call(snapshot, 'hexcoreAssignments') && applyHexcoreAssignmentsProjection(snapshot.hexcoreAssignments)) changed = true;
+    if (Object.prototype.hasOwnProperty.call(snapshot, 'hexcoreDraft') && applyHexcoreDraftProjection(snapshot.hexcoreDraft)) changed = true;
     if (Number.isInteger(Number(snapshot.currentRound)) && Hexcore2.state.draft.round !== Number(snapshot.currentRound)) {
       Hexcore2.state.draft.round = Number(snapshot.currentRound);
       changed = true;
@@ -1549,6 +1601,10 @@
 
   function applyRoomEvent(event) {
     if (!event || typeof event !== 'object') return false;
+    if (event.tournament) {
+      syncSessionFromTournament(event.tournament);
+      return applyRoomProjection(event.tournament);
+    }
     if (event.type === 'TeamRenamed' && event.payload) {
       return applyRoomProjection({
         stateVersion: event.stateVersion,
@@ -2845,7 +2901,7 @@
       return this.drawHexcoreForCaptain(captain ? captain.id : '');
     },
 
-    drawHexcoreForCaptain(captainId) {
+    async drawHexcoreForCaptain(captainId) {
       if (!captainClientCanActOn(captainId, '抽取海克斯失败')) return;
       const captain = Hexcore2.state.captains.find(item => item.id === captainId);
       if (!captain) {
@@ -2876,13 +2932,26 @@
         Hexcore2.state.hexcoreDraft.seenIds = [...slots];
         Hexcore2.state.hexcoreDraft.refreshUsed = false;
         Hexcore2.eventStore.append('抽取海克斯', `${captain.name} 抽出 ${slots.length} 个海克斯候选，等待队长选择 1 个`, 'draw');
+        try {
+          await submitRoomCommand('StartHexcoreDraw', {
+            teamId: captain.id,
+            slots,
+            candidateIds: slots,
+            chosen: [],
+            seenIds: [...slots],
+            refreshUsed: false,
+            drawOrder: Array.isArray(Hexcore2.state.hexcoreDraft.drawOrder) ? Hexcore2.state.hexcoreDraft.drawOrder : [],
+          });
+        } catch (error) {
+          Hexcore2.eventStore.append('同步海克斯失败', error && error.message ? error.message : String(error), 'warn');
+        }
       } else {
         Hexcore2.eventStore.append('抽取海克斯', `${captain.name} 已有进行中的海克斯五抽一`, 'info');
       }
       renderAndPersist();
     },
 
-    selectHexcoreFromDraw(captainId, hexcoreId) {
+    async selectHexcoreFromDraw(captainId, hexcoreId) {
       if (!captainClientCanActOn(captainId, '选择海克斯失败')) return;
       if (!captainClientCanUseHexcoreSession('选择海克斯失败')) return;
       const captain = Hexcore2.state.captains.find(item => item.id === captainId);
@@ -2937,6 +3006,15 @@
           : `${captain.name} 选择【${hexcore.name}】，全部队长海克斯抽取已完成`,
         'success'
       );
+      try {
+        await submitRoomCommand('PickHexcore', {
+          teamId: captain.id,
+          hexcoreId,
+          hexcoreStatus: hexcore.mode === 'passive' ? 'passive' : 'available',
+        });
+      } catch (error) {
+        Hexcore2.eventStore.append('同步海克斯失败', error && error.message ? error.message : String(error), 'warn');
+      }
       renderAndPersist();
     },
 
@@ -2962,7 +3040,7 @@
       renderAndPersist();
     },
 
-    refreshHexcoreSlot(slotIndex) {
+    async refreshHexcoreSlot(slotIndex) {
       if (!captainClientCanUseHexcoreSession('刷新海克斯失败')) return;
       const session = Hexcore2.state.hexcoreDraft || {};
       const index = Number(slotIndex);
@@ -2989,6 +3067,21 @@
       session.refreshUsed = true;
       const captain = Hexcore2.state.captains.find(item => item.id === session.captainId);
       Hexcore2.eventStore.append('刷新海克斯', `${captain ? captain.name : '当前队长'} 刷新了第 ${index + 1} 个候选`, 'warn');
+      try {
+        await submitRoomCommand('RefreshHexcoreCandidate', {
+          teamId: session.captainId,
+          candidateSlot: index,
+          replacementId: replacement,
+          hexcoreId: replacement,
+          slots: [...session.slots],
+          chosen: Array.isArray(session.chosen) ? [...session.chosen] : [],
+          seenIds: [...session.seenIds],
+          refreshUsed: true,
+          drawOrder: Array.isArray(session.drawOrder) ? session.drawOrder : [],
+        });
+      } catch (error) {
+        Hexcore2.eventStore.append('同步海克斯失败', error && error.message ? error.message : String(error), 'warn');
+      }
       renderAndPersist();
     },
 
@@ -3004,7 +3097,7 @@
       renderAndPersist();
     },
 
-    randomizeHexcoreDrawOrder() {
+    async randomizeHexcoreDrawOrder() {
       if (isCaptainClient()) {
         Hexcore2.eventStore.append('队长操作失败', '队长端不可执行裁判海克斯动作', 'warn');
         Hexcore2.ui.render();
@@ -3025,10 +3118,15 @@
       Hexcore2.state.ui = Hexcore2.state.ui || {};
       Hexcore2.state.ui.hexCaptainId = drawOrder[0] || '';
       Hexcore2.eventStore.append('海克斯抽取顺序', '裁判已清空所有队长海克斯，随机生成抽取顺序，并切换到第一顺位队长', 'success');
+      try {
+        await submitRoomCommand('SetHexcoreDrawOrder', { teamIds: drawOrder });
+      } catch (error) {
+        Hexcore2.eventStore.append('同步抽取顺序失败', error && error.message ? error.message : String(error), 'warn');
+      }
       renderAndPersist();
     },
 
-    resetAllHexcores() {
+    async resetAllHexcores() {
       if (isCaptainClient()) {
         Hexcore2.eventStore.append('队长操作失败', '队长端不可执行裁判海克斯动作', 'warn');
         Hexcore2.ui.render();
@@ -3049,6 +3147,11 @@
       Hexcore2.state.draft.runtimeEffects = [];
       Hexcore2.state.ui.hexCaptainId = Hexcore2.state.captains[0] ? Hexcore2.state.captains[0].id : '';
       Hexcore2.eventStore.append('海克斯重置', '裁判已移除所有队长持有海克斯，并清空当前抽取会话', 'warn');
+      try {
+        await submitRoomCommand('SetHexcoreDrawOrder', { teamIds: [] });
+      } catch (error) {
+        Hexcore2.eventStore.append('同步海克斯重置失败', error && error.message ? error.message : String(error), 'warn');
+      }
       renderAndPersist();
     },
 

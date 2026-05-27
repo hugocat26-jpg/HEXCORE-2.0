@@ -31,6 +31,8 @@ const EVENT_PUBLIC_PAYLOAD_FIELDS = [
   'message',
   'targetStateVersion',
   'restoredStateVersion',
+  'candidateSlot',
+  'replacementId',
 ];
 
 const VIEW_TYPES = Object.freeze({
@@ -190,6 +192,49 @@ function publicHexcoreWindows(windows = []) {
   })).filter(window => window.teamId && window.hexcoreId);
 }
 
+function publicHexcoreAssignments(assignments = {}) {
+  if (!assignments || typeof assignments !== 'object') return {};
+  return Object.fromEntries(Object.entries(assignments).map(([teamId, list]) => [
+    String(teamId || '').trim().slice(0, 80),
+    (Array.isArray(list) ? list : []).map(item => ({
+      id: String((item && (item.id || item.hexcoreId)) || item || '').trim().slice(0, 80),
+      status: String((item && item.status) || 'available').trim().slice(0, 40),
+    })).filter(item => item.id).slice(0, 4),
+  ]).filter(([teamId]) => teamId));
+}
+
+function publicHexcoreDraft(draft = {}) {
+  if (!draft || typeof draft !== 'object') {
+    return {
+      captainId: '',
+      teamId: '',
+      slots: [],
+      chosen: [],
+      seenIds: [],
+      refreshUsed: false,
+      drawOrder: [],
+    };
+  }
+  const captainId = String(draft.captainId || draft.teamId || '').trim().slice(0, 80);
+  return {
+    captainId,
+    teamId: captainId,
+    slots: Array.isArray(draft.slots || draft.candidateIds)
+      ? (draft.slots || draft.candidateIds).map(item => String(item || '').trim().slice(0, 80)).filter(Boolean).slice(0, 5)
+      : [],
+    chosen: Array.isArray(draft.chosen)
+      ? draft.chosen.map(item => String(item || '').trim().slice(0, 80)).filter(Boolean).slice(0, 5)
+      : [],
+    seenIds: Array.isArray(draft.seenIds)
+      ? draft.seenIds.map(item => String(item || '').trim().slice(0, 80)).filter(Boolean).slice(0, 40)
+      : [],
+    refreshUsed: Boolean(draft.refreshUsed),
+    drawOrder: Array.isArray(draft.drawOrder)
+      ? draft.drawOrder.map(item => String(item || '').trim().slice(0, 80)).filter(Boolean).slice(0, 40)
+      : [],
+  };
+}
+
 function publicRefereeRuling(ruling = null) {
   if (!ruling || typeof ruling !== 'object') return null;
   return {
@@ -294,6 +339,8 @@ function projectSnapshotData(snapshot = {}, view = VIEW_TYPES.PUBLIC, options = 
     tournament: publicTournament(snapshot.tournament, view, options),
     roundStates: publicRoundStates(snapshot.roundStates),
     hexcoreActionWindows: publicHexcoreWindows(snapshot.hexcoreActionWindows),
+    hexcoreAssignments: publicHexcoreAssignments(snapshot.hexcoreAssignments),
+    hexcoreDraft: publicHexcoreDraft(snapshot.hexcoreDraft),
     perspectiveTeamId: resolvePerspectiveTeamId(snapshot, options.teamId),
   };
 }
@@ -346,6 +393,8 @@ function projectEventPayload(payload = {}) {
     if (projectedRoundState) publicPayload.roundState = projectedRoundState;
   }
   if (trustedProjection && Array.isArray(payload.hexcoreActionWindows)) publicPayload.hexcoreActionWindows = publicHexcoreWindows(payload.hexcoreActionWindows);
+  if (payload.hexcoreAssignments) publicPayload.hexcoreAssignments = publicHexcoreAssignments(payload.hexcoreAssignments);
+  if (payload.hexcoreDraft) publicPayload.hexcoreDraft = publicHexcoreDraft(payload.hexcoreDraft);
   return publicPayload;
 }
 
@@ -392,5 +441,7 @@ module.exports = {
   projectEvent,
   projectSnapshotData,
   publicCurrentShop,
+  publicHexcoreAssignments,
+  publicHexcoreDraft,
   publicLastPurchase,
 };
