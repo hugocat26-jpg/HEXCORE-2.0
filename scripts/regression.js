@@ -3745,6 +3745,87 @@ async function testMultiplayerApiServer() {
       '雪定饿的喵应由服务端登记并在目标下一次商店扰乱公开信息，费用和真实槽位仍由服务端控制且不泄漏内部扰乱状态'
     );
 
+    const stormCreated = await requestJson(port, 'POST', '/api/tournaments', {
+      id: 't-storm-fog',
+      name: '血雾权威回归',
+      actorId: 'referee-storm',
+      teams: [
+        { teamId: 'storm-source', name: '血雾来源', camp: 'local', code: 'storm-source-code', economy: { gold: 9 } },
+        { teamId: 'storm-a', name: '血雾A', camp: 'local', code: 'storm-a-code', economy: { gold: 9 } },
+        { teamId: 'storm-b', name: '血雾B', camp: 'local', code: 'storm-b-code', economy: { gold: 9 } },
+        { teamId: 'storm-c', name: '血雾C', camp: 'local', code: 'storm-c-code', economy: { gold: 9 } },
+      ],
+      hexcoreAssignments: {
+        'storm-source': [{ id: 'storm-fog', status: 'available' }],
+      },
+      players: [
+        { id: 'storm-local-1', name: '血雾一号', gameId: 'F1', camp: 'local', tier: 1, score: 71, status: 'available' },
+        { id: 'storm-local-2', name: '血雾二号', gameId: 'F2', camp: 'local', tier: 2, score: 72, status: 'available' },
+        { id: 'storm-local-3', name: '血雾三号', gameId: 'F3', camp: 'local', tier: 3, score: 73, status: 'available' },
+        { id: 'storm-local-4', name: '血雾四号', gameId: 'F4', camp: 'local', tier: 4, score: 74, status: 'available' },
+        { id: 'storm-local-5', name: '血雾五号', gameId: 'F5', camp: 'local', tier: 5, score: 75, status: 'available' },
+      ],
+    });
+    const stormSourceJoin = await requestJson(port, 'POST', '/api/tournaments/t-storm-fog/join', {
+      code: stormCreated.body.room.captainCodes[0].code,
+      displayName: '血雾来源队长',
+    });
+    const stormTargetJoin = await requestJson(port, 'POST', '/api/tournaments/t-storm-fog/join', {
+      code: stormCreated.body.room.captainCodes[1].code,
+      displayName: '血雾目标队长',
+    });
+    const stormUsed = await requestJson(port, 'POST', '/api/tournaments/t-storm-fog/commands', {
+      sessionToken: stormSourceJoin.body.session.sessionToken,
+      command: {
+        commandId: 'cmd-api-use-storm-fog',
+        type: multiplayerShared.COMMAND_TYPES.USE_HEXCORE,
+        baseVersion: 1,
+        payload: { teamId: 'storm-source', hexcoreId: 'storm-fog', targetTeamId: 'storm-a' },
+      },
+    });
+    const stormUsedAgain = await requestJson(port, 'POST', '/api/tournaments/t-storm-fog/commands', {
+      sessionToken: stormSourceJoin.body.session.sessionToken,
+      command: {
+        commandId: 'cmd-api-use-storm-fog-again',
+        type: multiplayerShared.COMMAND_TYPES.USE_HEXCORE,
+        baseVersion: 2,
+        payload: { teamId: 'storm-source', hexcoreId: 'storm-fog', targetTeamId: 'storm-a' },
+      },
+    });
+    const stormSkip = await requestJson(port, 'POST', '/api/tournaments/t-storm-fog/commands', {
+      sessionToken: stormSourceJoin.body.session.sessionToken,
+      command: {
+        commandId: 'cmd-api-storm-source-skip',
+        type: multiplayerShared.COMMAND_TYPES.SKIP_TURN,
+        baseVersion: 2,
+        payload: { teamId: 'storm-source', round: 1 },
+      },
+    });
+    const stormShop = await requestJson(port, 'POST', '/api/tournaments/t-storm-fog/commands', {
+      sessionToken: stormTargetJoin.body.session.sessionToken,
+      command: {
+        commandId: 'cmd-api-storm-target-shop',
+        type: multiplayerShared.COMMAND_TYPES.OPEN_SHOP,
+        baseVersion: 3,
+        payload: { teamId: 'storm-a', round: 1 },
+      },
+    });
+    const stormCards = stormShop.body.tournament.snapshot.currentShop.cards;
+    const stormText = JSON.stringify(stormShop.body);
+    assert(
+      stormUsed.status === 200
+      && stormUsedAgain.status === 400
+      && /未持有/.test(stormUsedAgain.body.error)
+      && stormSkip.status === 200
+      && stormShop.status === 200
+      && stormCards.length === 5
+      && stormCards.some(card => card.masked)
+      && stormCards.every(card => Number(card.price) === Number(card.tier))
+      && !stormText.includes('shopDisturbances')
+      && !stormText.includes('hexcoreAssignments'),
+      '骤雨血雾清风应由服务端登记最多3名目标的商店扰乱，目标公开商店隐藏身份但不泄漏内部扰乱状态'
+    );
+
     const poorCreated = await requestJson(port, 'POST', '/api/tournaments', {
       id: 't-poor-refresh',
       name: '刷新金币不足回归',

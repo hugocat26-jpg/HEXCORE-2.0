@@ -80,16 +80,16 @@ function playerToShopCard(player, index) {
   };
 }
 
-function activeSnowCatDisturbance(snapshot = {}, teamId = '') {
+function activeDisplayDisturbance(snapshot = {}, teamId = '') {
   const cleanTeamId = safeText(teamId, '', 80);
   return (Array.isArray(snapshot.shopDisturbances) ? snapshot.shopDisturbances : [])
     .find(item => item
       && item.active !== false
-      && safeText(item.type, '', 40) === 'snow_cat'
+      && ['snow_cat', 'weather_fog'].includes(safeText(item.type, '', 40))
       && safeText(item.targetTeamId || item.targetCaptainId, '', 80) === cleanTeamId) || null;
 }
 
-function applySnowCatDisplayShuffle(cards = [], seed = '') {
+function applyDisplayShuffle(cards = [], seed = '', disturbanceType = '') {
   if (!Array.isArray(cards) || cards.length < 2) return cards;
   const ranked = [...cards].sort((left, right) => {
     const leftKey = crypto.createHash('sha256').update(`${seed}:display:${left.playerId}`).digest('hex');
@@ -112,6 +112,7 @@ function applySnowCatDisplayShuffle(cards = [], seed = '') {
       displayScore: display.score,
       displayHeroes: display.heroes,
       snowCatShuffled: true,
+      weatherFogged: safeText(disturbanceType, '', 40) === 'weather_fog',
     };
   });
 }
@@ -119,7 +120,7 @@ function applySnowCatDisplayShuffle(cards = [], seed = '') {
 function consumeShopDisturbance(snapshot = {}, teamId = '', consumedAt = new Date().toISOString()) {
   const cleanTeamId = safeText(teamId, '', 80);
   return (Array.isArray(snapshot.shopDisturbances) ? snapshot.shopDisturbances : []).map(item => {
-    if (!item || safeText(item.type, '', 40) !== 'snow_cat') return item;
+    if (!item || !['snow_cat', 'weather_fog'].includes(safeText(item.type, '', 40))) return item;
     if (safeText(item.targetTeamId || item.targetCaptainId, '', 80) !== cleanTeamId || item.active === false) return item;
     return { ...item, active: false, consumedAt };
   });
@@ -142,10 +143,10 @@ function createServerShop(snapshot = {}, command, roleBinding = {}, payload = {}
     : 0;
   const seed = safeText(payload.seed || payload.clientSeed || command.commandId, command.commandId, 120);
   const candidates = rankedCandidates(shopPlayerCandidates(snapshot, teamId), `${snapshot.tournamentId || command.tournamentId}:${teamId}:${round}:${refreshCount}:${seed}`);
-  const disturbance = activeSnowCatDisturbance(snapshot, teamId);
+  const disturbance = activeDisplayDisturbance(snapshot, teamId);
   const baseCards = candidates.slice(0, 5).map(playerToShopCard);
   const cards = disturbance
-    ? applySnowCatDisplayShuffle(baseCards, `${snapshot.tournamentId || command.tournamentId}:${teamId}:${round}:${refreshCount}:${seed}:snow-cat`)
+    ? applyDisplayShuffle(baseCards, `${snapshot.tournamentId || command.tournamentId}:${teamId}:${round}:${refreshCount}:${seed}:${safeText(disturbance.type, '', 40)}`, safeText(disturbance.type, '', 40))
     : baseCards;
   return {
     id: safeText(`shop_${teamId}_${round}_${command.commandId}`, `shop_${Date.now()}`, 80),
@@ -157,7 +158,7 @@ function createServerShop(snapshot = {}, command, roleBinding = {}, payload = {}
     refreshCostPaid: command.type === COMMAND_TYPES.REFRESH_SHOP ? nextRefreshCost(snapshot, teamId, round) : 0,
     selectedSlot: 0,
     pickedThisTurn: false,
-    appliedDisturbance: disturbance ? { type: 'snow_cat', sourceTeamId: safeText(disturbance.sourceTeamId, '', 80) } : null,
+    appliedDisturbance: disturbance ? { type: safeText(disturbance.type, '', 40), sourceTeamId: safeText(disturbance.sourceTeamId, '', 80) } : null,
     cards,
   };
 }

@@ -366,6 +366,26 @@ function markHexcoreUsed(snapshot, teamId, hexcoreId) {
   return snapshot;
 }
 
+function teamIdsFrom(snapshot = {}) {
+  return Array.isArray(snapshot.teams)
+    ? snapshot.teams.map(team => safeText(team && (team.teamId || team.id), '', 80)).filter(Boolean)
+    : [];
+}
+
+function stormFogTargetIds(snapshot, sourceTeamId, startTeamId) {
+  const order = teamIdsFrom(snapshot);
+  const source = safeText(sourceTeamId, '', 80);
+  const start = safeText(startTeamId, '', 80);
+  const startIndex = order.indexOf(start);
+  if (startIndex < 0) return [];
+  const targets = [];
+  for (let offset = 0; offset < order.length && targets.length < 3; offset += 1) {
+    const teamId = order[(startIndex + offset) % order.length];
+    if (teamId && teamId !== source) targets.push(teamId);
+  }
+  return targets;
+}
+
 function assignPurchasedPlayer(snapshot, teamId, playerId) {
   const cleanTeamId = safeText(teamId, '', 80);
   const cleanPlayerId = safeText(playerId, '', 80);
@@ -578,6 +598,30 @@ function applyEventToSnapshot(snapshot, event) {
           createdAt: event.createdAt,
           consumedAt: '',
         },
+      ];
+      markHexcoreUsed(next, teamId, hexcoreId);
+    }
+    if (hexcoreId === 'storm-fog') {
+      const targetTeamId = safeText(payload.targetTeamId || payload.targetCaptainId, '', 80);
+      if (!targetTeamId || !teamExists(next, targetTeamId)) throw new Error('骤雨 血雾 清风需要选择有效目标队伍');
+      if (targetTeamId === teamId) throw new Error('骤雨 血雾 清风不能对自己使用');
+      if (!canApplyClientProjection(payload) && !teamHasHexcore(next, teamId, hexcoreId)) {
+        throw new Error('当前队伍未持有骤雨 血雾 清风');
+      }
+      const targetIds = stormFogTargetIds(next, teamId, targetTeamId);
+      if (!targetIds.length) throw new Error('骤雨 血雾 清风没有可影响目标');
+      const current = Array.isArray(next.shopDisturbances) ? next.shopDisturbances.map(normalizeShopDisturbance) : [];
+      next.shopDisturbances = [
+        ...current.filter(item => item.active && !(item.type === 'weather_fog' && targetIds.includes(item.targetTeamId))),
+        ...targetIds.map(targetId => ({
+          type: 'weather_fog',
+          sourceTeamId: teamId,
+          targetTeamId: targetId,
+          hexcoreId,
+          active: true,
+          createdAt: event.createdAt,
+          consumedAt: '',
+        })),
       ];
       markHexcoreUsed(next, teamId, hexcoreId);
     }
