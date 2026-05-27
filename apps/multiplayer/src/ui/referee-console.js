@@ -348,8 +348,14 @@
   }
 
   function hungryWaveBanner() {
-    if (!Hexcore2.hexcoreEngine || !Hexcore2.hexcoreEngine.activeHungryWave) return '';
-    const wave = Hexcore2.hexcoreEngine.activeHungryWave();
+    if (Hexcore2.hexcoreEngine && Hexcore2.hexcoreEngine.activeHungryWave) {
+      const wave = Hexcore2.hexcoreEngine.activeHungryWave();
+      if (wave) return localHungryWaveBanner(wave);
+    }
+    return projectedHungryWaveBanner();
+  }
+
+  function localHungryWaveBanner(wave) {
     if (!wave) return '';
     const source = Hexcore2.state.captains.find(captain => captain.id === wave.captainId);
     const checked = new Set(wave.checkedCaptainIds || []);
@@ -367,6 +373,34 @@
           <span>${escapeHtml(source ? source.name : '未知队长')} 已触发【海浪，我没吃饭】，本轮后续购买都会进入判定。</span>
         </div>
         <em>剩余待判定 ${remaining} 队</em>
+      </section>
+    `;
+  }
+
+  function projectedHungryWaveBanner() {
+    const wave = Hexcore2.state.multiplayer && Hexcore2.state.multiplayer.lastHungryWave;
+    if (!wave || !wave.type) return '';
+    const source = Hexcore2.state.captains.find(captain => captain.id === wave.sourceTeamId);
+    const buyer = Hexcore2.state.captains.find(captain => captain.id === wave.buyerTeamId);
+    const player = Hexcore2.state.players.find(item => item.id === wave.playerId);
+    const sourceName = source ? source.name : (wave.sourceTeamId || '未知队伍');
+    const buyerName = buyer ? buyer.name : (wave.buyerTeamId || '');
+    const playerName = player ? player.name : (wave.playerId || '');
+    const probability = wave.chanceBase > 1 ? `判定 ${wave.roll + 1}/${wave.chanceBase}` : '';
+    const copyByType = {
+      round_start: `${sourceName} 已触发【海浪，我没吃饭】，本轮自动跳过并等待后续购买判定。`,
+      same_camp_steal: `${sourceName} 命中 ${buyerName} 的购买，已带走${playerName ? `「${playerName}」` : '该选手'}。`,
+      opposite_camp_return: `${sourceName} 命中 ${buyerName} 的异阵营购买，选手已退回卡池并登记轮末补偿。`,
+      round_reward: `${sourceName} 已获得海浪轮末补偿${playerName ? `「${playerName}」` : ''}。`,
+      round_reward_failed: `${sourceName} 的海浪轮末补偿未能结算。`,
+    };
+    return `
+      <section class="hungry-wave-alert" aria-live="polite">
+        <div>
+          <strong>海浪同步</strong>
+          <span>${escapeHtml(copyByType[wave.type] || '海浪结果已由服务端同步。')}</span>
+        </div>
+        <em>${escapeHtml(probability || '服务端权威')}</em>
       </section>
     `;
   }

@@ -632,6 +632,25 @@ function remainingHungryWaveCandidates(snapshot = {}, wave = {}) {
   return teamIdsFrom(snapshot).filter(teamId => teamId !== wave.captainId && !checked.has(teamId));
 }
 
+function hungryWaveHitRoll(snapshot = {}, wave = {}, buyerId = '', playerId = '', event = {}, remaining = 1) {
+  const chanceBase = Math.max(1, safePositiveNumber(remaining, 1, 20));
+  const seed = [
+    safeText(snapshot.tournamentId, 'local', 80),
+    safePositiveNumber(wave.round || snapshot.currentRound, 1, 8),
+    safeText(wave.captainId, '', 80),
+    safeText(buyerId, '', 80),
+    safeText(playerId, '', 80),
+    safeText(event.sourceCommandId || event.eventSeq, '', 120),
+  ].join(':');
+  const digest = crypto.createHash('sha256').update(seed).digest('hex');
+  const roll = Number.parseInt(digest.slice(0, 8), 16) % chanceBase;
+  return {
+    roll,
+    chanceBase,
+    hit: roll === 0,
+  };
+}
+
 function resolveHungryWaveAfterPurchase(snapshot, buyerId, playerId, pricePaid, event) {
   const round = safePositiveNumber(snapshot.currentRound, 1, 8);
   const wave = activeHungryWave(snapshot, round);
@@ -641,8 +660,8 @@ function resolveHungryWaveAfterPurchase(snapshot, buyerId, playerId, pricePaid, 
   const remaining = remainingHungryWaveCandidates(snapshot, wave);
   if (!remaining.includes(cleanBuyerId)) return null;
   const nextChecked = [...new Set([...(wave.checkedTeamIds || []), cleanBuyerId])];
-  const shouldHit = remaining.length <= 1;
-  if (!shouldHit) {
+  const hitRoll = hungryWaveHitRoll(snapshot, wave, cleanBuyerId, cleanPlayerId, event, remaining.length);
+  if (!hitRoll.hit) {
     snapshot.hungryWaveRound = {
       ...wave,
       checkedTeamIds: nextChecked,
@@ -653,6 +672,8 @@ function resolveHungryWaveAfterPurchase(snapshot, buyerId, playerId, pricePaid, 
       buyerTeamId: cleanBuyerId,
       playerId: cleanPlayerId,
       round,
+      roll: hitRoll.roll,
+      chanceBase: hitRoll.chanceBase,
       resolvedAt: event.createdAt,
     };
   }
@@ -669,6 +690,8 @@ function resolveHungryWaveAfterPurchase(snapshot, buyerId, playerId, pricePaid, 
     playerId: cleanPlayerId,
     round,
     priceRefunded: safePositiveNumber(pricePaid, 0, 999),
+    roll: hitRoll.roll,
+    chanceBase: hitRoll.chanceBase,
     resolvedAt: event.createdAt,
     pendingRoundReward: !sameCamp,
   };

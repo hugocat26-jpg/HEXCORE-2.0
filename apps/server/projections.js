@@ -149,6 +149,8 @@ function publicHungryWaveSummary(summary = null) {
     playerId: String(summary.playerId || '').trim().slice(0, 80),
     round: Number(summary.round) || 1,
     priceRefunded: Math.max(0, Number(summary.priceRefunded) || 0),
+    roll: Math.max(0, Number(summary.roll) || 0),
+    chanceBase: Math.max(0, Number(summary.chanceBase) || 0),
     pendingRoundReward: Boolean(summary.pendingRoundReward),
     goldBefore: Math.max(0, Number(summary.goldBefore) || 0),
     failedReason: String(summary.failedReason || '').trim().slice(0, 80),

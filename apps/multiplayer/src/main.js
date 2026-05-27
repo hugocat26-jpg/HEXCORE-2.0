@@ -1191,6 +1191,7 @@
           purchaseUsed: Boolean(state.purchaseUsed),
           skipped: Boolean(state.skipped),
           photographerRefreshUsed: Boolean(state.photographerRefreshUsed),
+          hungryWaveFreeRefreshes: Math.max(0, Number(state.hungryWaveFreeRefreshes) || 0),
         };
         if (JSON.stringify(current) !== JSON.stringify(next)) {
           captain.economy.roundState[roundKey] = next;
@@ -1338,9 +1339,35 @@
         pricePaid: Math.max(0, Number(purchase.pricePaid) || 0),
         goldAfter: Math.max(0, Number(purchase.goldAfter) || 0),
         masked: Boolean(purchase.masked),
+        hungryWave: normalizeHungryWaveProjection(purchase.hungryWave),
       }
       : null;
     return previous !== JSON.stringify(Hexcore2.state.multiplayer.lastPurchase || null);
+  }
+
+  function normalizeHungryWaveProjection(summary) {
+    if (!summary || typeof summary !== 'object') return null;
+    return {
+      type: String(summary.type || ''),
+      sourceTeamId: String(summary.sourceTeamId || ''),
+      buyerTeamId: String(summary.buyerTeamId || ''),
+      playerId: String(summary.playerId || ''),
+      round: Math.max(1, Math.min(8, Number(summary.round) || Hexcore2.state.draft.round || 1)),
+      priceRefunded: Math.max(0, Number(summary.priceRefunded) || 0),
+      roll: Math.max(0, Number(summary.roll) || 0),
+      chanceBase: Math.max(0, Number(summary.chanceBase) || 0),
+      pendingRoundReward: Boolean(summary.pendingRoundReward),
+      goldBefore: Math.max(0, Number(summary.goldBefore) || 0),
+      failedReason: String(summary.failedReason || ''),
+      resolvedAt: String(summary.resolvedAt || ''),
+    };
+  }
+
+  function applyLastHungryWaveProjection(summary) {
+    Hexcore2.state.multiplayer = Hexcore2.state.multiplayer || {};
+    const previous = JSON.stringify(Hexcore2.state.multiplayer.lastHungryWave || null);
+    Hexcore2.state.multiplayer.lastHungryWave = normalizeHungryWaveProjection(summary);
+    return previous !== JSON.stringify(Hexcore2.state.multiplayer.lastHungryWave || null);
   }
 
   function applyTournamentProjection(tournament) {
@@ -1361,6 +1388,7 @@
     if (applyRoundStatesProjection(snapshot.roundStates)) changed = true;
     if (Object.prototype.hasOwnProperty.call(snapshot, 'currentShop') && applyCurrentShopProjection(snapshot.currentShop)) changed = true;
     if (Object.prototype.hasOwnProperty.call(snapshot, 'lastPurchase') && applyLastPurchaseProjection(snapshot.lastPurchase)) changed = true;
+    if (Object.prototype.hasOwnProperty.call(snapshot, 'lastHungryWave') && applyLastHungryWaveProjection(snapshot.lastHungryWave)) changed = true;
     if (Object.prototype.hasOwnProperty.call(snapshot, 'tournament') && applyTournamentProjection(snapshot.tournament)) changed = true;
     if (applyHexcoreWindowProjection(snapshot.hexcoreActionWindows)) changed = true;
     if (Number.isInteger(Number(snapshot.currentRound)) && Hexcore2.state.draft.round !== Number(snapshot.currentRound)) {

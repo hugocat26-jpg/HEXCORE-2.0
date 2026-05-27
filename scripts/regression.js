@@ -1,5 +1,6 @@
 const fs = require('fs');
 const http = require('http');
+const crypto = require('crypto');
 const os = require('os');
 const path = require('path');
 const vm = require('vm');
@@ -225,6 +226,16 @@ function createReadyHarness() {
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
+}
+
+function hungryWaveCommandIdForRoll({ tournamentId, round, sourceTeamId, buyerTeamId, playerId, remaining, wantedHit }) {
+  for (let index = 1; index < 5000; index += 1) {
+    const commandId = `cmd-api-hungry-roll-${wantedHit ? 'hit' : 'miss'}-${index}`;
+    const seed = `${tournamentId || 'local'}:${round}:${sourceTeamId}:${buyerTeamId}:${playerId}:${commandId}`;
+    const roll = Number.parseInt(crypto.createHash('sha256').update(seed).digest('hex').slice(0, 8), 16) % remaining;
+    if ((wantedHit && roll === 0) || (!wantedHit && roll !== 0)) return commandId;
+  }
+  throw new Error('无法构造海浪命中测试 commandId');
 }
 
 function listen(server) {
@@ -4154,6 +4165,121 @@ async function testMultiplayerApiServer() {
       '海浪触发队伍尝试开店时服务端应自动登记海浪并跳过，不生成或泄漏该队商店'
     );
 
+    const hungryRollCreated = await requestJson(port, 'POST', '/api/tournaments', {
+      id: 't-hungry-wave-roll',
+      name: '海浪概率权威回归',
+      actorId: 'referee-hungry-roll',
+      settings: { initialGold: 9, refreshCosts: [1, 2, 3, 4] },
+      teams: [
+        { teamId: 'wave-roll-source', name: '概率海浪', camp: 'local', code: 'wave-roll-source-code', economy: { gold: 9 } },
+        { teamId: 'wave-roll-a', name: '概率A', camp: 'local', code: 'wave-roll-a-code', economy: { gold: 9 } },
+        { teamId: 'wave-roll-b', name: '概率B', camp: 'local', code: 'wave-roll-b-code', economy: { gold: 9 } },
+      ],
+      hexcoreAssignments: {
+        'wave-roll-source': [{ id: 'hungry-wave', status: 'passive' }],
+      },
+      hungryWaveRound: {
+        captainId: 'wave-roll-source',
+        round: 1,
+        active: true,
+      },
+      players: [
+        { id: 'wave-roll-local-1', name: '概率本地一号', gameId: 'HR1', camp: 'local', tier: 2, score: 82, status: 'available' },
+        { id: 'wave-roll-local-2', name: '概率本地二号', gameId: 'HR2', camp: 'local', tier: 3, score: 83, status: 'available' },
+      ],
+    });
+    const hungryRollSourceJoin = await requestJson(port, 'POST', '/api/tournaments/t-hungry-wave-roll/join', {
+      code: hungryRollCreated.body.room.captainCodes[0].code,
+      displayName: '概率海浪队长',
+    });
+    const hungryRollAJoin = await requestJson(port, 'POST', '/api/tournaments/t-hungry-wave-roll/join', {
+      code: hungryRollCreated.body.room.captainCodes[1].code,
+      displayName: '概率A队长',
+    });
+    const hungryRollBJoin = await requestJson(port, 'POST', '/api/tournaments/t-hungry-wave-roll/join', {
+      code: hungryRollCreated.body.room.captainCodes[2].code,
+      displayName: '概率B队长',
+    });
+    const hungryRollSkip = await requestJson(port, 'POST', '/api/tournaments/t-hungry-wave-roll/commands', {
+      sessionToken: hungryRollSourceJoin.body.session.sessionToken,
+      command: {
+        commandId: 'cmd-api-hungry-roll-source-skip',
+        type: multiplayerShared.COMMAND_TYPES.SKIP_TURN,
+        baseVersion: 1,
+        payload: { teamId: 'wave-roll-source', round: 1 },
+      },
+    });
+    const hungryRollAShop = await requestJson(port, 'POST', '/api/tournaments/t-hungry-wave-roll/commands', {
+      sessionToken: hungryRollAJoin.body.session.sessionToken,
+      command: {
+        commandId: 'cmd-api-hungry-roll-a-shop',
+        type: multiplayerShared.COMMAND_TYPES.OPEN_SHOP,
+        baseVersion: 2,
+        payload: { teamId: 'wave-roll-a', round: 1 },
+      },
+    });
+    const hungryRollAPlayerId = hungryRollAShop.body.tournament.snapshot.currentShop.cards[0].playerId;
+    const hungryRollMissCommandId = hungryWaveCommandIdForRoll({
+      tournamentId: '',
+      round: 1,
+      sourceTeamId: 'wave-roll-source',
+      buyerTeamId: 'wave-roll-a',
+      playerId: hungryRollAPlayerId,
+      remaining: 2,
+      wantedHit: false,
+    });
+    const hungryRollMiss = await requestJson(port, 'POST', '/api/tournaments/t-hungry-wave-roll/commands', {
+      sessionToken: hungryRollAJoin.body.session.sessionToken,
+      command: {
+        commandId: hungryRollMissCommandId,
+        type: multiplayerShared.COMMAND_TYPES.PURCHASE_SHOP_CARD,
+        baseVersion: 3,
+        payload: { teamId: 'wave-roll-a', slotId: hungryRollAShop.body.tournament.snapshot.currentShop.cards[0].slotId },
+      },
+    });
+    const hungryRollASkip = await requestJson(port, 'POST', '/api/tournaments/t-hungry-wave-roll/commands', {
+      sessionToken: hungryRollAJoin.body.session.sessionToken,
+      command: {
+        commandId: 'cmd-api-hungry-roll-a-skip',
+        type: multiplayerShared.COMMAND_TYPES.SKIP_TURN,
+        baseVersion: 4,
+        payload: { teamId: 'wave-roll-a', round: 1 },
+      },
+    });
+    const hungryRollBShop = await requestJson(port, 'POST', '/api/tournaments/t-hungry-wave-roll/commands', {
+      sessionToken: hungryRollBJoin.body.session.sessionToken,
+      command: {
+        commandId: 'cmd-api-hungry-roll-b-shop',
+        type: multiplayerShared.COMMAND_TYPES.OPEN_SHOP,
+        baseVersion: 5,
+        payload: { teamId: 'wave-roll-b', round: 1 },
+      },
+    });
+    const hungryRollHit = await requestJson(port, 'POST', '/api/tournaments/t-hungry-wave-roll/commands', {
+      sessionToken: hungryRollBJoin.body.session.sessionToken,
+      command: {
+        commandId: 'cmd-api-hungry-roll-b-hit',
+        type: multiplayerShared.COMMAND_TYPES.PURCHASE_SHOP_CARD,
+        baseVersion: 6,
+        payload: { teamId: 'wave-roll-b', slotId: hungryRollBShop.body.tournament.snapshot.currentShop.cards[0].slotId },
+      },
+    });
+    assert(
+      hungryRollSkip.status === 200
+      && hungryRollAShop.status === 200
+      && hungryRollMiss.status === 200
+      && hungryRollMiss.body.tournament.snapshot.lastHungryWave === null
+      && hungryRollMiss.body.tournament.snapshot.lastPurchase.hungryWave.type === 'miss'
+      && hungryRollMiss.body.tournament.snapshot.lastPurchase.hungryWave.chanceBase === 2
+      && hungryRollMiss.body.tournament.snapshot.roundStates['wave-roll-a']['1'].purchaseUsed === true
+      && hungryRollASkip.status === 200
+      && hungryRollBShop.status === 200
+      && hungryRollHit.status === 200
+      && hungryRollHit.body.tournament.snapshot.lastHungryWave.type === 'same_camp_steal'
+      && hungryRollHit.body.tournament.snapshot.lastHungryWave.chanceBase === 1,
+      '海浪购买判定应按剩余候选数做可重放 1/N 判定，未命中时保留原购买并继续等待后续购买'
+    );
+
     const hungryOppositeCreated = await requestJson(port, 'POST', '/api/tournaments', {
       id: 't-hungry-wave-opposite',
       name: '异阵营海浪权威回归',
@@ -5371,6 +5497,8 @@ function testMultiplayerClientSubmitsAuthoritativeCommands() {
     && main.includes('applyCurrentShopProjection(snapshot.currentShop)')
     && main.includes('applyProjectedShopPlayers(normalizedCards)')
     && main.includes('applyLastPurchaseProjection(snapshot.lastPurchase)')
+    && main.includes('applyLastHungryWaveProjection(snapshot.lastHungryWave)')
+    && main.includes('hungryWaveFreeRefreshes')
     && main.includes('applyRoundStatesProjection(snapshot.roundStates)')
     && main.includes('applyHexcoreWindowProjection(snapshot.hexcoreActionWindows)')
     && main.includes('applyTournamentProjection(snapshot.tournament)')
@@ -5380,6 +5508,14 @@ function testMultiplayerClientSubmitsAuthoritativeCommands() {
     && main.includes('eventSource.addEventListener')
     && main.includes('applyRoomProjection(responsePayload.tournament)'),
     '多人端应在 command 成功和 SSE 快照/事件到达时应用服务端公开投影，避免长期只依赖本地状态',
+  );
+  const refereeConsole = fs.readFileSync(path.join(root, 'apps/multiplayer/src/ui/referee-console.js'), 'utf8');
+  assert(
+    refereeConsole.includes('function projectedHungryWaveBanner()')
+    && refereeConsole.includes('Hexcore2.state.multiplayer.lastHungryWave')
+    && refereeConsole.includes('海浪同步')
+    && refereeConsole.includes('服务端权威'),
+    '多人端 UI 应展示服务端同步的海浪摘要，刷新或 SSE 重连后仍能解释最近海浪结算',
   );
 }
 
