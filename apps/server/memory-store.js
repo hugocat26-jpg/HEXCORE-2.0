@@ -281,6 +281,9 @@ function normalizeHungryWaveRound(input = {}) {
     consumed: Boolean(source.consumed),
     triggered: Boolean(source.triggered),
     pendingRoundReward: Boolean(source.pendingRoundReward),
+    roundRewardResolved: Boolean(source.roundRewardResolved),
+    roundRewardPlayerId: String(source.roundRewardPlayerId || '').trim().slice(0, 80),
+    roundRewardFailedReason: String(source.roundRewardFailedReason || '').trim().slice(0, 80),
     checkedTeamIds: Array.isArray(source.checkedTeamIds)
       ? source.checkedTeamIds.map(teamId => String(teamId || '').trim().slice(0, 80)).filter(Boolean).slice(0, 20)
       : [],

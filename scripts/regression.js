@@ -4115,6 +4115,7 @@ async function testMultiplayerApiServer() {
       },
       players: [
         { id: 'wave-outsider-1', name: '海浪外地一号', gameId: 'HO1', camp: 'outsider', tier: 3, score: 83, status: 'available' },
+        { id: 'wave-local-reward-1', name: '海浪本地补偿', gameId: 'HLR1', camp: 'local', tier: 2, score: 82, status: 'available' },
       ],
     });
     const hungryOppositeSourceJoin = await requestJson(port, 'POST', '/api/tournaments/t-hungry-wave-opposite/join', {
@@ -4152,6 +4153,15 @@ async function testMultiplayerApiServer() {
         payload: { teamId: 'wave-outsider', slotId: hungryOppositeShop.body.tournament.snapshot.currentShop.cards[0].slotId },
       },
     });
+    const hungryOppositeRoundEnd = await requestJson(port, 'POST', '/api/tournaments/t-hungry-wave-opposite/commands', {
+      sessionToken: hungryOppositeBuyerJoin.body.session.sessionToken,
+      command: {
+        commandId: 'cmd-api-hungry-opposite-round-end',
+        type: multiplayerShared.COMMAND_TYPES.SKIP_TURN,
+        baseVersion: 4,
+        payload: { teamId: 'wave-outsider', round: 1 },
+      },
+    });
     const hungryOppositeText = JSON.stringify(hungryOppositePurchase.body);
     assert(
       hungryOppositeSkip.status === 200
@@ -4163,10 +4173,15 @@ async function testMultiplayerApiServer() {
       && hungryOppositePurchase.body.tournament.snapshot.roundStates['wave-outsider']['1'].purchaseUsed === false
       && hungryOppositePurchase.body.tournament.snapshot.lastHungryWave.type === 'opposite_camp_return'
       && hungryOppositePurchase.body.tournament.snapshot.lastHungryWave.pendingRoundReward === true
+      && hungryOppositeRoundEnd.status === 200
+      && hungryOppositeRoundEnd.body.tournament.snapshot.currentRound === 2
+      && hungryOppositeRoundEnd.body.tournament.snapshot.teams[0].team.includes('wave-local-reward-1')
+      && hungryOppositeRoundEnd.body.tournament.snapshot.lastHungryWave.type === 'round_reward'
+      && hungryOppositeRoundEnd.body.tournament.snapshot.lastHungryWave.playerId === 'wave-local-reward-1'
       && !hungryOppositeText.includes('hungryWaveRound')
       && !hungryOppositeText.includes('hexcoreAssignments')
       && !hungryOppositeText.includes('"players"'),
-      '服务端海浪异阵营命中时应退回真实购买选手、返还购买者金币和购买权，并只公开安全结算摘要'
+      '服务端海浪异阵营命中时应退回真实购买选手、返还购买者金币和购买权，并在轮末发放同阵营补偿'
     );
 
     const poorCreated = await requestJson(port, 'POST', '/api/tournaments', {

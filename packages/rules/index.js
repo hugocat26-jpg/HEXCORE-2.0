@@ -278,6 +278,9 @@ function normalizeHungryWaveRound(input = {}) {
     consumed: safeBoolean(input.consumed),
     triggered: safeBoolean(input.triggered),
     pendingRoundReward: safeBoolean(input.pendingRoundReward),
+    roundRewardResolved: safeBoolean(input.roundRewardResolved),
+    roundRewardPlayerId: safeText(input.roundRewardPlayerId, '', 80),
+    roundRewardFailedReason: safeText(input.roundRewardFailedReason, '', 80),
     checkedTeamIds: Array.isArray(input.checkedTeamIds)
       ? input.checkedTeamIds.map(teamId => safeText(teamId, '', 80)).filter(Boolean).slice(0, 20)
       : [],
@@ -579,6 +582,34 @@ function replacePlayerTeam(snapshot, playerId, teamId) {
   return snapshot;
 }
 
+function teamMemberCapacity(snapshot = {}, teamId = '') {
+  const settings = snapshot.settings && typeof snapshot.settings === 'object' ? snapshot.settings : {};
+  return safePositiveNumber(settings.teamMemberCapacity || settings.playersPerTeam - 1, 4, 8);
+}
+
+function teamMemberCount(snapshot = {}, teamId = '') {
+  const team = teamById(snapshot, teamId);
+  return Array.isArray(team && team.team) ? team.team.length : 0;
+}
+
+function hungryWaveRewardCandidate(snapshot = {}, teamId = '') {
+  const camp = teamCamp(snapshot, teamId);
+  if (!camp || !Array.isArray(snapshot.players)) return null;
+  const captainPlayerIds = new Set((Array.isArray(snapshot.teams) ? snapshot.teams : [])
+    .map(team => safeText(team && (team.playerId || team.captainPlayerId), '', 80))
+    .filter(Boolean));
+  return snapshot.players
+    .filter(player => {
+      const playerId = safeText(player && (player.id || player.playerId), '', 80);
+      if (!playerId || captainPlayerIds.has(playerId) || player.isCaptain) return false;
+      if (safeText(player.camp, '', 40) !== camp) return false;
+      if (safeText(player.status || 'available', 'available', 40) !== 'available') return false;
+      if (safeText(player.teamId, '', 80)) return false;
+      return true;
+    })
+    .sort((left, right) => safeText(left.id || left.playerId, '', 80).localeCompare(safeText(right.id || right.playerId, '', 80)))[0] || null;
+}
+
 function remainingHungryWaveCandidates(snapshot = {}, wave = {}) {
   const checked = new Set(Array.isArray(wave.checkedTeamIds) ? wave.checkedTeamIds : []);
   return teamIdsFrom(snapshot).filter(teamId => teamId !== wave.captainId && !checked.has(teamId));
@@ -669,6 +700,48 @@ function startHungryWaveOnSkip(snapshot, teamId, round, event) {
     pendingRoundReward: false,
     checkedTeamIds: [],
     resolvedAt: '',
+  };
+  snapshot.lastHungryWave = result;
+  return result;
+}
+
+function resolveHungryWaveRoundEnd(snapshot, round, event) {
+  const wave = normalizeHungryWaveRound(snapshot.hungryWaveRound);
+  const cleanRound = safePositiveNumber(round, 1, 8);
+  if (!wave || wave.round !== cleanRound || !wave.pendingRoundReward || wave.roundRewardResolved) return null;
+  const sourceTeamId = wave.captainId;
+  let playerId = '';
+  let failedReason = '';
+  if (teamMemberCount(snapshot, sourceTeamId) >= teamMemberCapacity(snapshot, sourceTeamId)) {
+    failedReason = 'team_full';
+  } else {
+    const rewardPlayer = hungryWaveRewardCandidate(snapshot, sourceTeamId);
+    if (!rewardPlayer) {
+      failedReason = 'no_candidate';
+    } else {
+      playerId = safeText(rewardPlayer.id || rewardPlayer.playerId, '', 80);
+      addPlayerToTeam(snapshot, sourceTeamId, playerId);
+      replacePlayerTeam(snapshot, playerId, sourceTeamId);
+    }
+  }
+  const result = {
+    type: playerId ? 'round_reward' : 'round_reward_failed',
+    sourceTeamId,
+    buyerTeamId: '',
+    playerId,
+    round: cleanRound,
+    priceRefunded: 0,
+    pendingRoundReward: false,
+    failedReason,
+    resolvedAt: event.createdAt,
+  };
+  snapshot.hungryWaveRound = {
+    ...wave,
+    active: false,
+    roundRewardResolved: true,
+    roundRewardPlayerId: playerId,
+    roundRewardFailedReason: failedReason,
+    resolvedAt: event.createdAt,
   };
   snapshot.lastHungryWave = result;
   return result;
@@ -832,7 +905,10 @@ function applyEventToSnapshot(snapshot, event) {
     const trustedProjection = canApplyClientProjection(payload);
     next.currentTeamId = safeText(trustedProjection ? (payload.nextTeamId || nextPointer.nextTeamId) : nextPointer.nextTeamId, '', 80);
     next.currentRound = safePositiveNumber(trustedProjection ? (payload.nextRound || nextPointer.nextRound) : nextPointer.nextRound, round, 8);
-    if (next.currentRound > round) applyRoundIncome(next, next.currentRound);
+    if (next.currentRound > round) {
+      resolveHungryWaveRoundEnd(next, round, event);
+      applyRoundIncome(next, next.currentRound);
+    }
     if (trustedProjection) applyHexcoreWindows(next, payload.hexcoreActionWindows);
   }
   if (event.type === EVENT_TYPES.HEXCORE_USED) {
