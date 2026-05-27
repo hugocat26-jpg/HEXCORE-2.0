@@ -60,11 +60,16 @@ function normalizeProjectionView(view) {
 }
 
 function publicTeams(snapshot = {}) {
-  return Array.isArray(snapshot.teams) ? snapshot.teams.map(team => ({
-    teamId: team.teamId || team.id || '',
-    name: team.name || '',
-    camp: team.camp || '',
-  })) : [];
+  return Array.isArray(snapshot.teams) ? snapshot.teams.map(team => {
+    const projected = {
+      teamId: team.teamId || team.id || '',
+      name: team.name || '',
+      camp: team.camp || '',
+    };
+    if (team.playerId || team.captainPlayerId) projected.playerId = team.playerId || team.captainPlayerId || '';
+    if (Array.isArray(team.team)) projected.team = team.team.map(playerId => String(playerId || '').trim()).filter(Boolean);
+    return projected;
+  }) : [];
 }
 
 function publicShopCard(card = {}) {

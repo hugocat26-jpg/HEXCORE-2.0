@@ -1108,7 +1108,7 @@ function testSystemIntegrityCheck() {
   H.actions.setActiveView('settings');
   H.actions.runSystemCheck();
 
-  assert(H.meta.version === '2.0.8' && app.innerHTML.includes('HEXCORE 2.0 v2.0.8 裁判端'), '系统设置页应展示统一项目版本号');
+  assert(H.meta.version === '2.0.9' && app.innerHTML.includes('HEXCORE 2.0 v2.0.9 裁判端'), '系统设置页应展示统一项目版本号');
   assert(H.state.ui.systemCheckResult && !H.state.ui.systemCheckResult.ok, '状态检查应保存可视化结果');
   assert(H.state.ui.systemCheckResult.issues.some(issue => issue.type === '重复归属'), '状态检查应识别重复归属');
   assert(H.state.ui.systemCheckResult.issues.some(issue => issue.type === '跨阵营'), '状态检查应识别跨阵营');
@@ -3488,6 +3488,34 @@ async function testMultiplayerApiServer() {
       && !generatedShopText.includes('_serverGeneratedProjection'),
       '队长开店应由服务端从导入选手池生成同阵营商店，不能使用队长 payload 伪造卡面'
     );
+    const generatedPlayerId = generatedCards[0].playerId;
+    const generatedPurchase = await requestJson(port, 'POST', '/api/tournaments/t-shop/commands', {
+      sessionToken: shopCaptainJoin.body.session.sessionToken,
+      command: {
+        commandId: 'cmd-api-purchase-generated-shop',
+        type: multiplayerShared.COMMAND_TYPES.PURCHASE_SHOP_CARD,
+        baseVersion: 2,
+        payload: {
+          teamId: 'team-local',
+          slotId: generatedCards[0].slotId,
+          playerId: 'forged-purchase-player',
+        },
+      },
+    });
+    const purchasedTeam = generatedPurchase.body.tournament.snapshot.teams[0];
+    const purchasedCard = generatedPurchase.body.tournament.snapshot.currentShop.cards[0];
+    const generatedPurchaseText = JSON.stringify(generatedPurchase.body);
+    assert(
+      generatedPurchase.status === 200
+      && generatedPurchase.body.tournament.stateVersion === 3
+      && purchasedCard.purchased === true
+      && purchasedTeam.team.includes(generatedPlayerId)
+      && generatedPurchase.body.tournament.snapshot.lastPurchase.playerId === generatedPlayerId
+      && generatedPurchase.body.tournament.snapshot.roundStates['team-local']['1'].purchaseUsed
+      && !generatedPurchase.body.tournament.snapshot.players
+      && !generatedPurchaseText.includes('forged-purchase-player'),
+      '购买服务端生成商店卡后，应更新公开队伍成员和购买状态，但不公开完整私有选手池或伪造选手 ID'
+    );
 
     const trustedShop = await requestJson(port, 'POST', '/api/tournaments/t-api/commands', {
       sessionToken: refereeJoin.body.session.sessionToken,
@@ -4335,6 +4363,8 @@ function testMultiplayerClientSubmitsAuthoritativeCommands() {
   );
   assert(
     main.includes('function applyRoomProjection(tournament)')
+    && main.includes('captain.team = nextTeam')
+    && main.includes("player.status = 'drafted'")
     && main.includes('applyCurrentShopProjection(snapshot.currentShop)')
     && main.includes('applyProjectedShopPlayers(normalizedCards)')
     && main.includes('applyLastPurchaseProjection(snapshot.lastPurchase)')

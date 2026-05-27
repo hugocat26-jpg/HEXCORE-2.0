@@ -201,6 +201,43 @@ function applyHexcoreWindows(snapshot, windows) {
   return snapshot;
 }
 
+function assignPurchasedPlayer(snapshot, teamId, playerId) {
+  const cleanTeamId = safeText(teamId, '', 80);
+  const cleanPlayerId = safeText(playerId, '', 80);
+  if (!cleanTeamId || !cleanPlayerId) return snapshot;
+  let assigned = false;
+  if (Array.isArray(snapshot.players)) {
+    snapshot.players = snapshot.players.map(player => {
+      const currentId = safeText(player && (player.id || player.playerId), '', 80);
+      if (currentId !== cleanPlayerId) return player;
+      if (safeText(player.teamId, '', 80) && safeText(player.teamId, '', 80) !== cleanTeamId) return player;
+      if (safeText(player.status || 'available', 'available', 40) !== 'available') return player;
+      assigned = true;
+      return {
+        ...player,
+        status: 'drafted',
+        teamId: cleanTeamId,
+      };
+    });
+  }
+  if (!assigned && Array.isArray(snapshot.players)) return snapshot;
+  if (Array.isArray(snapshot.teams)) {
+    snapshot.teams = snapshot.teams.map(team => {
+      const currentId = safeText(team && (team.teamId || team.id), '', 80);
+      if (currentId !== cleanTeamId) return team;
+      const currentTeam = Array.isArray(team.team)
+        ? team.team.map(item => safeText(item, '', 80)).filter(Boolean)
+        : (Array.isArray(team.memberIds) ? team.memberIds.map(item => safeText(item, '', 80)).filter(Boolean) : []);
+      const nextTeam = currentTeam.includes(cleanPlayerId) ? currentTeam : [...currentTeam, cleanPlayerId];
+      return {
+        ...team,
+        team: nextTeam,
+      };
+    });
+  }
+  return snapshot;
+}
+
 function canApplyClientProjection(payload = {}) {
   return [ROLES.SUPER_ADMIN, ROLES.TOURNAMENT_ADMIN, ROLES.REFEREE].includes(payload.commandRole);
 }
@@ -287,6 +324,7 @@ function applyEventToSnapshot(snapshot, event) {
     }
     const purchasePlayerId = purchasedCard ? purchasedCard.playerId : '';
     const purchaseDisplayPlayerId = purchasedCard ? purchasedCard.displayPlayerId : '';
+    assignPurchasedPlayer(next, teamId, purchasePlayerId);
     next.lastPurchase = {
       teamId,
       slotId,

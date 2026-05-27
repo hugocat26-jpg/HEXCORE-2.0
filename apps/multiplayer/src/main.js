@@ -1139,6 +1139,28 @@
         captain.renameUsed = Boolean(team.renameUsed);
         changed = true;
       }
+      if (Array.isArray(team.team)) {
+        const nextTeam = team.team.map(playerId => String(playerId || '')).filter(Boolean);
+        if (JSON.stringify(captain.team || []) !== JSON.stringify(nextTeam)) {
+          const previousTeam = Array.isArray(captain.team) ? captain.team : [];
+          previousTeam.forEach(playerId => {
+            if (nextTeam.includes(playerId)) return;
+            const player = Hexcore2.state.players.find(item => item.id === playerId);
+            if (player && player.teamId === teamId) {
+              player.status = 'available';
+              delete player.teamId;
+            }
+          });
+          captain.team = nextTeam;
+          nextTeam.forEach(playerId => {
+            const player = Hexcore2.state.players.find(item => item.id === playerId);
+            if (!player) return;
+            player.status = 'drafted';
+            player.teamId = teamId;
+          });
+          changed = true;
+        }
+      }
     });
     return changed;
   }

@@ -148,6 +148,11 @@ function normalizeTeams(input = {}) {
     teamId: String(team.teamId || team.id || `team-${index + 1}`).trim(),
     name: String(team.name || `队伍${index + 1}`).trim().slice(0, 40),
     camp: String(team.camp || '').trim().slice(0, 40),
+    playerId: String(team.playerId || team.captainPlayerId || '').trim().slice(0, 80),
+    playerGameId: String(team.playerGameId || '').trim().slice(0, 80),
+    team: Array.isArray(team.team)
+      ? team.team.map(playerId => String(playerId || '').trim().slice(0, 80)).filter(Boolean).slice(0, 8)
+      : (Array.isArray(team.memberIds) ? team.memberIds.map(playerId => String(playerId || '').trim().slice(0, 80)).filter(Boolean).slice(0, 8) : []),
     renameUsed: Boolean(team.renameUsed),
   }));
 }
