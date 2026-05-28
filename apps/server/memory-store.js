@@ -11,6 +11,7 @@ function clone(value) {
 class MemoryTournamentStore {
   constructor(options = {}) {
     this.dataFile = options.dataFile || process.env.HEXCORE_DATA_FILE || '';
+    this.sessionTtlMs = normalizeSessionTtlMs(options.sessionTtlMs);
     this.tournaments = new Map();
     this.subscribers = new Map();
     this.roomAccess = new Map();
@@ -133,6 +134,7 @@ class MemoryTournamentStore {
       storage: this.storageLabel(),
       tournamentCount: this.tournaments.size,
       roomCount: this.roomAccess.size,
+      sessionTtlSeconds: Math.max(1, Math.ceil(this.sessionTtlMs / 1000)),
       subscriberCount,
     };
   }
@@ -146,6 +148,7 @@ class MemoryTournamentStore {
     if (!binding) throw new Error('房间码无效');
     const actorId = `user-${crypto.randomUUID()}`;
     const sessionToken = generateSecret('sess');
+    const issuedAt = new Date();
     const session = {
       sessionTokenHash: hashSecret(sessionToken),
       tournamentId: id,
@@ -153,7 +156,9 @@ class MemoryTournamentStore {
       displayName,
       role: binding.role,
       teamId: binding.teamId || '',
-      joinedAt: new Date().toISOString(),
+      joinedAt: issuedAt.toISOString(),
+      issuedAt: issuedAt.toISOString(),
+      expiresAt: new Date(issuedAt.getTime() + this.sessionTtlMs).toISOString(),
     };
     this.sessions.set(session.sessionTokenHash, session);
     this.persistToDisk();
@@ -161,9 +166,22 @@ class MemoryTournamentStore {
   }
 
   getSession(sessionToken, tournamentId) {
-    const session = this.sessions.get(hashSecret(String(sessionToken || '')));
+    const sessionHash = hashSecret(String(sessionToken || ''));
+    const session = this.sessions.get(sessionHash);
     if (!session || session.tournamentId !== tournamentId) return null;
+    if (this.isSessionExpired(session)) {
+      this.sessions.delete(sessionHash);
+      this.persistToDisk();
+      return null;
+    }
     return clone(session);
+  }
+
+  isSessionExpired(session) {
+    const expiresAtMs = Date.parse(session && session.expiresAt);
+    if (Number.isFinite(expiresAtMs)) return Date.now() >= expiresAtMs;
+    const issuedAtMs = Date.parse((session && (session.issuedAt || session.joinedAt)) || '');
+    return Number.isFinite(issuedAtMs) ? Date.now() >= issuedAtMs + this.sessionTtlMs : true;
   }
 
   getSessionBinding(sessionToken, tournamentId) {
@@ -229,6 +247,14 @@ function entriesFromMap(map) {
 
 function mapFromEntries(entries) {
   return new Map((Array.isArray(entries) ? entries : []).map(([key, value]) => [String(key), clone(value)]));
+}
+
+function normalizeSessionTtlMs(value) {
+  const configuredMs = Number(value);
+  if (Number.isFinite(configuredMs) && configuredMs >= 1) return Math.round(configuredMs);
+  const envHours = Number(process.env.HEXCORE_SESSION_TTL_HOURS);
+  const hours = Number.isFinite(envHours) && envHours > 0 ? envHours : 24;
+  return Math.round(hours * 60 * 60 * 1000);
 }
 
 function normalizeTeams(input = {}) {

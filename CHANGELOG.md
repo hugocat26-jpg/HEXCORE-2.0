@@ -2,6 +2,20 @@
 
 本文件记录 HEXCORE 2.0 每次版本号变化的用户可见改动、规则变更和维护事项。每次提交并推送 GitHub 前，如果版本号发生变化，必须同步更新本文件。
 
+## v2.0.16 - 2026-05-28
+
+### 多人端
+
+- M8 部署运维继续推进：多人端 session 增加服务端过期时间，默认 24 小时。
+- 加入房间返回 `expiresAt`，便于前端和裁判判断本机会话何时需要重新加入。
+- `/health` 的运行状态增加 `sessionTtlSeconds`，便于本地和局域网运维确认当前过期策略。
+- 可通过 `HEXCORE_SESSION_TTL_HOURS` 调整默认会话有效期；测试和嵌入式启动可用 `createServer({ sessionTtlMs })` 覆盖。
+
+### 安全边界
+
+- 过期 session 会在 store 层统一失效，队长投影、command 写入、房间管理、审计和备份均不能继续复用过期会话。
+- JSON 文件和 SQLite 持久化继续只保存 session 摘要，不保存 `sessionToken` 明文。
+
 ## v2.0.15 - 2026-05-27
 
 ### 多人端

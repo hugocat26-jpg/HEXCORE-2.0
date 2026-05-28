@@ -116,9 +116,12 @@ function createTournamentStore(options = {}) {
   const sqliteFile = String(options.sqliteFile || process.env.HEXCORE_SQLITE_FILE || '').trim();
   if (sqliteFile) {
     const { SqliteTournamentStore } = require('./sqlite-store');
-    return new SqliteTournamentStore({ sqliteFile });
+    return new SqliteTournamentStore({ sqliteFile, sessionTtlMs: options.sessionTtlMs });
   }
-  return new MemoryTournamentStore({ dataFile: options.dataFile || process.env.HEXCORE_DATA_FILE || '' });
+  return new MemoryTournamentStore({
+    dataFile: options.dataFile || process.env.HEXCORE_DATA_FILE || '',
+    sessionTtlMs: options.sessionTtlMs,
+  });
 }
 
 function projectionOptionsFromRequest(req, parsed, store, tournamentId, view) {

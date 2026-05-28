@@ -252,6 +252,10 @@ function closeServer(server) {
   return new Promise(resolve => server.close(resolve));
 }
 
+function delay(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 function requestJson(port, method, pathname, body, options = {}) {
   return new Promise((resolve, reject) => {
     const payload = body === undefined ? '' : JSON.stringify(body);
@@ -1123,7 +1127,7 @@ function testSystemIntegrityCheck() {
   H.actions.setActiveView('settings');
   H.actions.runSystemCheck();
 
-  assert(H.meta.version === '2.0.15' && app.innerHTML.includes('HEXCORE 2.0 v2.0.15 裁判端'), '系统设置页应展示统一项目版本号');
+  assert(H.meta.version === '2.0.16' && app.innerHTML.includes('HEXCORE 2.0 v2.0.16 裁判端'), '系统设置页应展示统一项目版本号');
   assert(H.state.ui.systemCheckResult && !H.state.ui.systemCheckResult.ok, '状态检查应保存可视化结果');
   assert(H.state.ui.systemCheckResult.issues.some(issue => issue.type === '重复归属'), '状态检查应识别重复归属');
   assert(H.state.ui.systemCheckResult.issues.some(issue => issue.type === '跨阵营'), '状态检查应识别跨阵营');
@@ -4937,6 +4941,45 @@ async function testMultiplayerApiServer() {
   }
 }
 
+async function testMultiplayerSessionExpiry() {
+  const server = multiplayerApiServer.createServer({ sessionTtlMs: 5 });
+  const port = await listen(server);
+  try {
+    const health = await requestJson(port, 'GET', '/health');
+    assert(health.body.runtime.sessionTtlSeconds === 1, '健康检查应返回最小化后的 session TTL 秒数，便于运维确认过期策略');
+    const created = await requestJson(port, 'POST', '/api/tournaments', {
+      id: 't-session-expire',
+      name: '会话过期回归',
+      teams: [{ teamId: 'expire-team', name: '过期队', camp: 'local', code: 'expire-code' }],
+    });
+    const join = await requestJson(port, 'POST', '/api/tournaments/t-session-expire/join', {
+      code: created.body.room.captainCodes[0].code,
+      displayName: '短会话队长',
+    });
+    assert(join.status === 200 && join.body.session.expiresAt && !join.body.session.sessionTokenHash, '加入房间应返回 session 过期时间，但不返回 session 摘要');
+    await delay(15);
+    const expiredProjection = await requestJson(port, 'GET', `/api/tournaments/t-session-expire/projection?view=captain&sessionToken=${encodeURIComponent(join.body.session.sessionToken)}`);
+    const expiredCommand = await requestJson(port, 'POST', '/api/tournaments/t-session-expire/commands', {
+      sessionToken: join.body.session.sessionToken,
+      command: {
+        commandId: 'cmd-expired-session',
+        type: multiplayerShared.COMMAND_TYPES.OPEN_SHOP,
+        baseVersion: 1,
+        payload: { teamId: 'expire-team', round: 1 },
+      },
+    });
+    assert(
+      expiredProjection.status === 401
+      && /sessionToken/.test(expiredProjection.body.error)
+      && expiredCommand.status === 400
+      && /sessionToken/.test(expiredCommand.body.error),
+      'session 过期后应统一拒绝队长投影和 command 写入',
+    );
+  } finally {
+    await closeServer(server);
+  }
+}
+
 function testRuleTemplateSaveAndLoad() {
   const { H, app } = createHarness();
   H.actions.setActiveView('rules');
@@ -5821,6 +5864,7 @@ async function run() {
     testMultiplayerCopyIsolation,
     testMultiplayerSharedRulePreflight,
     testMultiplayerApiServer,
+    testMultiplayerSessionExpiry,
     testRuleTemplateSaveAndLoad,
     testEventClickLocatesTargets,
     testRecoverDraftState,

@@ -17,7 +17,7 @@ function mapFromEntries(entries) {
 
 class SqliteTournamentStore extends MemoryTournamentStore {
   constructor(options = {}) {
-    super({ dataFile: '' });
+    super({ dataFile: '', sessionTtlMs: options.sessionTtlMs });
     const sqliteFile = String(options.sqliteFile || process.env.HEXCORE_SQLITE_FILE || '').trim();
     if (!sqliteFile) throw new Error('HEXCORE_SQLITE_FILE 不能为空');
     this.sqliteFile = path.resolve(sqliteFile);
