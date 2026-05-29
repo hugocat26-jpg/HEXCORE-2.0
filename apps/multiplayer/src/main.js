@@ -1235,7 +1235,25 @@
     const room = created && created.room;
     if (!room) return '';
     const captainCodes = Array.isArray(room.captainCodes) ? room.captainCodes : [];
-    const lines = [`赛事 ID：${created.tournamentId || room.tournamentId || ''}`];
+    const apiBase = String(created.apiBase || '').trim();
+    const tournamentId = created.tournamentId || room.tournamentId || '';
+    const singleCaptainId = String(kind || '').startsWith('captain:') ? String(kind).slice('captain:'.length) : '';
+    const singleCaptain = singleCaptainId ? captainCodes.find(item => String(item.teamId || '') === singleCaptainId) : null;
+    if (singleCaptain) {
+      return [
+        `服务地址：${apiBase}`,
+        `赛事 ID：${tournamentId}`,
+        `身份：${singleCaptain.teamName || singleCaptain.teamId || '队长'}`,
+        `加入码：${singleCaptain.code || ''}`,
+      ].join('\n').trim();
+    }
+    if (kind === 'referee') {
+      return [`服务地址：${apiBase}`, `赛事 ID：${tournamentId}`, '身份：裁判', `加入码：${room.refereeCode || ''}`].join('\n').trim();
+    }
+    if (kind === 'viewer') {
+      return [`服务地址：${apiBase}`, `赛事 ID：${tournamentId}`, '身份：观众', `加入码：${room.viewerCode || ''}`].join('\n').trim();
+    }
+    const lines = [`服务地址：${apiBase}`, `赛事 ID：${tournamentId}`];
     if (kind === 'all' || kind === 'referee') lines.push(`裁判码：${room.refereeCode || ''}`);
     if (kind === 'all' || kind === 'viewer') lines.push(`观众码：${room.viewerCode || ''}`);
     if (kind === 'all' || kind === 'captains') {

@@ -176,8 +176,27 @@
     const room = created && created.room;
     if (!room) return '';
     const captainCodes = Array.isArray(room.captainCodes) ? room.captainCodes : [];
+    const apiBase = String(created.apiBase || '').trim();
+    const tournamentId = created.tournamentId || room.tournamentId || '';
+    const singleCaptainId = String(kind || '').startsWith('captain:') ? String(kind).slice('captain:'.length) : '';
+    const singleCaptain = singleCaptainId ? captainCodes.find(item => String(item.teamId || '') === singleCaptainId) : null;
+    if (singleCaptain) {
+      return [
+        `服务地址：${apiBase}`,
+        `赛事 ID：${tournamentId}`,
+        `身份：${singleCaptain.teamName || singleCaptain.teamId || '队长'}`,
+        `加入码：${singleCaptain.code || ''}`,
+      ].join('\n').trim();
+    }
+    if (kind === 'referee') {
+      return [`服务地址：${apiBase}`, `赛事 ID：${tournamentId}`, '身份：裁判', `加入码：${room.refereeCode || ''}`].join('\n').trim();
+    }
+    if (kind === 'viewer') {
+      return [`服务地址：${apiBase}`, `赛事 ID：${tournamentId}`, '身份：观众', `加入码：${room.viewerCode || ''}`].join('\n').trim();
+    }
     const lines = [
-      `赛事 ID：${created.tournamentId || room.tournamentId || ''}`,
+      `服务地址：${apiBase}`,
+      `赛事 ID：${tournamentId}`,
     ];
     if (kind === 'all' || kind === 'referee') lines.push(`裁判码：${room.refereeCode || ''}`);
     if (kind === 'all' || kind === 'viewer') lines.push(`观众码：${room.viewerCode || ''}`);
@@ -219,6 +238,7 @@
         <div class="room-code-warning">房间码明文只显示一次；刷新页面后将无法再次查看，请立即分发给对应身份。</div>
         <div class="room-code-actions">
           <button class="subtle-btn" onclick="window.hexcoreUI.copyCreatedRoomCodes('all')">复制全部</button>
+          <button class="subtle-btn" onclick="window.hexcoreUI.copyCreatedRoomCodes('referee')">复制裁判码</button>
           <button class="subtle-btn" onclick="window.hexcoreUI.copyCreatedRoomCodes('captains')">复制队长码</button>
           <button class="subtle-btn" onclick="window.hexcoreUI.copyCreatedRoomCodes('viewer')">复制观众码</button>
           <button class="subtle-btn" onclick="window.hexcoreUI.downloadCreatedRoomCodes()">下载 TXT</button>
@@ -226,18 +246,27 @@
         <textarea class="room-code-copy-source" readonly aria-label="房间码文本">${escapeHtml(createdRoomText('all'))}</textarea>
         <div class="room-code-grid">
           <div class="room-code-row">
-            <span>裁判码</span>
+            <div class="room-code-row-head">
+              <span>裁判码</span>
+              <button class="subtle-btn" onclick="window.hexcoreUI.copyCreatedRoomCodes('referee')">复制</button>
+            </div>
             <code>${escapeHtml(room.refereeCode || '')}</code>
           </div>
           <div class="room-code-row">
-            <span>观众码</span>
+            <div class="room-code-row-head">
+              <span>观众码</span>
+              <button class="subtle-btn" onclick="window.hexcoreUI.copyCreatedRoomCodes('viewer')">复制</button>
+            </div>
             <code>${escapeHtml(room.viewerCode || '')}</code>
           </div>
         </div>
         <div class="captain-code-list">
           ${captainCodes.map(item => `
             <div class="room-code-row">
-              <span>${escapeHtml(item.teamName || item.teamId || '队伍')}</span>
+              <div class="room-code-row-head">
+                <span>${escapeHtml(item.teamName || item.teamId || '队伍')}</span>
+                <button class="subtle-btn" onclick='window.hexcoreUI.copyCreatedRoomCodes(${safeJsonString(`captain:${item.teamId || ''}`)})'>复制</button>
+              </div>
               <code>${escapeHtml(item.code || '')}</code>
             </div>
           `).join('') || '<div class="empty-log">暂无队长码</div>'}
