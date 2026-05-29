@@ -90,6 +90,61 @@
     };
   }
 
+  function topbarRoleItems(captain, roleStatus, syncInfo) {
+    const ownCaptain = clientCaptain();
+    const syncVersion = syncInfo.version ? `v${syncInfo.version}` : '未同步';
+    const syncDetail = `${syncVersion} · ${syncInfo.lastSynced}`;
+    const currentName = captain ? captain.name : '无';
+    if (isViewerClient()) {
+      return [
+        { label: '身份', value: '观众端', detail: '只读进入' },
+        { label: '视角', value: currentName, detail: '跟随当前回合队长' },
+        { label: '权限', value: roleStatus, detail: '可看商店、海克斯和公开队伍', tone: 'readonly' },
+        { label: '同步', value: syncInfo.label, detail: syncDetail, tone: syncInfo.status || 'local' },
+        { label: '会话', value: syncInfo.remaining, detail: syncInfo.session ? '本机已加入' : '未加入' },
+      ];
+    }
+    if (isCaptainClient()) {
+      const isOwnTurn = captainCanOperateCurrentTurn();
+      const hasHexWindow = Hexcore2.state.multiplayer && Array.isArray(Hexcore2.state.multiplayer.hexcoreActionWindows)
+        && Hexcore2.state.multiplayer.hexcoreActionWindows.some(window => window && window.active !== false && window.teamId === clientTeamId());
+      return [
+        { label: '身份', value: '队长端', detail: ownCaptain ? ownCaptain.name : '未绑定队伍' },
+        { label: '视角', value: currentName, detail: isOwnTurn ? '本人回合' : '跟随当前回合队长' },
+        {
+          label: '权限',
+          value: roleStatus,
+          detail: isOwnTurn ? '可抽选、购买和维护本队' : (hasHexWindow ? '仅限允许的海克斯操作' : '当前只能查看'),
+          tone: isOwnTurn || hasHexWindow ? 'active' : 'readonly',
+        },
+        { label: '同步', value: syncInfo.label, detail: syncDetail, tone: syncInfo.status || 'local' },
+        { label: '会话', value: syncInfo.remaining, detail: syncInfo.session ? '本机已加入' : '未加入' },
+      ];
+    }
+    return [
+      { label: '身份', value: '裁判端', detail: '主持与管理' },
+      { label: '视角', value: currentName, detail: '全局裁判视角' },
+      { label: '权限', value: roleStatus, detail: '可代执行、修正和管理赛事', tone: 'active' },
+      { label: '同步', value: syncInfo.label, detail: syncDetail, tone: syncInfo.status || 'local' },
+      { label: '会话', value: syncInfo.remaining, detail: syncInfo.session ? '本机已加入' : '未加入' },
+    ];
+  }
+
+  function topbarRoleStrip(captain, roleStatus, syncInfo) {
+    const items = topbarRoleItems(captain, roleStatus, syncInfo);
+    return `
+      <div class="role-status-strip" aria-label="当前身份、权限和同步状态">
+        ${items.map(item => `
+          <span class="role-status-pill ${escapeHtml(item.tone || '')}">
+            <em>${escapeHtml(item.label)}</em>
+            <strong class="${item.label === '同步' ? `sync-state ${escapeHtml(syncInfo.status || 'local')}` : ''}">${escapeHtml(item.value)}</strong>
+            <small>${escapeHtml(item.detail)}</small>
+          </span>
+        `).join('')}
+      </div>
+    `;
+  }
+
   function shouldShowJoinGate() {
     return !hasExplicitClientRole() && !storedMultiplayerSession();
   }
@@ -1821,7 +1876,6 @@
       ? '选人已完成'
       : '选人进行中';
     const showRoomReturn = hasExplicitClientRole() || storedMultiplayerSession();
-    const ownCaptain = clientCaptain();
     const syncInfo = roomSyncInfo();
     const roleStatus = isCaptainClient()
       ? (captainCanOperateCurrentTurn()
@@ -1836,15 +1890,7 @@
         <div class="mode">${isReadonlyClient() ? '观众端' : (isCaptainClient() ? '队长端' : '裁判代执行')}</div>
         ${showRoomReturn ? '<button class="ghost-btn multiplayer-return-btn" onclick="window.hexcoreUI.leaveMultiplayerRoom()">返回多人房间</button>' : ''}
         ${showRoomReturn ? `
-          <div class="role-status-strip">
-            ${isCaptainClient() ? `<span>我的队伍：<strong>${escapeHtml(ownCaptain ? ownCaptain.name : '未绑定')}</strong></span>` : (isViewerClient() ? '<span>观众端：<strong>只读</strong></span>' : '<span>裁判端：<strong>主持中</strong></span>')}
-            <span>当前回合：<strong>${captain ? escapeHtml(captain.name) : '无'}</strong></span>
-            <span>当前权限：<strong>${escapeHtml(roleStatus)}</strong></span>
-            <span>同步：<strong class="sync-state ${escapeHtml(syncInfo.status || 'local')}">${escapeHtml(syncInfo.label)}</strong></span>
-            <span>版本：<strong>${syncInfo.version ? `v${syncInfo.version}` : '未同步'}</strong></span>
-            <span>最近同步：<strong>${escapeHtml(syncInfo.lastSynced)}</strong></span>
-            <span>会话：<strong>${escapeHtml(syncInfo.remaining)}</strong></span>
-          </div>
+          ${topbarRoleStrip(captain, roleStatus, syncInfo)}
         ` : ''}
         <div class="phase">当前阶段：<strong>第 ${Hexcore2.state.draft.round} 轮 / 金币商店</strong></div>
         <div class="captain-title">当前队长：<strong>${captain ? escapeHtml(captain.name) : '无'}</strong></div>

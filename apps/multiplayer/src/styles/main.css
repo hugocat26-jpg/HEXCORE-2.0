@@ -436,16 +436,18 @@ body:has(.join-gate-page) {
   min-height: 0;
   height: 100vh;
   display: grid;
-  grid-template-rows: var(--top) minmax(0, 1fr);
+  grid-template-rows: minmax(var(--top), auto) minmax(0, 1fr);
   overflow: hidden;
 }
 
 .topbar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 28px;
+  min-height: var(--top);
   min-width: 0;
-  padding: 0 22px;
+  padding: 6px 22px;
   border-bottom: 1px solid var(--line);
   background: rgba(5, 12, 17, 0.92);
 }
@@ -529,24 +531,63 @@ body:has(.join-gate-page) {
 
 .role-status-strip {
   min-width: 0;
+  max-width: 100%;
   display: flex;
+  flex: 1 1 520px;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   color: var(--muted);
-  font-size: 12px;
 }
 
-.role-status-strip span {
+.role-status-pill {
+  flex: 0 1 148px;
   min-width: 0;
-  max-width: 168px;
+  max-width: 148px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 1px 6px;
+  align-items: center;
+  padding: 5px 8px;
+  border: 1px solid rgba(37, 199, 218, 0.18);
+  border-radius: 8px;
+  background: rgba(8, 22, 29, 0.62);
+}
+
+.role-status-pill em,
+.role-status-pill strong,
+.role-status-pill small {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.role-status-strip strong {
+.role-status-pill em {
+  color: var(--muted);
+  font-size: 10px;
+  font-style: normal;
+}
+
+.role-status-pill strong {
   color: var(--cyan);
+  font-size: 12px;
+}
+
+.role-status-pill small {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.role-status-pill.active {
+  border-color: rgba(85, 200, 121, 0.32);
+  background: rgba(34, 197, 94, 0.09);
+}
+
+.role-status-pill.readonly {
+  border-color: rgba(148, 163, 184, 0.2);
+  background: rgba(15, 23, 42, 0.42);
 }
 
 .sync-state.online {
