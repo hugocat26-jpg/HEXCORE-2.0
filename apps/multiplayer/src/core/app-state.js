@@ -831,6 +831,19 @@
     state.ui.roomSyncStatus = ['online', 'submitting', 'reconnecting', 'offline', 'expired'].includes(state.ui.roomSyncStatus)
       ? state.ui.roomSyncStatus
       : '';
+    if (state.ui.joinGateMessage && typeof state.ui.joinGateMessage === 'object') {
+      state.ui.joinGateMessage = {
+        level: ['success', 'warn', 'info'].includes(state.ui.joinGateMessage.level) ? state.ui.joinGateMessage.level : 'warn',
+        text: sanitizeText(state.ui.joinGateMessage.text, '', 180),
+        kind: sanitizeText(state.ui.joinGateMessage.kind, '', 32),
+        tips: Array.isArray(state.ui.joinGateMessage.tips)
+          ? state.ui.joinGateMessage.tips.map(item => sanitizeText(item, '', 180)).filter(Boolean).slice(0, 4)
+          : [],
+      };
+      if (!state.ui.joinGateMessage.text) delete state.ui.joinGateMessage;
+    } else {
+      delete state.ui.joinGateMessage;
+    }
     delete state.ui.roomCommandSubmitting;
     state.ui.playerFilter = typeof state.ui.playerFilter === 'string' ? state.ui.playerFilter.slice(0, 32) : 'all';
     const campFilters = state.ui.playerCampFilters && typeof state.ui.playerCampFilters === 'object' ? state.ui.playerCampFilters : {};

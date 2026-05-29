@@ -794,6 +794,23 @@ body:has(.join-gate-page) {
   line-height: 1.6;
 }
 
+.join-gate-message strong {
+  display: block;
+  color: currentColor;
+}
+
+.join-gate-message ul {
+  display: grid;
+  gap: 4px;
+  margin: 8px 0 0;
+  padding-left: 18px;
+  color: var(--text);
+}
+
+.join-gate-message li {
+  padding-left: 2px;
+}
+
 .join-gate-message.success {
   border-color: rgba(34, 197, 94, 0.42);
   background: rgba(34, 197, 94, 0.1);

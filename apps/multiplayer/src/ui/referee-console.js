@@ -275,6 +275,18 @@
     `;
   }
 
+  function joinGateMessagePanel() {
+    const message = Hexcore2.state.ui && Hexcore2.state.ui.joinGateMessage;
+    if (!message) return '';
+    const tips = Array.isArray(message.tips) ? message.tips.map(item => String(item || '').trim()).filter(Boolean).slice(0, 4) : [];
+    return `
+      <div class="join-gate-message ${escapeHtml(message.level || 'warn')}">
+        <strong>${escapeHtml(message.text || '')}</strong>
+        ${tips.length ? `<ul>${tips.map(tip => `<li>${escapeHtml(tip)}</li>`).join('')}</ul>` : ''}
+      </div>
+    `;
+  }
+
   function joinGatePage() {
     const apiBase = (Hexcore2.actions && Hexcore2.actions.recentMultiplayerApiBase && Hexcore2.actions.recentMultiplayerApiBase()) || '';
     return `
@@ -321,7 +333,7 @@
           </div>
           ${createdRoomPanel()}
           <div class="empty-log">已加入的会话会保存在本机；需要切换身份时可清理浏览器本地数据后重新加入。</div>
-          ${Hexcore2.state.ui && Hexcore2.state.ui.joinGateMessage ? `<div class="join-gate-message ${escapeHtml(Hexcore2.state.ui.joinGateMessage.level || 'warn')}">${escapeHtml(Hexcore2.state.ui.joinGateMessage.text || '')}</div>` : ''}
+          ${joinGateMessagePanel()}
         </section>
       </main>
     `;

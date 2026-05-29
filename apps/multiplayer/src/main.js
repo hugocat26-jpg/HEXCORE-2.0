@@ -1186,21 +1186,81 @@
         body: JSON.stringify({ code }),
       });
     } catch (error) {
-      throw new Error('服务地址无法连接，请确认 API 地址是裁判电脑 IP 且服务已启动');
+      const networkError = new Error('服务地址无法连接，请确认 API 地址是裁判电脑 IP 且服务已启动');
+      networkError.joinFailureKind = 'network';
+      throw networkError;
     }
     let payload = {};
     try {
       payload = await response.json();
     } catch (error) {
-      throw new Error('服务返回格式异常，请确认填写的是多人端 API 地址');
+      const parseError = new Error('服务返回格式异常，请确认填写的是多人端 API 地址');
+      parseError.joinFailureKind = 'bad_response';
+      throw parseError;
     }
     if (!response.ok || !payload.ok || !payload.session || !payload.session.sessionToken) {
-      if (response.status === 404 || /赛事不存在/.test(payload.error || '')) throw new Error('赛事 ID 不存在，请确认裁判提供的赛事 ID');
-      if (response.status === 401 || response.status === 403) throw new Error('当前会话无权限或已过期，请重新输入加入码');
-      if (response.status === 400 && payload && /房间码无效/.test(payload.error || '')) throw new Error('加入码无效，请确认复制的是对应身份的房间码');
-      throw new Error(payload && payload.error ? payload.error : '加入失败');
+      let message = '加入失败，请检查分发文本或联系裁判';
+      let kind = 'unknown';
+      if (response.status === 404 || /赛事不存在/.test(payload.error || '')) {
+        message = '赛事 ID 不存在，请确认裁判提供的赛事 ID';
+        kind = 'not_found';
+      } else if (response.status === 401 || response.status === 403) {
+        message = '当前会话无权限或已过期，请重新输入加入码';
+        kind = 'expired';
+      } else if (response.status === 400 && payload && /房间码无效/.test(payload.error || '')) {
+        message = '加入码无效，请确认复制的是对应身份的房间码';
+        kind = 'invalid_code';
+      }
+      const joinError = new Error(message);
+      joinError.joinFailureKind = kind;
+      throw joinError;
     }
     return payload;
+  }
+
+  function joinFailureMessage(error) {
+    const text = error && error.message ? String(error.message) : String(error || '加入失败');
+    let kind = error && error.joinFailureKind ? error.joinFailureKind : 'unknown';
+    if (!error || !error.joinFailureKind) {
+      if (/服务地址无法连接/.test(text)) kind = 'network';
+      else if (/服务返回格式异常/.test(text)) kind = 'bad_response';
+      else if (/赛事 ID 不存在/.test(text)) kind = 'not_found';
+      else if (/加入码无效/.test(text)) kind = 'invalid_code';
+      else if (/无权限|过期/.test(text)) kind = 'expired';
+    }
+    const tipsByKind = {
+      network: [
+        '确认服务地址填写的是裁判电脑 API 地址，局域网通常是 http://电脑IP:4196。',
+        '确认裁判电脑已启动多人端 API，并且防火墙已允许 4196 端口。',
+        '手机或客户电脑需要和裁判电脑在同一个局域网。',
+      ],
+      bad_response: [
+        '确认服务地址指向 API 服务，不是多人端页面地址。',
+        '本地默认页面端口是 4186，API 端口是 4196；公网部署时通常填写同一个 HTTPS 域名。',
+      ],
+      not_found: [
+        '确认赛事 ID 与裁判创建赛事后分发文本中的赛事 ID 完全一致。',
+        '不要把赛事名称填到赛事 ID 输入框。',
+      ],
+      invalid_code: [
+        '确认复制的是分发文本中的加入码，不包含“加入码：”前缀。',
+        '确认使用了当前赛事对应的身份码；刷新页面后旧的未分发码不会重新显示。',
+      ],
+      expired: [
+        '当前本机会话可能已过期，请重新输入裁判分发的加入码。',
+        '如果裁判重新创建了赛事，请使用新赛事 ID 和新加入码。',
+      ],
+      unknown: [
+        '检查服务地址、赛事 ID 和加入码是否分别来自同一份分发文本。',
+        '仍失败时请让裁判重新复制对应身份的分发文本。',
+      ],
+    };
+    return {
+      level: 'warn',
+      text,
+      kind,
+      tips: tipsByKind[kind] || tipsByKind.unknown,
+    };
   }
 
   async function verifyTournamentAvailableForCreate(apiBase, tournamentId) {
@@ -1972,9 +2032,9 @@
         const session = persistJoinedSession(apiBase, tournamentId, payload);
         redirectForSession(session);
       } catch (error) {
-        const message = error && error.message ? error.message : String(error);
         Hexcore2.state.ui = Hexcore2.state.ui || {};
-        Hexcore2.state.ui.joinGateMessage = { level: 'warn', text: message };
+        const message = error && error.message ? error.message : String(error);
+        Hexcore2.state.ui.joinGateMessage = joinFailureMessage(error);
         Hexcore2.eventStore.append('加入房间失败', message, 'warn');
         Hexcore2.ui.render();
       }
