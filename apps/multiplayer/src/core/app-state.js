@@ -831,6 +831,7 @@
     state.ui.roomSyncStatus = ['online', 'submitting', 'reconnecting', 'offline', 'expired'].includes(state.ui.roomSyncStatus)
       ? state.ui.roomSyncStatus
       : '';
+    state.ui.roomWelcomeDismissed = Boolean(state.ui.roomWelcomeDismissed);
     if (state.ui.joinGateMessage && typeof state.ui.joinGateMessage === 'object') {
       state.ui.joinGateMessage = {
         level: ['success', 'warn', 'info'].includes(state.ui.joinGateMessage.level) ? state.ui.joinGateMessage.level : 'warn',

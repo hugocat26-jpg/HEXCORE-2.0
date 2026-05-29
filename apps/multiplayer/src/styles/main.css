@@ -858,6 +858,47 @@ body:has(.join-gate-page) {
   color: var(--green);
 }
 
+.room-welcome-panel {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.9fr) minmax(420px, 1.7fr) auto;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 12px;
+  padding: 12px 14px;
+  border: 1px solid rgba(37, 199, 218, 0.26);
+  border-radius: 8px;
+  background: linear-gradient(135deg, rgba(9, 34, 44, 0.94), rgba(9, 18, 27, 0.94));
+  box-shadow: var(--shadow-soft);
+}
+
+.room-welcome-panel strong {
+  color: var(--cyan);
+  font-size: 16px;
+}
+
+.room-welcome-panel p {
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.room-welcome-panel ul {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 14px;
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.room-welcome-panel .subtle-btn {
+  min-height: 32px;
+  white-space: nowrap;
+}
+
 .form-hint {
   color: var(--muted);
   font-size: 12px;
@@ -934,6 +975,14 @@ body:has(.join-gate-page) {
   .created-room-head {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .room-welcome-panel {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .room-welcome-panel ul {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 

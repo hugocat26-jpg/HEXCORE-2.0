@@ -5649,6 +5649,21 @@ function testMultiplayerCaptainUiReusesRefereeScreensWithScopedAccess() {
     '队伍页应复用裁判端队伍卡，队长端可查看全部队伍但只能编辑自己队伍',
   );
   assert(
+    ui.includes('roomWelcomePanel()')
+    && ui.includes('pageWorkspace = content')
+    && ui.includes('加入房间后的首屏引导')
+    && ui.includes('已进入队长端')
+    && ui.includes('已进入观众端')
+    && ui.includes('roomWelcomeDismissed')
+    && ui.includes('window.hexcoreUI.dismissRoomWelcome()')
+    && ui.includes('session.welcomeDismissedAt')
+    && main.includes('dismissRoomWelcome()')
+    && main.includes('welcomeDismissedAt = new Date().toISOString()')
+    && main.includes('roomWelcomeDismissed = true')
+    && main.includes('saveMultiplayerSession(session)'),
+    '队长和观众加入房间后应显示可关闭的首屏引导，且仅在本机会话中记录关闭状态',
+  );
+  assert(
     ui.includes('captainHexcoreCatalogPage()')
     && ui.includes('海克斯图录')
     && ui.includes('captain-hex-catalog')
@@ -5843,6 +5858,7 @@ function testMultiplayerJoinGateAndCors() {
     && main.includes('createTournamentRoom()')
     && main.includes('enterCreatedRefereeRoom()')
     && main.includes('leaveMultiplayerRoom()')
+    && main.includes('dismissRoomWelcome()')
     && main.includes('localStorage.removeItem(MULTIPLAYER_SESSION_KEY)')
     && main.includes('Hexcore2.roomEventSource.close')
     && main.includes('history.replaceState({}, \'\', path)')
@@ -5857,6 +5873,7 @@ function testMultiplayerJoinGateAndCors() {
     && appState.includes('sanitizeText(state.ui.createdRoomNotice.tournamentId')
     && appState.includes('state.ui.joinGateMessage = {')
     && appState.includes('state.ui.joinGateMessage.tips.map')
+    && appState.includes('state.ui.roomWelcomeDismissed = Boolean')
     && appState.includes('delete state.ui.roomCommandSubmitting')
     && appState.includes("['online', 'submitting', 'reconnecting', 'offline', 'expired']"),
     '房间码明文不得随裁判端完整状态长期持久化，旧 saved state 应清理 createdRoom，只保留安全提示摘要',
@@ -5892,6 +5909,8 @@ function testMultiplayerJoinGateAndCors() {
     && css.includes('text-overflow: ellipsis')
     && css.includes('.join-gate-message')
     && css.includes('.join-gate-message ul')
+    && css.includes('.room-welcome-panel')
+    && css.includes('.room-welcome-panel ul')
     && css.includes('.role-status-strip')
     && css.includes('grid-template-rows: minmax(var(--top), auto)')
     && css.includes('flex-wrap: wrap')

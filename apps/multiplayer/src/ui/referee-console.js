@@ -214,6 +214,39 @@
     `;
   }
 
+  function roomWelcomePanel() {
+    const session = storedMultiplayerSession();
+    const dismissed = Boolean((session && session.welcomeDismissedAt) || (Hexcore2.state.ui && Hexcore2.state.ui.roomWelcomeDismissed));
+    if (dismissed || (!session && !hasExplicitClientRole()) || (!isCaptainClient() && !isViewerClient())) return '';
+    const captain = clientCaptain();
+    const current = Hexcore2.selectors.currentCaptain && Hexcore2.selectors.currentCaptain();
+    const items = isCaptainClient()
+      ? [
+        `当前身份：${captain ? captain.name : '队长端'}`,
+        captainCanOperateCurrentTurn() ? '现在是你的回合，可在实时抽选页完成可用操作。' : '当前不是你的回合，你会跟随当前队长视角只读观看。',
+        '队伍总览可查看全部队伍，但只有自己的队伍名称可编辑。',
+        '海克斯图录只用于查看详情；赛程页只显示自己队伍相关场次。',
+      ]
+      : [
+        `当前身份：观众端，只读查看${current ? ` ${current.name} ` : '当前回合队长'}视角。`,
+        '实时抽选页会同步当前商店、海克斯详情和公开队伍信息。',
+        '队伍总览与海克斯图录均为只读，不会出现写入操作。',
+        '需要切换身份时，点击顶部“返回多人房间”重新加入。',
+      ];
+    return `
+      <section class="room-welcome-panel" aria-label="加入房间后的首屏引导">
+        <div>
+          <strong>${isCaptainClient() ? '已进入队长端' : '已进入观众端'}</strong>
+          <p>${isCaptainClient() ? '先确认顶部身份和权限，再按当前回合状态操作。' : '你正在以只读方式观看当前回合队长视角。'}</p>
+        </div>
+        <ul>
+          ${items.map(item => `<li>${escapeHtml(item)}</li>`).join('')}
+        </ul>
+        <button class="subtle-btn" onclick="window.hexcoreUI.dismissRoomWelcome()">知道了</button>
+      </section>
+    `;
+  }
+
   function captainAllowedView(view) {
     return ['draft', 'teams', 'hexcores', 'tournament', 'rules'].includes(view);
   }
@@ -3890,17 +3923,19 @@
     const activeView = isViewerClient() && !viewerAllowedView(requestedView)
       ? 'draft'
       : (isCaptainClient() && !captainAllowedView(requestedView) ? 'draft' : requestedView);
-    if (activeView === 'teams') return `<main class="workspace-main page-workspace">${teamsPage()}</main>`;
-    if (activeView === 'players') return `<main class="workspace-main page-workspace">${playersPage()}</main>`;
-    if (activeView === 'hexcores') return `<main class="workspace-main page-workspace">${hexcoresPage()}</main>`;
-    if (activeView === 'schedule') return `<main class="workspace-main page-workspace">${schedulePage()}</main>`;
-    if (activeView === 'tournament') return `<main class="workspace-main page-workspace">${tournamentPage()}</main>`;
-    if (activeView === 'rules') return `<main class="workspace-main page-workspace">${rulesPage()}</main>`;
-    if (activeView === 'logs') return `<main class="workspace-main page-workspace">${logsPage()}</main>`;
-    if (activeView === 'settings') return `<main class="workspace-main page-workspace">${settingsPage()}</main>`;
+    const pageWorkspace = content => `<main class="workspace-main page-workspace">${roomWelcomePanel()}${content}</main>`;
+    if (activeView === 'teams') return pageWorkspace(teamsPage());
+    if (activeView === 'players') return pageWorkspace(playersPage());
+    if (activeView === 'hexcores') return pageWorkspace(hexcoresPage());
+    if (activeView === 'schedule') return pageWorkspace(schedulePage());
+    if (activeView === 'tournament') return pageWorkspace(tournamentPage());
+    if (activeView === 'rules') return pageWorkspace(rulesPage());
+    if (activeView === 'logs') return pageWorkspace(logsPage());
+    if (activeView === 'settings') return pageWorkspace(settingsPage());
     return `
       <main class="workspace">
         <div class="workspace-main">
+          ${roomWelcomePanel()}
           ${captainClientReadonlyNotice()}
           ${viewerReadonlyNotice()}
           ${captainHexcoreDraftPanel()}

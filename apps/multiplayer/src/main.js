@@ -1986,6 +1986,19 @@
 
     recentMultiplayerApiBase,
 
+    dismissRoomWelcome() {
+      const session = multiplayerSession();
+      if (session) {
+        session.welcomeDismissedAt = new Date().toISOString();
+        saveMultiplayerSession(session);
+      } else {
+        Hexcore2.state.ui = Hexcore2.state.ui || {};
+        Hexcore2.state.ui.roomWelcomeDismissed = true;
+      }
+      Hexcore2.eventStore.append('多人房间', '已关闭加入引导', 'info');
+      Hexcore2.ui.render();
+    },
+
     async copyCreatedRoomCodes(kind = 'all') {
       try {
         const text = createdRoomText(kind);
