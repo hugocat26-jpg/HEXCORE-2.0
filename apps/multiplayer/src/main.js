@@ -1645,6 +1645,43 @@
     return 'online';
   }
 
+  function projectionViewForSession(session = multiplayerSession()) {
+    if (!session) return 'viewer';
+    if (session.role === 'captain') return 'captain';
+    if (session.role === 'referee') return 'referee';
+    return 'viewer';
+  }
+
+  async function fetchRoomProjection(session = multiplayerSession()) {
+    if (!session || !session.apiBase || !session.tournamentId) return null;
+    const view = projectionViewForSession(session);
+    const url = `${session.apiBase}/api/tournaments/${encodeURIComponent(session.tournamentId)}/projection?view=${encodeURIComponent(view)}`;
+    let response;
+    try {
+      response = await fetch(url, {
+        headers: session.sessionToken ? { Authorization: `Bearer ${session.sessionToken}` } : {},
+      });
+    } catch (error) {
+      const networkError = new Error('服务地址无法连接，请检查网络或等待重连');
+      networkError.recoverable = true;
+      throw networkError;
+    }
+    let payload = {};
+    try {
+      payload = await response.json();
+    } catch (error) {
+      throw new Error('服务端投影返回格式异常，请重新加入房间');
+    }
+    if (!response.ok || !payload.ok || !payload.tournament) {
+      const error = new Error(payload && payload.error ? payload.error : '服务端投影恢复失败');
+      error.requiresRejoin = response.status === 401 || response.status === 403 || /sessionToken|过期|无权限/.test(error.message);
+      throw error;
+    }
+    syncSessionFromTournament(payload.tournament);
+    applyRoomProjection(payload.tournament);
+    return payload.tournament;
+  }
+
   function serverSyncedHexcoreUsePayload(id, captainId, targetCaptainId) {
     if (id !== 'snow-cat' && id !== 'storm-fog') return null;
     const teamId = String(captainId || '').trim();
@@ -1770,11 +1807,10 @@
     if (Hexcore2.roomEventSource && Hexcore2.roomEventSource.readyState !== 2) return;
     if (roomEventStreamConnecting) return;
     roomEventStreamConnecting = true;
-    const view = session.role === 'captain'
-      ? 'captain'
-      : (session.role === 'referee' ? 'referee' : 'viewer');
+    const view = projectionViewForSession(session);
     const params = new URLSearchParams({ view });
     try {
+      await fetchRoomProjection(session);
       if (session.role === 'captain' || session.role === 'referee') {
         const streamToken = await requestRoomStreamToken(session);
         params.set('streamToken', streamToken);
@@ -1838,7 +1874,28 @@
       } catch (error) {}
       if (Hexcore2.roomEventSource === eventSource) Hexcore2.roomEventSource = null;
       Hexcore2.ui.render();
-      global.setTimeout(() => connectRoomEventStream(), 2000);
+      fetchRoomProjection(multiplayerSession())
+        .then(() => {
+          Hexcore2.state.ui = Hexcore2.state.ui || {};
+          Hexcore2.state.ui.roomSyncStatus = 'online';
+          Hexcore2.ui.render();
+        })
+        .catch(error => {
+          Hexcore2.state.ui = Hexcore2.state.ui || {};
+          if (error && error.requiresRejoin) {
+            const message = error.message || '实时同步凭据失效，请重新加入房间';
+            clearMultiplayerSession();
+            Hexcore2.state.ui.joinGateMessage = { level: 'warn', text: message };
+            Hexcore2.eventStore.append('实时同步失效', message, 'warn');
+            returnToMultiplayerGate();
+            return;
+          }
+          Hexcore2.state.ui.roomSyncStatus = roomSyncStatusFromError(error && error.message ? error.message : String(error));
+          Hexcore2.ui.render();
+        })
+        .finally(() => {
+          global.setTimeout(() => connectRoomEventStream(), 2000);
+        });
     };
   }
 

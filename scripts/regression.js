@@ -5948,14 +5948,21 @@ function testMultiplayerClientSubmitsAuthoritativeCommands() {
     && main.includes('connectRoomEventStream()')
     && main.includes('new global.EventSource')
     && main.includes('requestRoomStreamToken(session)')
+    && main.includes('async function fetchRoomProjection')
+    && main.includes('projectionViewForSession(session)')
+    && main.includes('/projection?view=${encodeURIComponent(view)}')
+    && main.includes("Authorization: `Bearer ${session.sessionToken}`")
+    && main.includes('await fetchRoomProjection(session)')
     && main.includes('/stream-token')
     && main.includes("params.set('streamToken', streamToken)")
-    && main.includes("session.role === 'referee' ? 'referee' : 'viewer'")
+    && main.includes('function projectionViewForSession')
+    && main.includes("if (session.role === 'referee') return 'referee'")
     && main.includes("session.role === 'captain' || session.role === 'referee'")
     && !main.includes("params.set('sessionToken', session.sessionToken)")
     && main.includes('eventSource.addEventListener')
+    && main.includes('fetchRoomProjection(multiplayerSession())')
     && main.includes('applyRoomProjection(responsePayload.tournament)'),
-    '多人端应在 command 成功和 SSE 快照/事件到达时应用服务端公开投影，队长 SSE 只能使用短期 streamToken，避免长期 sessionToken 进入订阅 URL',
+    '多人端应在 command 成功、SSE 快照/事件到达和断线恢复时应用服务端公开投影；队长/裁判恢复请求用 Authorization，SSE 只能使用短期 streamToken，避免长期 sessionToken 进入订阅 URL',
   );
   const rules = fs.readFileSync(path.join(root, 'packages/rules/index.js'), 'utf8');
   const projections = fs.readFileSync(path.join(root, 'apps/server/projections.js'), 'utf8');
