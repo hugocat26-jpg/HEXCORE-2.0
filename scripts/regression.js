@@ -5918,6 +5918,13 @@ function testMultiplayerClientSubmitsAuthoritativeCommands() {
     '开店、刷新、购买、跳过、改名、海克斯抽取顺序、海克斯抽选和裁判比分录入应在有房间 session 时提交服务端 command，再同步公开投影',
   );
   assert(
+    main.includes('function serverSyncedHexcoreUsePayload')
+    && main.includes("submitRoomCommand('UseHexcore', syncedPayload)")
+    && main.includes("id !== 'snow-cat' && id !== 'storm-fog'")
+    && main.includes('targetTeamId'),
+    '目标型主动海克斯应通过 UseHexcore command 交给服务端权威校验和同步，当前覆盖雪定饿的喵与骤雨血雾清风'
+  );
+  assert(
     main.includes('syncSessionFromTournament(responsePayload.tournament)')
     && main.includes('状态版本过期')
     && main.includes('sessionStorage'),

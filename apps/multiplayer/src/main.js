@@ -1645,6 +1645,18 @@
     return 'online';
   }
 
+  function serverSyncedHexcoreUsePayload(id, captainId, targetCaptainId) {
+    if (id !== 'snow-cat' && id !== 'storm-fog') return null;
+    const teamId = String(captainId || '').trim();
+    const targetTeamId = String(targetCaptainId || '').trim();
+    if (!teamId || !targetTeamId) return null;
+    return {
+      teamId,
+      hexcoreId: id,
+      targetTeamId,
+    };
+  }
+
   async function requestRoomStreamToken(session) {
     let response;
     try {
@@ -2596,6 +2608,28 @@
       const captain = sourceCaptainId
         ? Hexcore2.state.captains.find(item => item.id === sourceCaptainId)
         : Hexcore2.selectors.currentCaptain();
+      const syncedPayload = captain ? serverSyncedHexcoreUsePayload(id, captain.id, targetCaptainId) : null;
+      if (syncedPayload && multiplayerSession()) {
+        return submitRoomCommand('UseHexcore', syncedPayload)
+          .then(() => {
+            if (Hexcore2.state.ui) delete Hexcore2.state.ui.hexTargetPicker;
+            const hexcore = Hexcore2.sampleData.hexcores.find(item => item.id === id);
+            const target = Hexcore2.state.captains.find(item => item.id === targetCaptainId);
+            Hexcore2.eventStore.append(
+              '海克斯同步',
+              `${captain.name} 已通过服务端发动【${hexcore ? hexcore.name : id}】${target ? `，目标 ${target.name}` : ''}`,
+              'warn',
+              { captainId: captain.id, targetCaptainId, hexcoreId: id }
+            );
+            renderAndPersist();
+            return { ok: true, synced: true };
+          })
+          .catch(error => {
+            Hexcore2.eventStore.append('海克斯执行失败', error && error.message ? error.message : String(error), 'warn');
+            Hexcore2.ui.render();
+            return { ok: false, reason: error && error.message ? error.message : String(error) };
+          });
+      }
       if (id === 'last-stand') {
         const item = captain && Hexcore2.hexcoreEngine && Hexcore2.hexcoreEngine.executionQueue
           ? Hexcore2.hexcoreEngine.executionQueue(captain.id).find(entry => entry.id === 'last-stand')
