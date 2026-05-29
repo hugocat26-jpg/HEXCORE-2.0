@@ -490,6 +490,164 @@ function teamCamp(snapshot = {}, teamId = '') {
   return safeText(team && team.camp, '', 40);
 }
 
+function normalizeTournamentScore(value) {
+  const number = Number(value);
+  if (!Number.isInteger(number) || number < 0 || number > 999) {
+    throw new Error('赛程比分必须是 0-999 的整数');
+  }
+  return number;
+}
+
+function tournamentMatchStatus(match = {}) {
+  const hasA = Boolean(safeText(match.teamAId, '', 80));
+  const hasB = Boolean(safeText(match.teamBId, '', 80));
+  if (hasA && !hasB) return 'bye';
+  if (!hasA && !hasB) return 'empty';
+  if (match.status === 'completed' && safeText(match.winnerId, '', 80)) return 'completed';
+  return 'pending';
+}
+
+function normalizeTournamentMatchState(match = {}) {
+  const status = tournamentMatchStatus(match);
+  if (status === 'bye') {
+    match.status = 'bye';
+    match.winnerId = safeText(match.teamAId, '', 80);
+    match.scoreA = '';
+    match.scoreB = '';
+    return match;
+  }
+  if (status === 'completed') {
+    match.status = 'completed';
+    return match;
+  }
+  match.status = status;
+  match.winnerId = '';
+  return match;
+}
+
+function buildTournamentRound(roundNumber, entrants, oldRound = null) {
+  const cleanEntrants = Array.isArray(entrants) ? entrants.map(item => safeText(item, '', 80)).filter(Boolean) : [];
+  const matches = [];
+  const pairCount = Math.floor(cleanEntrants.length / 2);
+  for (let index = 0; index < pairCount; index += 1) {
+    const teamAId = cleanEntrants[index] || '';
+    const teamBId = cleanEntrants[cleanEntrants.length - 1 - index] || '';
+    const id = `r${roundNumber}m${index + 1}`;
+    const oldMatch = oldRound && Array.isArray(oldRound.matches)
+      ? oldRound.matches.find(match => safeText(match.id, '', 80) === id && safeText(match.teamAId, '', 80) === teamAId && safeText(match.teamBId, '', 80) === teamBId)
+      : null;
+    matches.push(oldMatch ? { ...oldMatch } : {
+      id,
+      teamAId,
+      teamBId,
+      scoreA: '',
+      scoreB: '',
+      winnerId: '',
+      status: teamAId && teamBId ? 'pending' : 'empty',
+    });
+  }
+  if (cleanEntrants.length % 2 === 1) {
+    const teamAId = cleanEntrants[pairCount] || '';
+    const id = `r${roundNumber}m${matches.length + 1}`;
+    const oldMatch = oldRound && Array.isArray(oldRound.matches)
+      ? oldRound.matches.find(match => safeText(match.id, '', 80) === id && safeText(match.teamAId, '', 80) === teamAId && !safeText(match.teamBId, '', 80))
+      : null;
+    matches.push(oldMatch ? { ...oldMatch } : {
+      id,
+      teamAId,
+      teamBId: '',
+      scoreA: '',
+      scoreB: '',
+      winnerId: teamAId,
+      status: 'bye',
+    });
+  }
+  return {
+    id: `r${roundNumber}`,
+    name: cleanEntrants.length <= 2 ? '决赛' : `第 ${roundNumber} 轮`,
+    index: roundNumber,
+    matches,
+  };
+}
+
+function recomputeTournamentAdvancement(snapshot) {
+  const tournament = snapshot.tournament && typeof snapshot.tournament === 'object'
+    ? snapshot.tournament
+    : { status: 'empty', championId: '', rounds: [] };
+  if (tournament.type === 'bandle_defense') return snapshot;
+  if (!Array.isArray(tournament.rounds) || !tournament.rounds.length) {
+    tournament.status = 'empty';
+    tournament.championId = '';
+    tournament.rounds = [];
+    snapshot.tournament = tournament;
+    return snapshot;
+  }
+
+  tournament.status = 'running';
+  tournament.championId = '';
+  for (let roundIndex = 0; roundIndex < tournament.rounds.length; roundIndex += 1) {
+    const round = tournament.rounds[roundIndex] || {};
+    round.matches = Array.isArray(round.matches) ? round.matches : [];
+    round.matches.forEach(normalizeTournamentMatchState);
+    const allDone = round.matches.length > 0 && round.matches.every(match =>
+      ['completed', 'bye'].includes(match.status) && safeText(match.winnerId, '', 80)
+    );
+    if (!allDone) {
+      tournament.rounds = tournament.rounds.slice(0, roundIndex + 1);
+      break;
+    }
+    const winners = round.matches.map(match => safeText(match.winnerId, '', 80)).filter(Boolean);
+    if (winners.length <= 1) {
+      tournament.status = 'completed';
+      tournament.championId = winners[0] || '';
+      tournament.rounds = tournament.rounds.slice(0, roundIndex + 1);
+      break;
+    }
+    const oldNextRound = tournament.rounds[roundIndex + 1];
+    tournament.rounds[roundIndex + 1] = buildTournamentRound(roundIndex + 2, winners, oldNextRound);
+  }
+  snapshot.tournament = tournament;
+  return snapshot;
+}
+
+function recordTournamentMatchScore(snapshot, payload = {}) {
+  const tournament = snapshot.tournament && typeof snapshot.tournament === 'object' ? snapshot.tournament : null;
+  if (!tournament || !Array.isArray(tournament.rounds) || !tournament.rounds.length) {
+    throw new Error('当前没有可记录比分的赛程');
+  }
+  if (tournament.type === 'bandle_defense') {
+    throw new Error('班德尔保卫战比分暂不支持多人端 command 同步，请使用裁判端本地流程');
+  }
+  const matchId = safeText(payload.matchId, '', 80);
+  const roundId = safeText(payload.roundId, '', 80);
+  let targetMatch = null;
+  tournament.rounds.some(round => {
+    if (roundId && safeText(round.id, '', 80) !== roundId) return false;
+    targetMatch = Array.isArray(round.matches)
+      ? round.matches.find(match => safeText(match.id, '', 80) === matchId)
+      : null;
+    return Boolean(targetMatch);
+  });
+  if (!targetMatch) throw new Error('未找到目标赛程场次');
+  const teamAId = safeText(targetMatch.teamAId, '', 80);
+  const teamBId = safeText(targetMatch.teamBId, '', 80);
+  if (!teamAId || !teamBId) throw new Error('目标场次无效或为轮空场次');
+  const scoreA = normalizeTournamentScore(payload.scoreA);
+  const scoreB = normalizeTournamentScore(payload.scoreB);
+  if (scoreA === scoreB) throw new Error('淘汰赛比分不能相同，请录入胜负结果');
+  const computedWinnerId = scoreA > scoreB ? teamAId : teamBId;
+  const requestedWinnerId = safeText(payload.winnerTeamId || payload.winnerId, '', 80);
+  if (requestedWinnerId && requestedWinnerId !== computedWinnerId) {
+    throw new Error('胜者与比分结果不一致');
+  }
+  targetMatch.scoreA = scoreA;
+  targetMatch.scoreB = scoreB;
+  targetMatch.winnerId = computedWinnerId;
+  targetMatch.status = 'completed';
+  recomputeTournamentAdvancement(snapshot);
+  return snapshot;
+}
+
 function playerById(snapshot = {}, playerId = '') {
   const cleanPlayerId = safeText(playerId, '', 80);
   return Array.isArray(snapshot.players)
@@ -1165,6 +1323,9 @@ function applyEventToSnapshot(snapshot, event) {
         return window;
       });
     }
+  }
+  if (event.type === EVENT_TYPES.MATCH_SCORE_RECORDED) {
+    recordTournamentMatchScore(next, payload);
   }
   if (event.type === EVENT_TYPES.REFEREE_RULING_FORCED) {
     next.lastRefereeRuling = {

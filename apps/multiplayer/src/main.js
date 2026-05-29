@@ -1758,10 +1758,12 @@
     if (Hexcore2.roomEventSource && Hexcore2.roomEventSource.readyState !== 2) return;
     if (roomEventStreamConnecting) return;
     roomEventStreamConnecting = true;
-    const view = session.role === 'captain' ? 'captain' : 'viewer';
+    const view = session.role === 'captain'
+      ? 'captain'
+      : (session.role === 'referee' ? 'referee' : 'viewer');
     const params = new URLSearchParams({ view });
     try {
-      if (session.role === 'captain') {
+      if (session.role === 'captain' || session.role === 'referee') {
         const streamToken = await requestRoomStreamToken(session);
         params.set('streamToken', streamToken);
       }
@@ -4695,7 +4697,7 @@
       Hexcore2.ui.render();
     },
 
-    saveTournamentScore(roundId, matchId) {
+    async saveTournamentScore(roundId, matchId, options = {}) {
       const tournament = Hexcore2.state.tournament || {};
       if (tournament.type === 'bandle_defense') {
         this.saveBandleDefenseScore(roundId, matchId);
@@ -4724,10 +4726,25 @@
         return;
       }
 
+      const winnerTeamId = scoreA > scoreB ? match.teamAId : match.teamBId;
+      try {
+        await submitRoomCommand('RecordMatchScore', {
+          roundId,
+          matchId,
+          scoreA,
+          scoreB,
+          winnerTeamId,
+        }, options);
+      } catch (error) {
+        Hexcore2.eventStore.append('保存比分失败', error && error.message ? error.message : String(error), 'warn');
+        Hexcore2.ui.render();
+        return;
+      }
+
       snapshot(`保存赛程比分前：${match.id}`);
       match.scoreA = scoreA;
       match.scoreB = scoreB;
-      match.winnerId = scoreA > scoreB ? match.teamAId : match.teamBId;
+      match.winnerId = winnerTeamId;
       match.status = 'completed';
       recomputeTournamentAdvancement();
       Hexcore2.eventStore.append(

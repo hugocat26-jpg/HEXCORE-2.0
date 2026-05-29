@@ -165,7 +165,7 @@ function createTournamentStore(options = {}) {
 }
 
 function projectionOptionsFromRequest(req, parsed, store, tournamentId, view, options = {}) {
-  if (view !== 'captain') return {};
+  if (view !== 'captain' && view !== 'referee') return {};
   const streamToken = String(parsed.searchParams.get('streamToken') || '').trim();
   let binding = null;
   if (options.requireStreamToken) {
@@ -178,9 +178,17 @@ function projectionOptionsFromRequest(req, parsed, store, tournamentId, view, op
       : store.getSessionBinding(sessionTokenFromRequest(req, parsed), tournamentId);
   }
   if (!binding) {
-    const error = new Error(options.requireStreamToken || streamToken ? 'streamToken 无效或已过期，请重新加入房间' : '需要有效队长 sessionToken 才能读取队长投影');
+    const error = new Error(options.requireStreamToken || streamToken ? 'streamToken 无效或已过期，请重新加入房间' : `需要有效${view === 'referee' ? '裁判' : '队长'} sessionToken 才能读取${view === 'referee' ? '裁判' : '队长'}投影`);
     error.statusCode = 401;
     throw error;
+  }
+  if (view === 'referee') {
+    if (![ROLES.REFEREE, ROLES.TOURNAMENT_ADMIN, ROLES.SUPER_ADMIN].includes(binding.role)) {
+      const error = new Error('当前身份无权读取裁判投影');
+      error.statusCode = 403;
+      throw error;
+    }
+    return { teamId: binding.teamId || '' };
   }
   if (binding.role !== ROLES.CAPTAIN || !binding.teamId) {
     const error = new Error('当前身份无权读取队长投影');

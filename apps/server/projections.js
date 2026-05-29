@@ -39,6 +39,7 @@ const VIEW_TYPES = Object.freeze({
   PUBLIC: 'public',
   VIEWER: 'viewer',
   CAPTAIN: 'captain',
+  REFEREE: 'referee',
 });
 
 function clone(value) {
@@ -59,6 +60,7 @@ function normalizeProjectionView(view) {
   const normalized = String(view || VIEW_TYPES.PUBLIC).trim().toLowerCase();
   if (normalized === ROLES.VIEWER || normalized === VIEW_TYPES.VIEWER) return VIEW_TYPES.VIEWER;
   if (normalized === ROLES.CAPTAIN || normalized === VIEW_TYPES.CAPTAIN) return VIEW_TYPES.CAPTAIN;
+  if (normalized === ROLES.REFEREE || normalized === VIEW_TYPES.REFEREE) return VIEW_TYPES.REFEREE;
   if (normalized === VIEW_TYPES.PUBLIC) return VIEW_TYPES.PUBLIC;
   throw new Error('未知只读投影视图');
 }
@@ -265,7 +267,24 @@ function publicRoundIncome(income = null) {
 }
 
 function publicTournament(tournament = null, view = VIEW_TYPES.PUBLIC, options = {}) {
-  if (view !== VIEW_TYPES.CAPTAIN || !options.teamId || !tournament || typeof tournament !== 'object') return undefined;
+  if (!tournament || typeof tournament !== 'object') return undefined;
+  if (view === VIEW_TYPES.REFEREE) {
+    const rounds = Array.isArray(tournament.rounds) ? tournament.rounds.map(round => ({
+      id: String(round.id || '').trim().slice(0, 80),
+      name: String(round.name || '').trim().slice(0, 40),
+      index: Number(round.index) || 0,
+      pairingMode: String(round.pairingMode || tournament.pairingMode || '').trim().slice(0, 40),
+      matches: Array.isArray(round.matches) ? round.matches.map(publicTournamentMatch) : [],
+    })) : [];
+    return {
+      type: String(tournament.type || '').trim().slice(0, 40),
+      status: String(tournament.status || (rounds.length ? 'running' : 'empty')).trim().slice(0, 40),
+      pairingMode: String(tournament.pairingMode || '').trim().slice(0, 40),
+      championId: String(tournament.championId || '').trim().slice(0, 80),
+      rounds,
+    };
+  }
+  if (![VIEW_TYPES.CAPTAIN, VIEW_TYPES.VIEWER].includes(view) || !options.teamId) return undefined;
   const teamId = String(options.teamId || '').trim();
   const rounds = Array.isArray(tournament.rounds) ? tournament.rounds.map(round => {
     const matches = Array.isArray(round.matches)
@@ -414,9 +433,12 @@ function projectEvent(event, view = VIEW_TYPES.PUBLIC) {
 function createReadOnlyProjection(state, viewInput = VIEW_TYPES.PUBLIC, options = {}) {
   const view = normalizeProjectionView(viewInput);
   const perspectiveTeamId = resolvePerspectiveTeamId(state.snapshot || {}, options.teamId);
+  const role = view === VIEW_TYPES.CAPTAIN
+    ? ROLES.CAPTAIN
+    : (view === VIEW_TYPES.REFEREE ? ROLES.REFEREE : ROLES.VIEWER);
   return {
     view,
-    role: view === VIEW_TYPES.CAPTAIN ? ROLES.CAPTAIN : ROLES.VIEWER,
+    role,
     readonly: true,
     canSubmitCommands: false,
     perspective: {
