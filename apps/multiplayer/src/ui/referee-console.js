@@ -375,6 +375,34 @@
     `;
   }
 
+  function joinGateAccessPanel(apiBase) {
+    const location = global.location || {};
+    const pageUrl = String(location.href || '').replace(/[?#].*$/, '') || 'http://裁判电脑IP:4186/';
+    const hostname = String(location.hostname || '').trim();
+    const isLocalHost = !hostname || /^(localhost|127\.0\.0\.1)$/.test(hostname);
+    const apiText = String(apiBase || '').trim() || 'http://裁判电脑IP:4196';
+    const recommendedPage = isLocalHost ? 'http://裁判电脑IP:4186/' : pageUrl;
+    const recommendedApi = isLocalHost ? 'http://裁判电脑IP:4196' : apiText;
+    return `
+      <div class="join-access-panel" aria-label="现场访问检查">
+        <div class="join-access-head">
+          <div>
+            <strong>现场访问检查</strong>
+            <span>${isLocalHost ? '当前是本机地址，客户电脑和手机不能直接使用 127.0.0.1。' : '当前页面已使用可分发地址，请确认 API 地址同样可访问。'}</span>
+          </div>
+          <button class="subtle-btn" onclick="window.hexcoreUI.copyJoinGateAccessText()">复制访问说明</button>
+        </div>
+        <div class="join-access-grid">
+          <div><span>当前页面</span><code>${escapeHtml(pageUrl)}</code></div>
+          <div><span>当前 API</span><code>${escapeHtml(apiText)}</code></div>
+          <div><span>推荐页面</span><code>${escapeHtml(recommendedPage)}</code></div>
+          <div><span>推荐 API</span><code>${escapeHtml(recommendedApi)}</code></div>
+        </div>
+        <p>局域网演示时，先在裁判电脑启动页面 4186 和 API 4196；队长或观众设备需要连接同一个 Wi-Fi，并使用裁判电脑的局域网 IP。</p>
+      </div>
+    `;
+  }
+
   function joinGatePage() {
     const apiBase = (Hexcore2.actions && Hexcore2.actions.recentMultiplayerApiBase && Hexcore2.actions.recentMultiplayerApiBase()) || '';
     return `
@@ -419,6 +447,7 @@
               </div>
             </div>
           </div>
+          ${joinGateAccessPanel(apiBase)}
           ${createdRoomPanel()}
           <div class="empty-log">已加入的会话会保存在本机；需要切换身份时可清理浏览器本地数据后重新加入。</div>
           ${joinGateMessagePanel()}

@@ -1343,6 +1343,27 @@
     return Boolean(ok);
   }
 
+  function joinGateAccessText() {
+    const location = global.location || {};
+    const pageUrl = String(location.href || '').replace(/[?#].*$/, '') || 'http://裁判电脑IP:4186/';
+    const hostname = String(location.hostname || '').trim();
+    const isLocalHost = !hostname || /^(localhost|127\.0\.0\.1)$/.test(hostname);
+    const apiBase = recentMultiplayerApiBase();
+    const apiText = String(apiBase || '').trim() || 'http://裁判电脑IP:4196';
+    const recommendedPage = isLocalHost ? 'http://裁判电脑IP:4186/' : pageUrl;
+    const recommendedApi = isLocalHost ? 'http://裁判电脑IP:4196' : apiText;
+    return [
+      'HEXCORE 2.0 多人端访问说明',
+      `当前页面：${pageUrl}`,
+      `当前 API：${apiText}`,
+      `推荐页面：${recommendedPage}`,
+      `推荐 API：${recommendedApi}`,
+      '局域网演示：队长或观众设备需要和裁判电脑连接同一个 Wi-Fi。',
+      '端口说明：页面端口 4186，API 端口 4196。',
+      '注意：不要把 127.0.0.1 分发给其它设备。',
+    ].join('\n');
+  }
+
   function applyTeamProjection(teams) {
     if (!Array.isArray(teams) || !teams.length) return false;
     let changed = false;
@@ -1985,6 +2006,12 @@
     },
 
     recentMultiplayerApiBase,
+
+    async copyJoinGateAccessText() {
+      const ok = await copyTextToClipboard(joinGateAccessText());
+      Hexcore2.eventStore.append(ok ? '访问说明已复制' : '访问说明复制失败', ok ? '已复制页面和 API 地址说明' : '当前浏览器不允许访问剪贴板，请手动复制页面上的地址', ok ? 'success' : 'warn');
+      Hexcore2.ui.render();
+    },
 
     dismissRoomWelcome() {
       const session = multiplayerSession();

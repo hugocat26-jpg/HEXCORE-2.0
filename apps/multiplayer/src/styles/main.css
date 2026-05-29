@@ -764,6 +764,72 @@ body:has(.join-gate-page) {
   line-height: 1.7;
 }
 
+.join-access-panel {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+  padding: 14px;
+  border: 1px solid rgba(37, 199, 218, 0.24);
+  border-radius: 8px;
+  background: rgba(7, 18, 25, 0.64);
+}
+
+.join-access-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.join-access-head div {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.join-access-head strong {
+  color: var(--cyan);
+  font-size: 15px;
+}
+
+.join-access-head span,
+.join-access-panel p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.join-access-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.join-access-grid div {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+  padding: 8px;
+  border: 1px solid var(--line-soft);
+  border-radius: 7px;
+  background: rgba(5, 12, 17, 0.5);
+}
+
+.join-access-grid span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.join-access-grid code {
+  overflow: hidden;
+  color: var(--text);
+  font-family: "Consolas", "SFMono-Regular", monospace;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .created-room-panel {
   display: grid;
   gap: 14px;
@@ -967,9 +1033,15 @@ body:has(.join-gate-page) {
   }
 
   .join-gate-grid,
+  .join-access-grid,
   .room-code-grid,
   .captain-code-list {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .join-access-head {
+    align-items: stretch;
+    flex-direction: column;
   }
 
   .created-room-head {
