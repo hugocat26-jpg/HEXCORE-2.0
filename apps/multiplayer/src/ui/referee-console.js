@@ -2636,6 +2636,15 @@
     function captainsForTeamsPage() {
       return Hexcore2.state.captains;
     }
+    function teamPermissionState(captain, isOwnCaptainTeam) {
+      if (isReadonlyClient()) return { label: '观众只读', detail: '可查看公开阵容，不可编辑', className: 'readonly' };
+      if (isCaptainClient()) {
+        return isOwnCaptainTeam
+          ? { label: '本队可编辑', detail: '仅队伍名称可改，队员归属只读', className: 'own' }
+          : { label: '其它队伍只读', detail: '可查看阵容，不可编辑', className: 'readonly' };
+      }
+      return { label: '裁判可管理', detail: '可修正队伍、顺位和成员', className: 'admin' };
+    }
     const visibleCaptains = captainsForTeamsPage();
     return `
       ${pageHeader(isCaptainClient() || isReadonlyClient() ? '队伍总览' : '队伍管理', isReadonlyClient() ? '观众端可查看全部队伍公开阵容，只读不可编辑。' : (isCaptainClient() ? '队长端可查看全部队伍，只有自己的队伍名称可编辑。' : '裁判可调整队伍、切换当前队伍、重命名队伍并处理队员归属。'))}
@@ -2669,6 +2678,7 @@
             const issues = teamIssues(captain);
             const repairableIssues = issues.filter(issue => issue.fixable);
             const isOwnCaptainTeam = isCaptainClient() && captain.id === clientTeamId();
+            const permission = teamPermissionState(captain, isOwnCaptainTeam);
             const backfillPlayers = availablePlayers.filter(player =>
               !Hexcore2.selectors.isCaptainPlayer(player.id)
               && (!goldShopMode || player.camp === Hexcore2.selectors.captainCamp(captain.id))
@@ -2682,6 +2692,10 @@
                   <small>队伍名称</small>
                   <input id="captain-name-${escapeHtml(captain.id)}" value="${escapeHtml(captain.name)}" aria-label="${escapeHtml(captain.name)} 队伍名称" ${isReadonlyClient() || (isCaptainClient() && !isOwnCaptainTeam) ? 'readonly' : ''}>
                 </label>
+                <div class="team-permission-badge ${escapeHtml(permission.className)}">
+                  <strong>${escapeHtml(permission.label)}</strong>
+                  <small>${escapeHtml(permission.detail)}</small>
+                </div>
               </div>
               <p>状态：<em class="${status.className}">${escapeHtml(status.label)}</em></p>
               <p>顺位记录：${escapeHtml(captain.record)} / 基础顺位第 ${basePosition}</p>

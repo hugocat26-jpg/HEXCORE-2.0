@@ -3577,6 +3577,16 @@
     async saveCaptainName(captainId, options = {}) {
       const captain = Hexcore2.state.captains.find(item => item.id === captainId);
       if (!captain) return;
+      if (isViewerClient()) {
+        rejectViewerClient('队伍改名失败');
+        Hexcore2.ui.render();
+        return;
+      }
+      if (isCaptainClient() && captainId !== clientTeamId()) {
+        Hexcore2.eventStore.append('队伍改名失败', '队长端只能修改自己的队伍名称', 'warn');
+        Hexcore2.ui.render();
+        return;
+      }
       const input = document.getElementById(`captain-name-${captainId}`);
       const nextName = input ? input.value : '';
       if (!nextName || !nextName.trim()) {

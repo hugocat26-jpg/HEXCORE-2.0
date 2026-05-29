@@ -5490,8 +5490,8 @@ function testHexcoreLibraryResponsiveStyles() {
   assert(css.includes('.hex-library-icon') && css.includes('flex: 0 0 64px;'), '海克斯库图标容器应固定尺寸，避免随标题压缩变形');
   assert(css.includes('.hex-library-desc > span') && css.includes('-webkit-line-clamp: 3'), '海克斯库描述应在卡片内摘要显示');
   assert(css.includes('.hex-detail-backdrop') && css.includes('.hex-detail-modal') && css.includes('overflow-y: auto'), '海克斯详情应使用固定尺寸弹窗并在正文区域滚动');
-  assert(css.includes('.hex-draw-actions') && css.includes('grid-template-columns: repeat(3, minmax(0, 1fr));'), '海克斯候选卡的详情、刷新、选择按钮应固定同一行三列显示');
-  assert(css.includes('.hex-draw-actions > button') && css.includes('min-height: 36px;') && css.includes('text-overflow: ellipsis;'), '海克斯候选卡底部按钮应统一尺寸、字重和溢出处理');
+  assert(css.includes('.hex-draw-actions') && css.includes('grid-template-columns: minmax(64px, 0.72fr) minmax(92px, 1fr);'), '海克斯候选卡的详情、刷新、选择按钮应使用两行自适应布局，避免中文按钮被截断');
+  assert(css.includes('.hex-draw-actions > button') && css.includes('min-height: 36px;') && css.includes('overflow-wrap: anywhere;'), '海克斯候选卡底部按钮应统一尺寸、字重，并允许中文按钮完整换行显示');
   assert(
     css.includes('.cannon-choice-grid button') && css.includes('display: inline-flex;')
     && css.includes('flex-direction: row;') && css.includes('justify-content: center;')
@@ -5499,7 +5499,7 @@ function testHexcoreLibraryResponsiveStyles() {
     && css.includes('white-space: nowrap;'),
     '大炮已充能选择按钮应使用单行横向居中布局，避免文字贴上边或换行'
   );
-  assert(css.includes('.hex-draw-actions .hex-detail-trigger') && css.includes('.hex-select-btn') && css.includes('linear-gradient(180deg, #12d9ff, #00aee4)'), '海克斯候选卡详情/刷新/选择按钮应共用按钮基线，并保留选择按钮主操作强调');
+  assert(css.includes('.hex-draw-actions .hex-detail-trigger') && css.includes('.hex-select-btn') && css.includes('grid-column: 1 / -1;') && css.includes('linear-gradient(180deg, #12d9ff, #00aee4)'), '海克斯候选卡详情/刷新/选择按钮应共用按钮基线，并保留选择按钮跨列主操作强调');
   assert(css.includes('.workspace > .workspace-main') && css.includes('overflow-y: auto;'), '实时抽选主内容超出视口高度时应在内容容器内纵向滚动');
   assert(uiSource.includes('function hexcoreIcon') && uiSource.includes('assets/hex-icons/${safeId}.png') && uiSource.includes('hex-svg-fallback'), '海克斯图标应优先加载同名本地 PNG，并保留 SVG 兜底');
   assert(
@@ -5606,6 +5606,7 @@ function testHexcorePngIconAssets() {
 function testMultiplayerCaptainUiReusesRefereeScreensWithScopedAccess() {
   const ui = fs.readFileSync(path.join(root, 'apps/multiplayer/src/ui/referee-console.js'), 'utf8');
   const main = fs.readFileSync(path.join(root, 'apps/multiplayer/src/main.js'), 'utf8');
+  const css = fs.readFileSync(path.join(root, 'apps/multiplayer/src/styles/main.css'), 'utf8');
   assert(
     ui.includes('clientRole()') && ui.includes('isCaptainClient()') && ui.includes('clientTeamId()'),
     '多人队长端应通过客户端角色和队伍绑定裁剪裁判端页面，而不是新建另一套 UI',
@@ -5644,6 +5645,10 @@ function testMultiplayerCaptainUiReusesRefereeScreensWithScopedAccess() {
     ui.includes('captainsForTeamsPage()')
     && ui.includes('captain-readonly-team')
     && ui.includes('captain-own-team')
+    && ui.includes('teamPermissionState(captain, isOwnCaptainTeam)')
+    && ui.includes('本队可编辑')
+    && ui.includes('其它队伍只读')
+    && ui.includes('观众只读')
     && ui.includes('只有自己的队伍名称可编辑')
     && ui.includes('captainClientReadonlyNotice'),
     '队伍页应复用裁判端队伍卡，队长端可查看全部队伍但只能编辑自己队伍',
@@ -5718,6 +5723,7 @@ function testMultiplayerCaptainUiReusesRefereeScreensWithScopedAccess() {
 function testMultiplayerViewerUiIsReadonlyCurrentCaptainPerspective() {
   const ui = fs.readFileSync(path.join(root, 'apps/multiplayer/src/ui/referee-console.js'), 'utf8');
   const main = fs.readFileSync(path.join(root, 'apps/multiplayer/src/main.js'), 'utf8');
+  const css = fs.readFileSync(path.join(root, 'apps/multiplayer/src/styles/main.css'), 'utf8');
   assert(
     ui.includes("role === 'viewer' ? 'viewer'")
     && ui.includes('isViewerClient()')
@@ -5756,6 +5762,16 @@ function testMultiplayerViewerUiIsReadonlyCurrentCaptainPerspective() {
     main.includes('rejectViewerClient(actionLabel)')
     && main.includes('观众端只读，无法操作'),
     '观众端写操作不能只靠隐藏按钮，动作函数也应拒绝 viewer 调用',
+  );
+  assert(
+    main.includes("rejectViewerClient('队伍改名失败')")
+    && main.includes('队长端只能修改自己的队伍名称')
+    && css.includes('.team-permission-badge')
+    && css.includes('.team-permission-badge.own')
+    && css.includes('.team-permission-badge.readonly')
+    && css.includes('line-height: 1.3')
+    && css.includes('.captain-name-field input[readonly]'),
+    '队伍页应在 UI 和动作层同时强化队长仅能改本队、观众完全只读',
   );
 }
 
