@@ -14,7 +14,7 @@ const {
   RULES_VERSION,
   createCommand,
 } = require('../../packages/shared');
-const { acceptCommandAsEvent, appendEvent } = require('../../packages/rules');
+const { acceptCommandAsEvent, appendEvent, resolveExpiredTurnTimer } = require('../../packages/rules');
 const { createAuthoritativeCommandPayload } = require('./shop-service');
 
 const host = process.env.HOST || '0.0.0.0';
@@ -33,11 +33,14 @@ const commandEventMap = {
   [COMMAND_TYPES.RENAME_TEAM]: EVENT_TYPES.TEAM_RENAMED,
   [COMMAND_TYPES.USE_HEXCORE]: EVENT_TYPES.HEXCORE_USED,
   [COMMAND_TYPES.SKIP_TURN]: EVENT_TYPES.TURN_SKIPPED,
+  [COMMAND_TYPES.UPDATE_TURN_TIMERS]: EVENT_TYPES.TURN_TIMERS_UPDATED,
   [COMMAND_TYPES.PAUSE_TOURNAMENT]: EVENT_TYPES.TOURNAMENT_PAUSED,
   [COMMAND_TYPES.RESUME_TOURNAMENT]: EVENT_TYPES.TOURNAMENT_RESUMED,
   [COMMAND_TYPES.FORCE_REFEREE_RULING]: EVENT_TYPES.REFEREE_RULING_FORCED,
   [COMMAND_TYPES.ROLLBACK_TO_VERSION]: EVENT_TYPES.STATE_ROLLED_BACK,
   [COMMAND_TYPES.RECORD_MATCH_SCORE]: EVENT_TYPES.MATCH_SCORE_RECORDED,
+  [COMMAND_TYPES.ACTIVATE_SUBSTITUTE]: EVENT_TYPES.SUBSTITUTE_ACTIVATED,
+  [COMMAND_TYPES.REPLACE_WITH_SUBSTITUTE]: EVENT_TYPES.PLAYER_REPLACED_BY_SUBSTITUTE,
 };
 
 function sendJson(res, status, body) {
@@ -46,7 +49,7 @@ function sendJson(res, status, body) {
     'Cache-Control': 'no-store',
     'X-Content-Type-Options': 'nosniff',
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
+    'Access-Control-Allow-Methods': 'GET,POST,DELETE,OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type,Authorization',
   });
   res.end(JSON.stringify(body));
@@ -151,21 +154,33 @@ function publicSnapshot(state) {
   return createReadOnlyProjection(state, 'public');
 }
 
+async function resolveTimerBeforeRead(store, tournamentId, state = null, now = new Date().toISOString()) {
+  const current = state || await store.getTournament(tournamentId);
+  if (!current) return null;
+  if (current.snapshot && current.snapshot.roomStatus === 'archived') return current;
+  const resolved = resolveExpiredTurnTimer(current, now);
+  if (resolved && resolved.stateVersion !== current.stateVersion) {
+    return store.replaceTournament(tournamentId, resolved);
+  }
+  return current;
+}
+
 function createTournamentStore(options = {}) {
   if (options.store) return options.store;
   const postgresUrl = String(options.postgresUrl || process.env.HEXCORE_POSTGRES_URL || '').trim();
   if (postgresUrl) {
     const { PostgresTournamentStore } = require('./postgres-store');
-    return PostgresTournamentStore.create({ connectionString: postgresUrl, sessionTtlMs: options.sessionTtlMs });
+    return PostgresTournamentStore.create({ connectionString: postgresUrl, sessionTtlMs: options.sessionTtlMs, maxRooms: options.maxRooms });
   }
   const sqliteFile = String(options.sqliteFile || process.env.HEXCORE_SQLITE_FILE || '').trim();
   if (sqliteFile) {
     const { SqliteTournamentStore } = require('./sqlite-store');
-    return new SqliteTournamentStore({ sqliteFile, sessionTtlMs: options.sessionTtlMs });
+    return new SqliteTournamentStore({ sqliteFile, sessionTtlMs: options.sessionTtlMs, maxRooms: options.maxRooms });
   }
   return new MemoryTournamentStore({
     dataFile: options.dataFile || process.env.HEXCORE_DATA_FILE || '',
     sessionTtlMs: options.sessionTtlMs,
+    maxRooms: options.maxRooms,
   });
 }
 
@@ -219,7 +234,7 @@ function createServer(options = {}) {
           'Cache-Control': 'no-store',
           'X-Content-Type-Options': 'nosniff',
           'Access-Control-Allow-Origin': '*',
-          'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
+          'Access-Control-Allow-Methods': 'GET,POST,DELETE,OPTIONS',
           'Access-Control-Allow-Headers': 'Content-Type,Authorization',
         });
         res.end();
@@ -233,6 +248,15 @@ function createServer(options = {}) {
           rulesVersion: RULES_VERSION,
           startedAt,
           uptimeSeconds: Math.max(0, Math.round((Date.now() - startedAtMs) / 1000)),
+          runtime: store.publicStats ? await store.publicStats() : { storage: 'unknown' },
+        });
+        return;
+      }
+
+      if (req.method === 'GET' && pathname === '/api/tournaments') {
+        sendJson(res, 200, {
+          ok: true,
+          rooms: store.listRooms ? await store.listRooms() : [],
           runtime: store.publicStats ? await store.publicStats() : { storage: 'unknown' },
         });
         return;
@@ -255,9 +279,35 @@ function createServer(options = {}) {
         return;
       }
 
+      const archiveTournamentId = req.method === 'POST' ? matchTournamentRoute(pathname, '/archive') : null;
+      if (archiveTournamentId) {
+        const body = await readJson(req);
+        const sessionToken = bearerSessionTokenFromRequest(req) || String(body.sessionToken || '').trim();
+        const room = store.archiveTournament ? await store.archiveTournament(archiveTournamentId, sessionToken) : null;
+        if (!room) {
+          sendJson(res, 404, { ok: false, error: '赛事不存在' });
+          return;
+        }
+        sendJson(res, 200, { ok: true, room });
+        return;
+      }
+
+      const deleteTournamentMatch = req.method === 'DELETE' ? pathname.match(/^\/api\/tournaments\/([A-Za-z0-9._:-]{1,80})$/) : null;
+      if (deleteTournamentMatch) {
+        const body = await readJson(req);
+        const sessionToken = bearerSessionTokenFromRequest(req) || String(body.sessionToken || '').trim();
+        const room = store.deleteTournament ? await store.deleteTournament(deleteTournamentMatch[1], sessionToken) : null;
+        if (!room) {
+          sendJson(res, 404, { ok: false, error: '赛事不存在' });
+          return;
+        }
+        sendJson(res, 200, { ok: true, room });
+        return;
+      }
+
       const snapshotTournamentId = req.method === 'GET' ? matchTournamentRoute(pathname, '/snapshot') : null;
       if (snapshotTournamentId) {
-        const state = await store.getTournament(snapshotTournamentId);
+        const state = await resolveTimerBeforeRead(store, snapshotTournamentId);
         if (!state) {
           sendJson(res, 404, { ok: false, error: '赛事不存在' });
           return;
@@ -268,7 +318,7 @@ function createServer(options = {}) {
 
       const projectionTournamentId = req.method === 'GET' ? matchTournamentRoute(pathname, '/projection') : null;
       if (projectionTournamentId) {
-        const state = await store.getTournament(projectionTournamentId);
+        const state = await resolveTimerBeforeRead(store, projectionTournamentId);
         if (!state) {
           sendJson(res, 404, { ok: false, error: '赛事不存在' });
           return;
@@ -276,6 +326,21 @@ function createServer(options = {}) {
         const view = normalizeProjectionView(parsed.searchParams.get('view') || 'public');
         const projectionOptions = await projectionOptionsFromRequest(req, parsed, store, projectionTournamentId, view);
         sendJson(res, 200, { ok: true, tournament: createReadOnlyProjection(state, view, projectionOptions) });
+        return;
+      }
+
+      const timerResolveTournamentId = req.method === 'POST' ? matchTournamentRoute(pathname, '/timers/resolve') : null;
+      if (timerResolveTournamentId) {
+        const body = await readJson(req);
+        const sessionToken = bearerSessionTokenFromRequest(req) || String(body.sessionToken || '').trim();
+        const binding = await store.getSessionBinding(sessionToken, timerResolveTournamentId);
+        if (!binding) throw new Error('sessionToken 无效或已过期');
+        const state = await resolveTimerBeforeRead(store, timerResolveTournamentId);
+        const view = binding.role === ROLES.REFEREE ? 'referee' : (binding.role === ROLES.CAPTAIN ? 'captain' : 'viewer');
+        sendJson(res, 200, {
+          ok: true,
+          tournament: createReadOnlyProjection(state, view, { teamId: binding.teamId || '' }),
+        });
         return;
       }
 
@@ -316,7 +381,7 @@ function createServer(options = {}) {
       if (joinTournamentId) {
         const body = await readJson(req);
         const session = await store.joinTournament(joinTournamentId, body);
-        const state = await store.getTournament(joinTournamentId);
+        const state = await resolveTimerBeforeRead(store, joinTournamentId);
         sendJson(res, 200, { ok: true, session, tournament: publicSnapshot(state) });
         return;
       }
@@ -337,7 +402,7 @@ function createServer(options = {}) {
 
       const eventTournamentId = req.method === 'GET' ? matchTournamentRoute(pathname, '/events') : null;
       if (eventTournamentId) {
-        const state = await store.getTournament(eventTournamentId);
+        const state = await resolveTimerBeforeRead(store, eventTournamentId);
         if (!state) {
           sendJson(res, 404, { ok: false, error: '赛事不存在' });
           return;
@@ -362,7 +427,7 @@ function createServer(options = {}) {
 
       const commandTournamentId = req.method === 'POST' ? matchTournamentRoute(pathname, '/commands') : null;
       if (commandTournamentId) {
-        const state = await store.getTournament(commandTournamentId);
+        const state = await resolveTimerBeforeRead(store, commandTournamentId);
         if (!state) {
           sendJson(res, 404, { ok: false, error: '赛事不存在' });
           return;
@@ -370,6 +435,7 @@ function createServer(options = {}) {
         const body = await readJson(req);
         const binding = await store.getSessionBinding(body.sessionToken, commandTournamentId);
         if (!binding) throw new Error('sessionToken 无效或已过期');
+        if (store.assertRoomWritable) await store.assertRoomWritable(commandTournamentId);
         const command = createCommand({
           ...body.command,
           tournamentId: commandTournamentId,

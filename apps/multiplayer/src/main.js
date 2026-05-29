@@ -556,7 +556,9 @@
   }
 
   function eligibleHeavenlyOwnersForPlayer(player) {
-    if (!player || !player.camp) return [];
+    if (!player) return [];
+    if (Hexcore2.selectors.isCampMode && !Hexcore2.selectors.isCampMode()) return heavenlyOwners();
+    if (!player.camp) return [];
     return heavenlyOwners().filter(owner => Hexcore2.selectors.captainCamp(owner.id) === player.camp);
   }
 
@@ -1391,9 +1393,108 @@
     }
   }
 
+  async function fetchRoomList(apiBase) {
+    const base = String(apiBase || '').trim().replace(/\/+$/, '');
+    if (!base) throw new Error('请先填写服务地址');
+    const response = await fetch(`${base}/api/tournaments`, {
+      method: 'GET',
+      headers: { 'Accept': 'application/json' },
+    });
+    let payload = {};
+    try {
+      payload = await response.json();
+    } catch (error) {
+      throw new Error('服务返回格式异常，请确认服务地址填写的是 API 地址');
+    }
+    if (!response.ok || !payload || !payload.ok) {
+      throw new Error(payload && payload.error ? payload.error : '房间列表获取失败');
+    }
+    return payload;
+  }
+
+  function normalizeRoomListPayload(payload) {
+    const runtime = payload && payload.runtime && typeof payload.runtime === 'object' ? payload.runtime : {};
+    const rooms = Array.isArray(payload && payload.rooms) ? payload.rooms : [];
+    return {
+      level: 'success',
+      text: '房间列表已更新',
+      fetchedAt: new Date().toISOString(),
+      runtime: {
+        storage: String(runtime.storage || 'unknown').slice(0, 40),
+        activeRoomCount: Math.max(0, Number(runtime.activeRoomCount) || 0),
+        maxRooms: Math.max(0, Number(runtime.maxRooms) || 0),
+        roomCount: Math.max(0, Number(runtime.roomCount) || rooms.length),
+        tournamentCount: Math.max(0, Number(runtime.tournamentCount) || 0),
+        subscriberCount: Math.max(0, Number(runtime.subscriberCount) || 0),
+        postgresConnected: Boolean(runtime.postgresConnected),
+      },
+      rooms: rooms.map(room => ({
+        tournamentId: String(room.tournamentId || '').slice(0, 80),
+        name: String(room.name || room.tournamentId || '').slice(0, 80),
+        status: ['active', 'archived'].includes(String(room.status || '')) ? String(room.status) : 'active',
+        createdAt: String(room.createdAt || '').slice(0, 40),
+        updatedAt: String(room.updatedAt || '').slice(0, 40),
+        archivedAt: String(room.archivedAt || '').slice(0, 40),
+        teamCount: Math.max(0, Number(room.teamCount) || 0),
+        campMode: String(room.campMode || 'dual_camp').slice(0, 40),
+        pairingMode: String(room.pairingMode || '').slice(0, 40),
+        storage: String(room.storage || runtime.storage || 'unknown').slice(0, 40),
+        subscriberCount: Math.max(0, Number(room.subscriberCount) || 0),
+      })).filter(room => room.tournamentId).slice(0, 80),
+    };
+  }
+
   function applyTeamProjection(teams) {
     if (!Array.isArray(teams) || !teams.length) return false;
     let changed = false;
+    const projectedTeams = teams.map((team, index) => {
+      const teamId = String(team && (team.teamId || team.id) || '').trim();
+      if (!teamId) return null;
+      return {
+        ...team,
+        teamId,
+        name: String(team.name || `队伍${index + 1}`).trim(),
+        camp: String(team.camp || '').trim(),
+        team: Array.isArray(team.team) ? team.team.map(playerId => String(playerId || '')).filter(Boolean) : [],
+      };
+    }).filter(Boolean);
+    const projectedIds = projectedTeams.map(team => team.teamId);
+    const currentIds = Hexcore2.state.captains.map(captain => captain.id);
+    const shouldReplaceCaptains = projectedIds.length
+      && (projectedIds.length !== currentIds.length || projectedIds.some((id, index) => currentIds[index] !== id));
+    if (shouldReplaceCaptains) {
+      const existingById = new Map(Hexcore2.state.captains.map(captain => [captain.id, captain]));
+      Hexcore2.state.captains = projectedTeams.map((team, index) => {
+        const existing = existingById.get(team.teamId) || {};
+        const economy = existing.economy && typeof existing.economy === 'object'
+          ? { ...existing.economy }
+          : { gold: 0, roundState: {} };
+        if (team.economy && typeof team.economy === 'object') {
+          economy.gold = Math.max(0, Math.round(Number(team.economy.gold) || 0));
+        }
+        return {
+          ...existing,
+          id: team.teamId,
+          name: team.name || existing.name || `队伍${index + 1}`,
+          record: existing.record || '',
+          camp: team.camp || existing.camp || '',
+          team: team.team,
+          playerId: String(team.playerId || team.captainPlayerId || existing.playerId || '').trim(),
+          playerGameId: String(team.playerGameId || existing.playerGameId || '').trim(),
+          renameUsed: Object.prototype.hasOwnProperty.call(team, 'renameUsed') ? Boolean(team.renameUsed) : Boolean(existing.renameUsed),
+          economy,
+        };
+      });
+      Hexcore2.state.settings = Hexcore2.state.settings || {};
+      Hexcore2.state.settings.teamCount = Hexcore2.state.captains.length;
+      Hexcore2.state.settings.totalTeams = Hexcore2.state.captains.length;
+      Hexcore2.state.settings.teamCountCustomized = Hexcore2.state.captains.length !== 10;
+      Hexcore2.state.draft = Hexcore2.state.draft || {};
+      Hexcore2.state.draft.baseOrder = [...projectedIds];
+      Hexcore2.state.draft.currentOrder = [...projectedIds];
+      Hexcore2.state.draft.currentIndex = 0;
+      changed = true;
+    }
     teams.forEach(team => {
       const teamId = String(team && (team.teamId || team.id) || '').trim();
       const captain = teamId ? Hexcore2.state.captains.find(item => item.id === teamId) : null;
@@ -1575,12 +1676,17 @@
     Hexcore2.state.multiplayer.hexcoreActionWindows = windows;
     const heavenly = windows.find(item => item && item.active !== false && item.hexcoreId === 'heavenly-descent');
     if (heavenly) {
+      const eligibleOwnerIds = windows
+        .filter(item => item && item.active !== false && item.hexcoreId === 'heavenly-descent')
+        .map(item => String(item.teamId || item.captainId || '').trim())
+        .filter(Boolean);
       Hexcore2.state.draft.heavenlyWindow = {
         active: true,
         resolved: false,
         projectedFromServer: true,
         round: Number(heavenly.round) || Hexcore2.state.draft.round,
         captainId: String(heavenly.sourceTeamId || ''),
+        eligibleOwnerIds,
         playerId: '',
         slotId: String(heavenly.slotId || ''),
         price: 0,
@@ -1688,6 +1794,91 @@
     return previous !== JSON.stringify(Hexcore2.state.multiplayer.lastHungryWave || null);
   }
 
+  function normalizeSubstituteActionProjection(action) {
+    if (!action || typeof action !== 'object') return null;
+    const type = String(action.type || '').trim();
+    if (!type) return null;
+    return {
+      type,
+      teamId: String(action.teamId || '').trim(),
+      absentPlayerId: String(action.absentPlayerId || '').trim(),
+      substitutePlayerId: String(action.substitutePlayerId || action.playerId || '').trim(),
+      reason: String(action.reason || '').trim(),
+      resolvedAt: String(action.resolvedAt || '').trim(),
+    };
+  }
+
+  function applyLastSubstituteProjection(action) {
+    Hexcore2.state.multiplayer = Hexcore2.state.multiplayer || {};
+    const previous = JSON.stringify(Hexcore2.state.multiplayer.lastSubstituteAction || null);
+    const normalized = normalizeSubstituteActionProjection(action);
+    Hexcore2.state.multiplayer.lastSubstituteAction = normalized;
+    let changed = previous !== JSON.stringify(Hexcore2.state.multiplayer.lastSubstituteAction || null);
+    if (!normalized) return changed;
+    const substitute = Hexcore2.state.players.find(player => player.id === normalized.substitutePlayerId);
+    if (normalized.type === 'activate' && substitute) {
+      if (substitute.attendanceStatus !== 'confirmed') {
+        substitute.attendanceStatus = 'confirmed';
+        changed = true;
+      }
+      if (substitute.drawWeight !== 1) {
+        substitute.drawWeight = 1;
+        changed = true;
+      }
+      if (substitute.status !== 'disabled' && substitute.status !== 'available') {
+        substitute.status = 'available';
+        changed = true;
+      }
+    }
+    if (normalized.type === 'replace') {
+      const team = Hexcore2.state.captains.find(captain => captain.id === normalized.teamId);
+      const player = Hexcore2.state.players.find(item => item.id === normalized.absentPlayerId);
+      if (team && substitute) {
+        const members = Array.isArray(team.team) ? team.team : [];
+        const nextMembers = members.map(id => id === normalized.absentPlayerId ? normalized.substitutePlayerId : id);
+        if (!nextMembers.includes(normalized.substitutePlayerId)) nextMembers.push(normalized.substitutePlayerId);
+        const uniqueMembers = Array.from(new Set(nextMembers.filter(Boolean)));
+        if (JSON.stringify(team.team || []) !== JSON.stringify(uniqueMembers)) {
+          team.team = uniqueMembers;
+          changed = true;
+        }
+      }
+      if (player) {
+        if (player.status !== 'unavailable') {
+          player.status = 'unavailable';
+          changed = true;
+        }
+        if (player.attendanceStatus !== 'unavailable') {
+          player.attendanceStatus = 'unavailable';
+          changed = true;
+        }
+        if (player.teamId) {
+          player.teamId = '';
+          changed = true;
+        }
+      }
+      if (substitute) {
+        if (substitute.status !== 'drafted') {
+          substitute.status = 'drafted';
+          changed = true;
+        }
+        if (substitute.attendanceStatus !== 'confirmed') {
+          substitute.attendanceStatus = 'confirmed';
+          changed = true;
+        }
+        if (substitute.drawWeight !== 1) {
+          substitute.drawWeight = 1;
+          changed = true;
+        }
+        if (substitute.teamId !== normalized.teamId) {
+          substitute.teamId = normalized.teamId;
+          changed = true;
+        }
+      }
+    }
+    return changed;
+  }
+
   function applyTournamentProjection(tournament) {
     if (!tournament || typeof tournament !== 'object') return false;
     const previous = JSON.stringify(Hexcore2.state.tournament || {});
@@ -1698,16 +1889,118 @@
     return previous !== JSON.stringify(Hexcore2.state.tournament || {});
   }
 
+  function normalizeTimerSettingsProjection(settings) {
+    const source = settings && typeof settings === 'object' ? settings : {};
+    const timers = source.turnTimers && typeof source.turnTimers === 'object' ? source.turnTimers : {};
+    return {
+      hexcoreSeconds: Math.max(0, Math.min(3600, Math.round(Number(timers.hexcoreSeconds) || 0))),
+      shopSeconds: Math.max(0, Math.min(3600, Math.round(Number(timers.shopSeconds) || 0))),
+    };
+  }
+
+  function applySettingsProjection(settings) {
+    if (!settings || typeof settings !== 'object') return false;
+    Hexcore2.state.settings = Hexcore2.state.settings || {};
+    const previous = JSON.stringify({
+      teamCount: Hexcore2.state.settings.teamCount,
+      totalTeams: Hexcore2.state.settings.totalTeams,
+      playersPerTeam: Hexcore2.state.settings.playersPerTeam,
+      campMode: Hexcore2.state.settings.campMode,
+      pairingMode: Hexcore2.state.settings.pairingMode,
+      allowSubstitutes: Hexcore2.state.settings.allowSubstitutes,
+      initialGold: Hexcore2.state.settings.initialGold,
+      roundIncome: Hexcore2.state.settings.roundIncome,
+      refreshCosts: Hexcore2.state.settings.refreshCosts,
+      turnTimers: Hexcore2.state.settings.turnTimers,
+    });
+    if (Object.prototype.hasOwnProperty.call(settings, 'teamCount') || Object.prototype.hasOwnProperty.call(settings, 'totalTeams')) {
+      const teamCount = Math.max(6, Math.min(20, Math.round(Number(settings.teamCount || settings.totalTeams) || Hexcore2.state.settings.teamCount || 10)));
+      Hexcore2.state.settings.teamCount = teamCount;
+      Hexcore2.state.settings.totalTeams = teamCount;
+      Hexcore2.state.settings.teamCountCustomized = teamCount !== 10;
+    }
+    if (Object.prototype.hasOwnProperty.call(settings, 'playersPerTeam')) {
+      Hexcore2.state.settings.playersPerTeam = Math.max(2, Math.min(8, Math.round(Number(settings.playersPerTeam) || Hexcore2.state.settings.playersPerTeam || 5)));
+      Hexcore2.state.settings.teamSizeIncludesCaptain = true;
+    }
+    if (Object.prototype.hasOwnProperty.call(settings, 'campMode')) {
+      const campMode = String(settings.campMode || '').trim();
+      if (['dual_camp', 'no_camp'].includes(campMode)) Hexcore2.state.settings.campMode = campMode;
+    }
+    if (Object.prototype.hasOwnProperty.call(settings, 'pairingMode')) {
+      const pairingMode = String(settings.pairingMode || '').trim();
+      if (['camp_versus', 'random', 'manual'].includes(pairingMode)) Hexcore2.state.settings.pairingMode = pairingMode;
+    } else if (Hexcore2.state.settings.campMode === 'no_camp') {
+      Hexcore2.state.settings.pairingMode = 'random';
+    }
+    if (Object.prototype.hasOwnProperty.call(settings, 'allowSubstitutes')) {
+      Hexcore2.state.settings.allowSubstitutes = settings.allowSubstitutes !== false;
+    }
+    if (Object.prototype.hasOwnProperty.call(settings, 'initialGold')) {
+      Hexcore2.state.settings.initialGold = Math.max(0, Math.round(Number(settings.initialGold) || 0));
+    }
+    if (Object.prototype.hasOwnProperty.call(settings, 'roundIncome')) {
+      Hexcore2.state.settings.roundIncome = Math.max(0, Math.round(Number(settings.roundIncome) || 0));
+    }
+    if (Array.isArray(settings.refreshCosts)) {
+      Hexcore2.state.settings.refreshCosts = settings.refreshCosts.slice(0, 4).map(cost => Math.max(0, Math.round(Number(cost) || 0)));
+    }
+    Hexcore2.state.settings.turnTimers = normalizeTimerSettingsProjection(settings);
+    return previous !== JSON.stringify({
+      teamCount: Hexcore2.state.settings.teamCount,
+      totalTeams: Hexcore2.state.settings.totalTeams,
+      playersPerTeam: Hexcore2.state.settings.playersPerTeam,
+      campMode: Hexcore2.state.settings.campMode,
+      pairingMode: Hexcore2.state.settings.pairingMode,
+      allowSubstitutes: Hexcore2.state.settings.allowSubstitutes,
+      initialGold: Hexcore2.state.settings.initialGold,
+      roundIncome: Hexcore2.state.settings.roundIncome,
+      refreshCosts: Hexcore2.state.settings.refreshCosts,
+      turnTimers: Hexcore2.state.settings.turnTimers,
+    });
+  }
+
+  function normalizeActiveTurnTimerProjection(timer) {
+    if (!timer || typeof timer !== 'object') return null;
+    return {
+      timerId: String(timer.timerId || '').slice(0, 160),
+      phase: String(timer.phase || '').slice(0, 40),
+      teamId: String(timer.teamId || '').slice(0, 80),
+      round: Math.max(1, Number(timer.round) || 1),
+      startedAt: String(timer.startedAt || '').slice(0, 40),
+      deadlineAt: String(timer.deadlineAt || '').slice(0, 40),
+      graceDeadlineAt: String(timer.graceDeadlineAt || '').slice(0, 40),
+      durationMs: Math.max(0, Number(timer.durationMs) || 0),
+    };
+  }
+
+  function applyActiveTurnTimerProjection(timer) {
+    const previous = JSON.stringify(Hexcore2.state.activeTurnTimer || null);
+    Hexcore2.state.activeTurnTimer = normalizeActiveTurnTimerProjection(timer);
+    return previous !== JSON.stringify(Hexcore2.state.activeTurnTimer || null);
+  }
+
   function applyRoomProjection(tournament) {
     if (!tournament || typeof tournament !== 'object') return false;
     const snapshot = tournament.snapshot || {};
     let changed = false;
+    if (Object.prototype.hasOwnProperty.call(snapshot, 'settings') && applySettingsProjection(snapshot.settings)) changed = true;
     if (applyTeamProjection(snapshot.teams)) changed = true;
     if (applyRoundStatesProjection(snapshot.roundStates)) changed = true;
     if (Object.prototype.hasOwnProperty.call(snapshot, 'currentShop') && applyCurrentShopProjection(snapshot.currentShop)) changed = true;
     if (Object.prototype.hasOwnProperty.call(snapshot, 'lastPurchase') && applyLastPurchaseProjection(snapshot.lastPurchase)) changed = true;
     if (Object.prototype.hasOwnProperty.call(snapshot, 'lastHungryWave') && applyLastHungryWaveProjection(snapshot.lastHungryWave)) changed = true;
+    if (Object.prototype.hasOwnProperty.call(snapshot, 'lastSubstituteAction') && applyLastSubstituteProjection(snapshot.lastSubstituteAction)) changed = true;
     if (Object.prototype.hasOwnProperty.call(snapshot, 'tournament') && applyTournamentProjection(snapshot.tournament)) changed = true;
+    if (Object.prototype.hasOwnProperty.call(snapshot, 'activeTurnTimer') && applyActiveTurnTimerProjection(snapshot.activeTurnTimer)) changed = true;
+    if (Object.prototype.hasOwnProperty.call(snapshot, 'roomStatus')) {
+      Hexcore2.state.multiplayer = Hexcore2.state.multiplayer || {};
+      const nextRoomStatus = ['active', 'archived'].includes(String(snapshot.roomStatus || '')) ? String(snapshot.roomStatus) : 'active';
+      if (Hexcore2.state.multiplayer.roomStatus !== nextRoomStatus) {
+        Hexcore2.state.multiplayer.roomStatus = nextRoomStatus;
+        changed = true;
+      }
+    }
     if (applyHexcoreWindowProjection(snapshot.hexcoreActionWindows)) changed = true;
     if (Object.prototype.hasOwnProperty.call(snapshot, 'hexcoreAssignments') && applyHexcoreAssignmentsProjection(snapshot.hexcoreAssignments)) changed = true;
     if (Object.prototype.hasOwnProperty.call(snapshot, 'hexcoreDraft') && applyHexcoreDraftProjection(snapshot.hexcoreDraft)) changed = true;
@@ -1735,6 +2028,7 @@
       if (Hexcore2.storageService && Hexcore2.storageService.save) Hexcore2.storageService.save(Hexcore2.state);
       Hexcore2.ui.render();
     }
+    scheduleRoomTimerTick();
     return changed;
   }
 
@@ -1809,8 +2103,11 @@
   }
 
   function serverSyncedHexcoreUsePayload(id, captainId, targetCaptainId) {
-    if (id !== 'snow-cat' && id !== 'storm-fog') return null;
+    if (id !== 'snow-cat' && id !== 'storm-fog' && id !== 'heavenly-descent') return null;
     const teamId = String(captainId || '').trim();
+    if (id === 'heavenly-descent') {
+      return teamId ? { teamId, hexcoreId: id } : null;
+    }
     const targetTeamId = String(targetCaptainId || '').trim();
     if (!teamId || !targetTeamId) return null;
     return {
@@ -1927,6 +2224,59 @@
     return false;
   }
 
+  function scheduleRoomTimerTick() {
+    if (!global.setTimeout || !global.clearTimeout) return;
+    if (Hexcore2.roomTimerTick) global.clearTimeout(Hexcore2.roomTimerTick);
+    const timer = Hexcore2.state && Hexcore2.state.activeTurnTimer;
+    if (!timer || !timer.deadlineAt) return;
+    const deadlineMs = Date.parse(timer.deadlineAt);
+    const graceMs = Date.parse(timer.graceDeadlineAt || timer.deadlineAt);
+    if (!deadlineMs || !graceMs) return;
+    const now = Date.now();
+    const nextDelay = now < deadlineMs
+      ? Math.min(1000, Math.max(80, deadlineMs - now))
+      : Math.min(1000, Math.max(80, graceMs - now));
+    Hexcore2.roomTimerTick = global.setTimeout(() => {
+      if (Hexcore2.ui && Hexcore2.ui.render) Hexcore2.ui.render();
+      const current = Hexcore2.state && Hexcore2.state.activeTurnTimer;
+      const currentGraceMs = current ? Date.parse(current.graceDeadlineAt || current.deadlineAt || '') : 0;
+      if (current && currentGraceMs && Date.now() >= currentGraceMs) {
+        resolveRoomTimerIfNeeded(current.timerId);
+      }
+      scheduleRoomTimerTick();
+    }, nextDelay + 30);
+  }
+
+  async function resolveRoomTimerIfNeeded(timerId = '') {
+    const session = multiplayerSession();
+    if (!session || !session.apiBase || !session.tournamentId || Hexcore2.roomTimerResolving) return null;
+    const current = Hexcore2.state && Hexcore2.state.activeTurnTimer;
+    if (!current || (timerId && current.timerId !== timerId)) return null;
+    const graceMs = Date.parse(current.graceDeadlineAt || current.deadlineAt || '');
+    if (!graceMs || Date.now() < graceMs) return null;
+    Hexcore2.roomTimerResolving = true;
+    try {
+      const response = await fetch(`${session.apiBase}/api/tournaments/${encodeURIComponent(session.tournamentId)}/timers/resolve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionToken: session.sessionToken }),
+      });
+      const payload = await response.json();
+      if (response.ok && payload.ok && payload.tournament) {
+        syncSessionFromTournament(payload.tournament);
+        applyRoomProjection(payload.tournament);
+      }
+      return payload;
+    } catch (error) {
+      Hexcore2.state.ui = Hexcore2.state.ui || {};
+      Hexcore2.state.ui.roomSyncStatus = 'reconnecting';
+      if (Hexcore2.ui && Hexcore2.ui.render) Hexcore2.ui.render();
+      return null;
+    } finally {
+      Hexcore2.roomTimerResolving = false;
+    }
+  }
+
   async function connectRoomEventStream() {
     const session = multiplayerSession();
     if (!session || !session.apiBase || !session.tournamentId || !global.EventSource) return;
@@ -2032,6 +2382,63 @@
       returnToMultiplayerGate();
     },
 
+    async archiveCurrentRoom() {
+      const session = multiplayerSession();
+      if (!session || session.role !== 'referee') {
+        Hexcore2.eventStore.append('归档房间失败', '只有裁判会话可以归档当前房间', 'warn');
+        Hexcore2.ui.render();
+        return;
+      }
+      const confirmed = typeof confirm === 'function'
+        ? confirm('确认归档当前房间？归档后将禁止新的加入和所有写操作。')
+        : true;
+      if (!confirmed) return;
+      try {
+        const response = await fetch(`${session.apiBase}/api/tournaments/${encodeURIComponent(session.tournamentId)}/archive`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionToken: session.sessionToken }),
+        });
+        const payload = await response.json();
+        if (!response.ok || !payload.ok) throw new Error(payload && payload.error ? payload.error : '服务端拒绝归档');
+        Hexcore2.state.multiplayer = Hexcore2.state.multiplayer || {};
+        Hexcore2.state.multiplayer.roomStatus = 'archived';
+        Hexcore2.eventStore.append('房间已归档', '当前房间已进入只读状态，后续写操作会被服务端拒绝', 'warn');
+      } catch (error) {
+        Hexcore2.eventStore.append('归档房间失败', error && error.message ? error.message : String(error), 'warn');
+      }
+      Hexcore2.ui.render();
+    },
+
+    async deleteCurrentRoom() {
+      const session = multiplayerSession();
+      if (!session || session.role !== 'referee') {
+        Hexcore2.eventStore.append('删除房间失败', '只有裁判会话可以删除当前房间', 'warn');
+        Hexcore2.ui.render();
+        return;
+      }
+      const confirmed = typeof confirm === 'function'
+        ? confirm('确认删除当前房间？删除后赛事状态、事件、会话和房间访问记录都会从服务端移除。')
+        : true;
+      if (!confirmed) return;
+      try {
+        const response = await fetch(`${session.apiBase}/api/tournaments/${encodeURIComponent(session.tournamentId)}`, {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionToken: session.sessionToken }),
+        });
+        const payload = await response.json();
+        if (!response.ok || !payload.ok) throw new Error(payload && payload.error ? payload.error : '服务端拒绝删除');
+        clearMultiplayerSession();
+        Hexcore2.state.ui = Hexcore2.state.ui || {};
+        Hexcore2.state.ui.joinGateMessage = { level: 'success', text: '房间已删除，当前会话已清理。' };
+        returnToMultiplayerGate();
+      } catch (error) {
+        Hexcore2.eventStore.append('删除房间失败', error && error.message ? error.message : String(error), 'warn');
+        Hexcore2.ui.render();
+      }
+    },
+
     recentMultiplayerApiBase,
 
     async copyJoinGateAccessText() {
@@ -2075,6 +2482,36 @@
           ],
         };
         Hexcore2.eventStore.append('API 检测失败', error && error.message ? error.message : '服务地址不可用', 'warn');
+      }
+      Hexcore2.ui.render();
+    },
+
+    async loadRoomList() {
+      const input = document.getElementById('join-api-base');
+      const apiBase = input ? input.value.trim() : recentMultiplayerApiBase();
+      Hexcore2.state.ui = Hexcore2.state.ui || {};
+      Hexcore2.state.ui.roomList = {
+        level: 'info',
+        text: '正在读取房间列表...',
+        fetchedAt: '',
+        runtime: {},
+        rooms: [],
+      };
+      Hexcore2.ui.render();
+      try {
+        rememberMultiplayerApiBase(apiBase);
+        const payload = await fetchRoomList(apiBase);
+        Hexcore2.state.ui.roomList = normalizeRoomListPayload(payload);
+        Hexcore2.eventStore.append('房间列表已更新', `当前 active 房间 ${Hexcore2.state.ui.roomList.runtime.activeRoomCount}/${Hexcore2.state.ui.roomList.runtime.maxRooms || '-'}`, 'success');
+      } catch (error) {
+        Hexcore2.state.ui.roomList = {
+          level: 'warn',
+          text: error && error.message ? error.message : '房间列表获取失败',
+          fetchedAt: new Date().toISOString(),
+          runtime: {},
+          rooms: [],
+        };
+        Hexcore2.eventStore.append('房间列表获取失败', Hexcore2.state.ui.roomList.text, 'warn');
       }
       Hexcore2.ui.render();
     },
@@ -2150,12 +2587,33 @@
       const apiBaseInput = document.getElementById('join-api-base');
       const tournamentInput = document.getElementById('create-tournament-id');
       const nameInput = document.getElementById('create-tournament-name');
+      const teamCountInput = document.getElementById('create-team-count');
+      const campModeInput = document.getElementById('create-camp-mode');
+      const playersPerTeamInput = document.getElementById('create-players-per-team');
       const apiBase = String(apiBaseInput && apiBaseInput.value ? apiBaseInput.value : defaultMultiplayerApiBase()).replace(/\/+$/, '');
       const providedId = String(tournamentInput && tournamentInput.value ? tournamentInput.value : '').trim();
       const tournamentId = providedId || `hexcore-${Date.now()}`;
       const name = String(nameInput && nameInput.value ? nameInput.value : 'HEXCORE 多人赛事').trim();
+      const teamCount = Number(teamCountInput && teamCountInput.value);
+      const playersPerTeam = Number(playersPerTeamInput && playersPerTeamInput.value);
+      const campMode = String(campModeInput && campModeInput.value ? campModeInput.value : 'dual_camp').trim() === 'no_camp' ? 'no_camp' : 'dual_camp';
       if (!/^[A-Za-z0-9._:-]{1,80}$/.test(tournamentId)) {
         Hexcore2.eventStore.append('创建赛事失败', '赛事 ID 必须是 1-80 位安全标识，可使用字母、数字、点、下划线、冒号和短横线', 'warn');
+        Hexcore2.ui.render();
+        return;
+      }
+      if (!Number.isInteger(teamCount) || teamCount < 6 || teamCount > 20) {
+        Hexcore2.eventStore.append('创建赛事失败', '队伍数量必须在 6-20 队之间', 'warn');
+        Hexcore2.ui.render();
+        return;
+      }
+      if (campMode === 'dual_camp' && teamCount % 2 !== 0) {
+        Hexcore2.eventStore.append('创建赛事失败', '双阵营模式需要偶数队伍，才能平分本地和外地队伍', 'warn');
+        Hexcore2.ui.render();
+        return;
+      }
+      if (!Number.isInteger(playersPerTeam) || playersPerTeam < 2 || playersPerTeam > 8) {
+        Hexcore2.eventStore.append('创建赛事失败', '每队人数必须在 2-8 人之间', 'warn');
         Hexcore2.ui.render();
         return;
       }
@@ -2165,7 +2623,18 @@
         const response = await fetch(`${apiBase}/api/tournaments`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id: tournamentId, name, actorId: 'local-referee' }),
+          body: JSON.stringify({
+            id: tournamentId,
+            name,
+            actorId: 'local-referee',
+            settings: {
+              teamCount,
+              totalTeams: teamCount,
+              playersPerTeam,
+              campMode,
+              pairingMode: campMode === 'no_camp' ? 'random' : 'camp_versus',
+            },
+          }),
         });
         const payload = await response.json();
         if (!response.ok || !payload.ok || !payload.tournament || !payload.room) {
@@ -2623,6 +3092,24 @@
         Hexcore2.ui.render();
         return { ok: false, reason: '没有可用神兵天降' };
       }
+      if (multiplayerSession()) {
+        return submitRoomCommand('UseHexcore', { teamId: sourceCaptain.id, hexcoreId: 'heavenly-descent' })
+          .then(() => {
+            Hexcore2.eventStore.append(
+              '神兵天降同步',
+              `${sourceCaptain.name} 已通过服务端发动【神兵天降】`,
+              'warn',
+              { captainId: sourceCaptain.id, hexcoreId: 'heavenly-descent' }
+            );
+            renderAndPersist();
+            return { ok: true, synced: true };
+          })
+          .catch(error => {
+            Hexcore2.eventStore.append('神兵天降失败', error && error.message ? error.message : String(error), 'warn');
+            Hexcore2.ui.render();
+            return { ok: false, reason: error && error.message ? error.message : String(error) };
+          });
+      }
       if (!targetCaptain || !player || player.teamId !== targetCaptain.id || !targetCaptain.team.includes(player.id)) {
         windowState.active = false;
         windowState.resolved = true;
@@ -2630,8 +3117,9 @@
         Hexcore2.ui.render();
         return { ok: false, reason: '目标购买结果已变化' };
       }
+      const campMode = Hexcore2.selectors.isCampMode ? Hexcore2.selectors.isCampMode() : true;
       const sourceCamp = Hexcore2.selectors.captainCamp(sourceCaptain.id);
-      if (!sourceCamp || player.camp !== sourceCamp) {
+      if (campMode && (!sourceCamp || player.camp !== sourceCamp)) {
         Hexcore2.eventStore.append(
           '神兵天降失败',
           `${sourceCaptain.name} 只能夺取同阵营选手，「${player.name}」属于${Hexcore2.selectors.campLabel(player.camp)}，不可发动`,
@@ -4272,6 +4760,26 @@
       renderAndPersist();
     },
 
+    async updateTurnTimers() {
+      if (isCaptainClient() || isReadonlyClient()) {
+        Hexcore2.eventStore.append('计时设置失败', '只有裁判端可以修改回合计时', 'warn');
+        Hexcore2.ui.render();
+        return;
+      }
+      const hexInput = document.getElementById('rules-hexcore-timer');
+      const shopInput = document.getElementById('rules-shop-timer');
+      const hexcoreSeconds = Math.max(0, Math.min(3600, Math.round(Number(hexInput && hexInput.value) || 0)));
+      const shopSeconds = Math.max(0, Math.min(3600, Math.round(Number(shopInput && shopInput.value) || 0)));
+      Hexcore2.state.settings.turnTimers = { hexcoreSeconds, shopSeconds };
+      Hexcore2.eventStore.append('回合计时设置', `海克斯 ${hexcoreSeconds || '关闭'} 秒，商店 ${shopSeconds || '关闭'} 秒`, 'success');
+      try {
+        await submitRoomCommand('UpdateTurnTimers', { hexcoreSeconds, shopSeconds });
+      } catch (error) {
+        Hexcore2.eventStore.append('同步计时设置失败', error && error.message ? error.message : String(error), 'warn');
+      }
+      renderAndPersist();
+    },
+
     toggleHexcoreEnabled(hexcoreId) {
       const hexcore = Hexcore2.sampleData.hexcores.find(item => item.id === hexcoreId);
       if (!hexcore) return;
@@ -4462,7 +4970,7 @@
 
     importPlayers(file) {
       if (rejectGoldLockedMutation('选手导入失败')) return;
-      Hexcore2.exportService.readPlayerImportPreview(file, Hexcore2.state.players, preview => {
+      Hexcore2.exportService.readPlayerImportPreview(file, Hexcore2.state.players, Hexcore2.state.playerProfiles, preview => {
         Hexcore2.state.ui = Hexcore2.state.ui || {};
         Hexcore2.state.ui.playerImportPreview = preview;
         Hexcore2.state.ui.playerImportPage = 1;
@@ -4833,6 +5341,182 @@
       renderAndPersist();
     },
 
+    setPlayerAttendance(playerId, status) {
+      if (rejectGoldLockedMutation('出勤状态失败')) return;
+      const player = Hexcore2.state.players.find(item => item.id === playerId);
+      if (!player) return;
+      const normalize = Hexcore2.exportService && Hexcore2.exportService.normalizeAttendanceStatus
+        ? Hexcore2.exportService.normalizeAttendanceStatus
+        : value => String(value || 'confirmed');
+      const nextStatus = normalize(status);
+      const defaults = (Hexcore2.exportService && Hexcore2.exportService.ATTENDANCE_WEIGHT_DEFAULTS) || {
+        confirmed: 1,
+        pending: 0.7,
+        high_risk: 0.4,
+        substitute: 0,
+        unavailable: 0,
+      };
+      snapshot(`调整出勤状态前：${player.name}`);
+      player.attendanceStatus = nextStatus;
+      player.drawWeight = defaults[nextStatus] ?? 1;
+      if (Hexcore2.normalizeState) Hexcore2.normalizeState(Hexcore2.state);
+      Hexcore2.eventStore.append('出勤管理', `${player.name} 出勤状态调整为 ${Hexcore2.selectors.attendanceLabel(nextStatus)}，抽取权重 ${player.drawWeight}`, nextStatus === 'confirmed' ? 'success' : 'warn');
+      renderAndPersist();
+    },
+
+    async activateSubstitute(playerId, options = {}) {
+      if (rejectViewerClient('激活替补失败')) return;
+      if (isCaptainClient()) {
+        Hexcore2.eventStore.append('激活替补失败', '队长端无权激活替补，请联系裁判处理', 'warn');
+        Hexcore2.ui.render();
+        return;
+      }
+      const player = Hexcore2.state.players.find(item => item.id === playerId);
+      if (!player) return;
+      if (player.attendanceStatus !== 'substitute') {
+        Hexcore2.eventStore.append('激活替补失败', '目标选手不是替补状态', 'warn');
+        Hexcore2.ui.render();
+        return;
+      }
+
+      let response;
+      try {
+        response = await submitRoomCommand('ActivateSubstitute', { playerId }, options);
+      } catch (error) {
+        Hexcore2.eventStore.append('激活替补失败', error && error.message ? error.message : String(error), 'warn');
+        Hexcore2.ui.render();
+        return;
+      }
+      if (response && !response.skipped) return;
+
+      snapshot(`激活替补前：${player.name}`);
+      player.attendanceStatus = 'confirmed';
+      player.drawWeight = 1;
+      if (player.status !== 'disabled') player.status = 'available';
+      if (Hexcore2.normalizeState) Hexcore2.normalizeState(Hexcore2.state);
+      Hexcore2.eventStore.append('替补管理', `${player.name} 已激活为可用替补`, 'success');
+      renderAndPersist();
+    },
+
+    async replaceWithSubstitute(teamId, absentPlayerId, options = {}) {
+      if (rejectViewerClient('替补替换失败')) return;
+      if (isCaptainClient()) {
+        Hexcore2.eventStore.append('替补替换失败', '队长端无权替换队员，请联系裁判处理', 'warn');
+        Hexcore2.ui.render();
+        return;
+      }
+      const captain = Hexcore2.state.captains.find(item => item.id === teamId);
+      const player = Hexcore2.state.players.find(item => item.id === absentPlayerId);
+      const select = document.getElementById(`team-replace-sub-${teamId}-${absentPlayerId}`);
+      const substitutePlayerId = select ? String(select.value || '').trim() : '';
+      const substitute = Hexcore2.state.players.find(item => item.id === substitutePlayerId);
+      if (!captain || !player || !substitute) {
+        Hexcore2.eventStore.append('替补替换失败', '请选择需要替换的队员和已激活替补', 'warn');
+        Hexcore2.ui.render();
+        return;
+      }
+
+      let response;
+      try {
+        response = await submitRoomCommand('ReplaceWithSubstitute', {
+          teamId: captain.id,
+          absentPlayerId: player.id,
+          substitutePlayerId: substitute.id,
+          replacementReason: '裁判替补替换',
+        }, options);
+      } catch (error) {
+        Hexcore2.eventStore.append('替补替换失败', error && error.message ? error.message : String(error), 'warn');
+        Hexcore2.ui.render();
+        return;
+      }
+      if (response && !response.skipped) return;
+
+      snapshot(`替补替换前：${captain.name}`);
+      captain.team = captain.team.map(id => id === player.id ? substitute.id : id);
+      player.status = 'unavailable';
+      player.attendanceStatus = 'unavailable';
+      player.teamId = '';
+      substitute.status = 'drafted';
+      substitute.attendanceStatus = 'confirmed';
+      substitute.drawWeight = 1;
+      substitute.teamId = captain.id;
+      if (Hexcore2.normalizeState) Hexcore2.normalizeState(Hexcore2.state);
+      Hexcore2.eventStore.append('替补管理', `${captain.name} 已用 ${substitute.name} 替换 ${player.name}`, 'success');
+      renderAndPersist();
+    },
+
+    createProfileFromPlayer(playerId) {
+      if (rejectGoldLockedMutation('创建档案失败')) return;
+      const player = Hexcore2.state.players.find(item => item.id === playerId);
+      if (!player) return;
+      const usedIds = new Set((Hexcore2.state.playerProfiles || []).map(profile => profile.id));
+      let index = usedIds.size + 1;
+      let profileId = `profile-${index}`;
+      while (usedIds.has(profileId)) {
+        index += 1;
+        profileId = `profile-${index}`;
+      }
+      snapshot(`创建选手档案前：${player.name}`);
+      Hexcore2.state.playerProfiles = Hexcore2.state.playerProfiles || [];
+      Hexcore2.state.playerProfiles.push({
+        id: profileId,
+        commonName: player.commonName || player.name,
+        aliases: Array.from(new Set([player.name, player.gameId].filter(Boolean))).slice(0, 12),
+        historicalIdentities: [{
+          tournamentName: player.tournamentName || '当前赛事',
+          region: player.region || '',
+          gameId: player.gameId || '',
+          name: player.name || '',
+        }],
+        attendanceReliability: player.attendanceStatus || 'confirmed',
+        refereeNotes: '',
+        updatedAt: new Date().toISOString(),
+      });
+      player.profileId = profileId;
+      if (Hexcore2.normalizeState) Hexcore2.normalizeState(Hexcore2.state);
+      Hexcore2.eventStore.append('选手档案', `已为 ${player.name} 创建并关联历史档案`, 'success');
+      renderAndPersist();
+    },
+
+    linkPlayerProfile(playerId, profileId) {
+      if (rejectGoldLockedMutation('关联档案失败')) return;
+      const player = Hexcore2.state.players.find(item => item.id === playerId);
+      if (!player) return;
+      const nextProfileId = String(profileId || '').trim();
+      if (nextProfileId && !Hexcore2.state.playerProfiles.some(profile => profile.id === nextProfileId)) return;
+      snapshot(`关联选手档案前：${player.name}`);
+      player.profileId = nextProfileId;
+      if (Hexcore2.normalizeState) Hexcore2.normalizeState(Hexcore2.state);
+      Hexcore2.eventStore.append('选手档案', `${player.name} ${nextProfileId ? '已关联历史档案' : '已取消档案关联'}`, nextProfileId ? 'success' : 'info');
+      renderAndPersist();
+    },
+
+    addPlayerAliasToProfile(playerId) {
+      if (rejectGoldLockedMutation('补充档案别名失败')) return;
+      const player = Hexcore2.state.players.find(item => item.id === playerId);
+      const profile = player && Hexcore2.state.playerProfiles.find(item => item.id === player.profileId);
+      if (!player || !profile) return;
+      snapshot(`补充档案别名前：${player.name}`);
+      const aliases = new Set(Array.isArray(profile.aliases) ? profile.aliases : []);
+      if (player.name) aliases.add(player.name);
+      if (player.gameId) aliases.add(player.gameId);
+      profile.aliases = Array.from(aliases).slice(0, 12);
+      profile.historicalIdentities = Array.isArray(profile.historicalIdentities) ? profile.historicalIdentities : [];
+      const exists = profile.historicalIdentities.some(identity => identity.gameId === player.gameId && identity.name === player.name);
+      if (!exists) {
+        profile.historicalIdentities.push({
+          tournamentName: player.tournamentName || '当前赛事',
+          region: player.region || '',
+          gameId: player.gameId || '',
+          name: player.name || '',
+        });
+      }
+      profile.updatedAt = new Date().toISOString();
+      if (Hexcore2.normalizeState) Hexcore2.normalizeState(Hexcore2.state);
+      Hexcore2.eventStore.append('选手档案', `已补充 ${profile.commonName} 的别名和本届身份`, 'success');
+      renderAndPersist();
+    },
+
     deletePlayer(playerId) {
       if (rejectGoldLockedMutation('删除选手失败')) return;
       const player = Hexcore2.state.players.find(item => item.id === playerId);
@@ -4866,10 +5550,11 @@
         Hexcore2.ui.render();
         return;
       }
+      const isCampMode = Hexcore2.selectors.isCampMode ? Hexcore2.selectors.isCampMode() : true;
       const optionInput = document.getElementById('tournament-camp-versus-toggle');
-      const useCampVersus = optionInput && typeof optionInput.checked === 'boolean'
+      const useCampVersus = isCampMode && (optionInput && typeof optionInput.checked === 'boolean'
         ? Boolean(optionInput.checked)
-        : !(Hexcore2.state.ui && Hexcore2.state.ui.tournamentCampVersus === false);
+        : !(Hexcore2.state.ui && Hexcore2.state.ui.tournamentCampVersus === false));
       Hexcore2.state.ui = Hexcore2.state.ui || {};
       Hexcore2.state.ui.tournamentCampVersus = useCampVersus;
       const campAEntrants = orderedEntrants.filter(id => Hexcore2.selectors.captainCamp(id) === 'local');
@@ -5428,5 +6113,6 @@
   }
   Hexcore2.ui.render();
   connectRoomEventStream();
+  scheduleRoomTimerTick();
   scheduleHeavenlyWindowTick();
 })(window);

@@ -6,6 +6,16 @@
     return Hexcore2.selectors.captainCamp ? Hexcore2.selectors.captainCamp(captainId) : '';
   }
 
+  function canAssign(captainId, playerId) {
+    if (Hexcore2.selectors && typeof Hexcore2.selectors.canAssignPlayerToCaptain === 'function') {
+      return Hexcore2.selectors.canAssignPlayerToCaptain(captainId, playerId);
+    }
+    const player = Hexcore2.state.players.find(item => item.id === playerId);
+    const camp = captainCamp(captainId);
+    if (!camp || !player || player.camp !== camp) return { ok: false, reason: '不能选择异阵营选手' };
+    return { ok: true, reason: '' };
+  }
+
   function isCaptainPlayer(playerId) {
     return Hexcore2.selectors.isCaptainPlayer
       ? Hexcore2.selectors.isCaptainPlayer(playerId)
@@ -91,9 +101,9 @@
       const captain = state.captains.find(item => item.id === captainId);
       const player = state.players.find(item => item.id === playerId);
       if (!captain || !player || player.status !== 'available') return false;
-      const camp = captainCamp(captainId);
-      if (!camp || player.camp !== camp) {
-        Hexcore2.eventStore.append('入队失败', `${captain ? captain.name : '目标队伍'} 不能接收异阵营选手「${player ? player.name : playerId}」`, 'warn', { source, playerId });
+      const eligibility = canAssign(captainId, player.id);
+      if (!eligibility.ok) {
+        Hexcore2.eventStore.append('入队失败', `${captain ? captain.name : '目标队伍'} ${eligibility.reason}「${player ? player.name : playerId}」`, 'warn', { source, playerId });
         return false;
       }
       if (isCaptainPlayer(player.id)) {
@@ -119,10 +129,10 @@
       const captain = state.captains.find(item => item.id === captainId);
       const player = state.players.find(item => item.id === playerId);
       if (!captain || !player || player.status !== 'available') return { ok: false, reason: '目标队员不可购买' };
-      const camp = captainCamp(captainId);
-      if (!camp || player.camp !== camp) {
-        Hexcore2.eventStore.append('购买失败', `${captain.name} 不能购买异阵营选手「${player.name}」`, 'warn', { source, playerId });
-        return { ok: false, reason: '不能购买异阵营选手' };
+      const eligibility = canAssign(captainId, player.id);
+      if (!eligibility.ok) {
+        Hexcore2.eventStore.append('购买失败', `${captain.name} ${eligibility.reason}「${player.name}」`, 'warn', { source, playerId });
+        return { ok: false, reason: eligibility.reason.replace('选择', '购买') };
       }
       if (isCaptainPlayer(player.id)) return { ok: false, reason: '队长锁定选手不可购买' };
       const pricing = purchasePrice(captainId, player, options);
@@ -165,8 +175,8 @@
       const captain = state.captains.find(item => item.id === captainId);
       const player = state.players.find(item => item.id === playerId);
       if (!captain || !player || player.status !== 'available') return { ok: false, reason: '目标队员不可选择' };
-      const camp = captainCamp(captainId);
-      if (!camp || player.camp !== camp) return { ok: false, reason: '不能选择异阵营选手' };
+      const eligibility = canAssign(captainId, player.id);
+      if (!eligibility.ok) return { ok: false, reason: eligibility.reason };
       if (isCaptainPlayer(player.id)) return { ok: false, reason: '队长锁定选手不可选择' };
       const basePrice = Math.max(1, Number(player.tier) || 1);
       const finalCost = Math.max(0, basePrice - Math.max(0, Math.round(Number(offset) || 0)));
@@ -244,10 +254,9 @@
       let filled = 0;
       state.captains.forEach(captain => {
         while (captain.team.length < Hexcore2.selectors.teamMemberCapacity(captain.id)) {
-          const camp = captainCamp(captain.id);
           const candidates = state.players.filter(player =>
             player.status === 'available'
-            && player.camp === camp
+            && canAssign(captain.id, player.id).ok
             && player.tier >= 1
             && player.tier <= 5
             && !isCaptainPlayer(player.id)

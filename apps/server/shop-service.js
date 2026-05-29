@@ -23,6 +23,11 @@ function teamCamp(snapshot = {}, teamId = '') {
   return safeText(team && team.camp, '', 40);
 }
 
+function isNoCampMode(snapshot = {}) {
+  const settings = snapshot.settings && typeof snapshot.settings === 'object' ? snapshot.settings : {};
+  return safeText(settings.campMode, '', 40) === 'no_camp';
+}
+
 function roundRefreshCount(snapshot = {}, teamId = '', round = 1) {
   const roundStates = snapshot.roundStates || {};
   const teamStates = roundStates[safeText(teamId, '', 80)] || {};
@@ -39,14 +44,15 @@ function nextRefreshCost(snapshot = {}, teamId = '', round = 1) {
 
 function shopPlayerCandidates(snapshot = {}, teamId = '') {
   const camp = teamCamp(snapshot, teamId);
-  if (!camp) return [];
+  const noCampMode = isNoCampMode(snapshot);
+  if (!noCampMode && !camp) return [];
   const captainPlayerIds = new Set((Array.isArray(snapshot.teams) ? snapshot.teams : [])
     .map(team => safeText(team.playerId || team.captainPlayerId, '', 80))
     .filter(Boolean));
   return (Array.isArray(snapshot.players) ? snapshot.players : [])
     .filter(player => {
       if (!player || !safeText(player.id || player.playerId, '', 80)) return false;
-      if (safeText(player.camp, '', 40) !== camp) return false;
+      if (!noCampMode && safeText(player.camp, '', 40) !== camp) return false;
       if (player.isCaptain || captainPlayerIds.has(safeText(player.id || player.playerId, '', 80))) return false;
       if (safeText(player.status || 'available', 'available', 40) !== 'available') return false;
       if (safeText(player.teamId, '', 80)) return false;

@@ -5,6 +5,7 @@ const SNAPSHOT_PUBLIC_FIELDS = [
   'createdAt',
   'mode',
   'status',
+  'roomStatus',
   'currentRound',
   'currentPhase',
   'currentTeamId',
@@ -31,8 +32,14 @@ const EVENT_PUBLIC_PAYLOAD_FIELDS = [
   'message',
   'targetStateVersion',
   'restoredStateVersion',
+  'absentPlayerId',
+  'substitutePlayerId',
+  'replacementReason',
   'candidateSlot',
   'replacementId',
+  'hexcoreSeconds',
+  'shopSeconds',
+  'timeout',
 ];
 
 const VIEW_TYPES = Object.freeze({
@@ -162,6 +169,17 @@ function publicHungryWaveSummary(summary = null) {
   };
 }
 
+function publicSubstituteAction(action = null) {
+  if (!action || typeof action !== 'object') return null;
+  return {
+    type: String(action.type || '').trim().slice(0, 40),
+    teamId: String(action.teamId || '').trim().slice(0, 80),
+    absentPlayerId: String(action.absentPlayerId || '').trim().slice(0, 80),
+    substitutePlayerId: String(action.substitutePlayerId || action.playerId || '').trim().slice(0, 80),
+    resolvedAt: String(action.resolvedAt || '').trim().slice(0, 40),
+  };
+}
+
 function publicRoundStates(roundStates = {}) {
   if (!roundStates || typeof roundStates !== 'object') return {};
   return Object.fromEntries(Object.entries(roundStates).map(([teamId, rounds]) => [
@@ -266,6 +284,74 @@ function publicRoundIncome(income = null) {
   };
 }
 
+function publicSettings(settings = {}) {
+  const source = settings && typeof settings === 'object' ? settings : {};
+  const timers = source.turnTimers && typeof source.turnTimers === 'object' ? source.turnTimers : {};
+  const teamCount = Math.max(6, Math.min(20, Math.round(Number(source.teamCount || source.totalTeams) || 10)));
+  const campMode = ['dual_camp', 'no_camp'].includes(String(source.campMode || '').trim())
+    ? String(source.campMode).trim()
+    : 'dual_camp';
+  const pairingMode = ['camp_versus', 'random', 'manual'].includes(String(source.pairingMode || '').trim())
+    ? String(source.pairingMode).trim()
+    : (campMode === 'no_camp' ? 'random' : 'camp_versus');
+  return {
+    minTeams: 6,
+    maxTeams: 20,
+    teamCount,
+    totalTeams: teamCount,
+    playersPerTeam: Math.max(2, Math.min(8, Math.round(Number(source.playersPerTeam) || 5))),
+    teamSizeIncludesCaptain: true,
+    campMode,
+    pairingMode,
+    allowSubstitutes: source.allowSubstitutes !== false,
+    initialGold: Math.max(0, Number(source.initialGold) || 0),
+    roundIncome: Math.max(0, Number(source.roundIncome) || 0),
+    refreshCosts: Array.isArray(source.refreshCosts)
+      ? source.refreshCosts.slice(0, 4).map(cost => Math.max(0, Number(cost) || 0))
+      : [],
+    turnTimers: {
+      hexcoreSeconds: Math.max(0, Number(timers.hexcoreSeconds) || 0),
+      shopSeconds: Math.max(0, Number(timers.shopSeconds) || 0),
+    },
+  };
+}
+
+function publicPlayerProfiles(profiles = [], view = VIEW_TYPES.PUBLIC) {
+  if (view !== VIEW_TYPES.REFEREE || !Array.isArray(profiles)) return [];
+  return profiles.map(profile => ({
+    id: String(profile.id || '').trim().slice(0, 80),
+    commonName: String(profile.commonName || '').trim().slice(0, 40),
+    aliases: Array.isArray(profile.aliases)
+      ? profile.aliases.map(alias => String(alias || '').trim().slice(0, 40)).filter(Boolean).slice(0, 12)
+      : [],
+    historicalIdentities: Array.isArray(profile.historicalIdentities)
+      ? profile.historicalIdentities.map(identity => ({
+        tournamentName: String(identity && identity.tournamentName || '').trim().slice(0, 80),
+        region: String(identity && identity.region || '').trim().slice(0, 40),
+        gameId: String(identity && identity.gameId || '').trim().slice(0, 80),
+        name: String(identity && identity.name || '').trim().slice(0, 40),
+      })).filter(identity => identity.tournamentName || identity.region || identity.gameId || identity.name).slice(0, 30)
+      : [],
+    attendanceReliability: String(profile.attendanceReliability || '').trim().slice(0, 40),
+    refereeNotes: String(profile.refereeNotes || '').trim().slice(0, 240),
+    updatedAt: String(profile.updatedAt || '').trim().slice(0, 40),
+  })).filter(profile => profile.id);
+}
+
+function publicActiveTurnTimer(timer = null) {
+  if (!timer || typeof timer !== 'object') return null;
+  return {
+    timerId: String(timer.timerId || '').trim().slice(0, 160),
+    phase: String(timer.phase || '').trim().slice(0, 40),
+    teamId: String(timer.teamId || '').trim().slice(0, 80),
+    round: Math.max(1, Number(timer.round) || 1),
+    startedAt: String(timer.startedAt || '').trim().slice(0, 40),
+    deadlineAt: String(timer.deadlineAt || '').trim().slice(0, 40),
+    graceDeadlineAt: String(timer.graceDeadlineAt || '').trim().slice(0, 40),
+    durationMs: Math.max(0, Number(timer.durationMs) || 0),
+  };
+}
+
 function publicTournament(tournament = null, view = VIEW_TYPES.PUBLIC, options = {}) {
   if (!tournament || typeof tournament !== 'object') return undefined;
   if (view === VIEW_TYPES.REFEREE) {
@@ -352,9 +438,13 @@ function projectSnapshotData(snapshot = {}, view = VIEW_TYPES.PUBLIC, options = 
     currentShop: publicCurrentShop(snapshot.currentShop),
     lastPurchase: publicLastPurchase(snapshot.lastPurchase),
     lastHungryWave: publicHungryWaveSummary(snapshot.lastHungryWave),
+    lastSubstituteAction: publicSubstituteAction(snapshot.lastSubstituteAction),
     lastRefereeRuling: publicRefereeRuling(snapshot.lastRefereeRuling),
     lastRollback: publicRollback(snapshot.lastRollback),
     lastRoundIncome: publicRoundIncome(snapshot.lastRoundIncome),
+    settings: publicSettings(snapshot.settings),
+    playerProfiles: publicPlayerProfiles(snapshot.playerProfiles, view),
+    activeTurnTimer: publicActiveTurnTimer(snapshot.activeTurnTimer),
     tournament: publicTournament(snapshot.tournament, view, options),
     roundStates: publicRoundStates(snapshot.roundStates),
     hexcoreActionWindows: publicHexcoreWindows(snapshot.hexcoreActionWindows),
@@ -411,6 +501,9 @@ function projectEventPayload(payload = {}) {
     const projectedRoundState = projectedRoundStateForCommand(payload);
     if (projectedRoundState) publicPayload.roundState = projectedRoundState;
   }
+  if (payload.commandType === COMMAND_TYPES.ACTIVATE_SUBSTITUTE && payload.playerId) {
+    publicPayload.substitutePlayerId = String(payload.playerId || '').trim().slice(0, 80);
+  }
   if (trustedProjection && Array.isArray(payload.hexcoreActionWindows)) publicPayload.hexcoreActionWindows = publicHexcoreWindows(payload.hexcoreActionWindows);
   if (payload.hexcoreAssignments) publicPayload.hexcoreAssignments = publicHexcoreAssignments(payload.hexcoreAssignments);
   if (payload.hexcoreDraft) publicPayload.hexcoreDraft = publicHexcoreDraft(payload.hexcoreDraft);
@@ -466,4 +559,5 @@ module.exports = {
   publicHexcoreAssignments,
   publicHexcoreDraft,
   publicLastPurchase,
+  publicPlayerProfiles,
 };

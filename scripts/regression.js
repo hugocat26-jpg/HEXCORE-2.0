@@ -10,6 +10,7 @@ const multiplayerServer = require('./serve-multiplayer.js');
 const multiplayerApiServer = require('../apps/server/server.js');
 const multiplayerShared = require('../packages/shared');
 const multiplayerRules = require('../packages/rules');
+const { MemoryTournamentStore } = require('../apps/server/memory-store.js');
 const { analyzeTaskDoc, runTaskLoop } = require('./task-loop-runner.js');
 
 const root = path.resolve(__dirname, '..');
@@ -32,6 +33,7 @@ const sourceFiles = [
   'src/ui/referee-console.js',
   'src/main.js',
 ];
+const multiplayerSourceFiles = sourceFiles.map(file => file.replace(/^src\//, 'apps/multiplayer/src/'));
 
 function createHarness(options = {}) {
   const appMain = { scrollTop: 0, scrollLeft: 0 };
@@ -54,6 +56,9 @@ function createHarness(options = {}) {
   const elements = {};
   const scrollingElement = { scrollTop: 0, scrollLeft: 0, dataset: {} };
   let storedState = options.storedState || '';
+  const localStorageItems = options.localStorageItems && typeof options.localStorageItems === 'object'
+    ? { ...options.localStorageItems }
+    : null;
   const context = {
     console,
     Math,
@@ -94,18 +99,37 @@ function createHarness(options = {}) {
       createObjectURL() { return 'blob:test'; },
       revokeObjectURL() {},
     },
+    URLSearchParams,
     localStorage: {
-      getItem() { return storedState || null; },
-      setItem(_key, value) { storedState = value; },
-      removeItem() { storedState = ''; },
+      getItem(key) {
+        if (localStorageItems) return Object.prototype.hasOwnProperty.call(localStorageItems, key) ? localStorageItems[key] : null;
+        return storedState || null;
+      },
+      setItem(key, value) {
+        if (localStorageItems) {
+          localStorageItems[key] = String(value);
+          return;
+        }
+        storedState = value;
+      },
+      removeItem(key) {
+        if (localStorageItems) {
+          delete localStorageItems[key];
+          return;
+        }
+        storedState = '';
+      },
     },
     location: { protocol: 'http:', search: options.locationSearch || '', reload() {} },
+    fetch: options.fetch,
+    EventSource: options.EventSource,
     confirm() { return true; },
     prompt(message, defaultValue) { return defaultValue || '测试输入'; },
   };
   context.window = context;
   vm.createContext(context);
-  sourceFiles.forEach(file => {
+  const files = Array.isArray(options.sourceFiles) && options.sourceFiles.length ? options.sourceFiles : sourceFiles;
+  files.forEach(file => {
     vm.runInContext(fs.readFileSync(path.join(root, file), 'utf8'), context, { filename: file });
   });
   return {
@@ -837,6 +861,7 @@ function testPlayersUiAndImport() {
   ].join('\n');
   const parsed = H.exportService.parsePlayerImport('players.csv', csv);
   assert(parsed[0].camp === 'local', '导入应识别本地人阵营');
+  assert(parsed[0].attendanceStatus === 'confirmed' && parsed[0].drawWeight === 1, '导入选手应默认已确认且正常权重');
 
   let error = '';
   try {
@@ -849,15 +874,25 @@ function testPlayersUiAndImport() {
   H.state.players = H.state.players.slice(0, 10);
   const initialPlayerCount = H.state.players.length;
   const previewCsv = [
-    'name,gameId,lane,camp,score',
-    '预览本地,PREVIEW_LOCAL,上路,本地人,76',
+    'name,gameId,lane,camp,score,出勤状态',
+    '预览本地,PREVIEW_LOCAL,上路,本地人,76,待确认',
     '缺阵营,NO_CAMP,中路,,70',
     '坏评分,BAD_SCORE,打野,外地人,999',
     '重复选手,PREVIEW_LOCAL,辅助,本地人,66',
   ].join('\n');
+  H.state.playerProfiles = [{
+    id: 'profile-preview',
+    commonName: '预览本地',
+    aliases: ['预览本地旧名'],
+    historicalIdentities: [{ tournamentName: 'S1', region: '一区', gameId: 'OLD_PREVIEW', name: '预览本地' }],
+    attendanceReliability: 'pending',
+    refereeNotes: '仅裁判可见',
+  }];
   const preview = H.exportService.buildPlayerImportPreview('preview.csv', previewCsv, H.state.players);
   assert(preview.totalRows === 4, '导入预览应统计总行数');
   assert(preview.accepted.length === 1, '导入预览应只接收有效且未重复的选手');
+  assert(preview.accepted[0].attendanceStatus === 'pending' && preview.accepted[0].drawWeight === 0.7, '导入预览应识别出勤状态并设置默认权重');
+  assert(preview.accepted[0].profileMatches[0].profileId === 'profile-preview', '导入预览应提示疑似历史档案但不自动合并');
   assert(preview.skipped.length === 3, '导入预览应统计跳过总数');
   assert(preview.stats.missingCamp === 1, '导入预览应单独统计阵营缺失');
   assert(preview.stats.invalidScore === 1, '导入预览应单独统计非法评分');
@@ -876,13 +911,22 @@ function testPlayersUiAndImport() {
   assert(H.state.players.length === initialPlayerCount, '导入预览确认前不应写入状态');
   assert(H.state.ui.playerImportPreview.accepted.length === 1, '导入动作应先生成预览');
   assert(H.state.ui.playerImportSelected.length === 1, '导入预览应默认勾选全部可导入选手');
-  assert(app.innerHTML.includes('确认导入 1 名') && app.innerHTML.includes('type="checkbox"'), '导入预览应显示可勾选选手并按选择数更新确认按钮');
+  assert(app.innerHTML.includes('确认导入 1 名') && app.innerHTML.includes('type="checkbox"') && app.innerHTML.includes('疑似档案'), '导入预览应显示可勾选选手、疑似档案并按选择数更新确认按钮');
   H.actions.togglePlayerImportSelection(0);
   assert(H.state.ui.playerImportSelected.length === 0, '导入预览应允许取消勾选单个选手');
   assert(app.innerHTML.includes('确认导入 0 名') || app.innerHTML.includes('disabled'), '未选择选手时确认导入应不可用');
   H.actions.setPlayerImportSelection('all');
   H.actions.confirmPlayerImport();
   assert(H.state.players.length === initialPlayerCount + 1, '确认导入后才写入有效选手');
+  const importedPlayer = H.state.players.find(player => player.gameId === 'PREVIEW_LOCAL');
+  assert(importedPlayer && !importedPlayer.profileId, '疑似档案不得在导入确认时自动合并');
+  H.actions.createProfileFromPlayer(importedPlayer.id);
+  assert(importedPlayer.profileId && H.state.playerProfiles.some(profile => profile.id === importedPlayer.profileId), '裁判应能为选手创建并关联档案');
+  H.actions.setPlayerAttendance(importedPlayer.id, '缺席');
+  assert(H.selectors.effectiveDrawWeight(importedPlayer) === 0, '缺席选手不应进入抽卡权重池');
+  assert(!H.selectors.availableCampPlayers('c1').some(player => player.id === importedPlayer.id), '缺席选手不应出现在队长可抽卡池');
+  H.actions.setActiveView('players');
+  assert(app.innerHTML.includes('出勤状态') && app.innerHTML.includes('关联档案') && app.innerHTML.includes('抽取权重'), '选手库应展示出勤和档案维护控件');
 
   H.state.players = [];
   const overflowRows = ['name,gameId,lane,camp,score'];
@@ -1127,7 +1171,7 @@ function testSystemIntegrityCheck() {
   H.actions.setActiveView('settings');
   H.actions.runSystemCheck();
 
-  assert(H.meta.version === '2.0.18' && app.innerHTML.includes('HEXCORE 2.0 v2.0.18 裁判端'), '系统设置页应展示统一项目版本号');
+  assert(H.meta.version === '2.0.19' && app.innerHTML.includes('HEXCORE 2.0 v2.0.19 裁判端'), '系统设置页应展示统一项目版本号');
   assert(H.state.ui.systemCheckResult && !H.state.ui.systemCheckResult.ok, '状态检查应保存可视化结果');
   assert(H.state.ui.systemCheckResult.issues.some(issue => issue.type === '重复归属'), '状态检查应识别重复归属');
   assert(H.state.ui.systemCheckResult.issues.some(issue => issue.type === '跨阵营'), '状态检查应识别跨阵营');
@@ -2636,7 +2680,7 @@ function testHexcoreFiveDrawOneFlow() {
   const firstSlots = [...H.state.hexcoreDraft.slots];
   assert(firstSlots.length === 5, `海克斯抽取应一次生成5张候选，当前 ${firstSlots.length}`);
   assert(new Set(firstSlots).size === 5, '5张海克斯候选不应重复');
-  assert(app.innerHTML.includes('刷新此张') && app.innerHTML.includes('hex-draw-card'), '海克斯库UI应展示五抽一候选卡和单张刷新操作');
+  assert(app.innerHTML.includes('title="刷新此张候选"') && app.innerHTML.includes('title="选择此海克斯"') && app.innerHTML.includes('hex-draw-card'), '海克斯库UI应展示五抽一候选卡和完整按钮语义');
   assert(app.innerHTML.includes('hex-effect-icon'), '海克斯卡片应使用效果语义图标而不是纯文字或emoji');
 
   H.actions.refreshHexcoreSlot(0);
@@ -3015,7 +3059,7 @@ function testUiNavigationAndSecurity() {
   assert(staticServer.resolveRequestPath('/src/main.js') === path.join(root, 'src', 'main.js'), '静态服务应正常解析项目内资源');
   assert(staticServer.resolveRequestPath('/assets/hex-icons/camp-scout.png') === path.join(root, 'public', 'assets', 'hex-icons', 'camp-scout.png'), '静态服务应将 assets 图标路径映射到 public/assets');
   assert(staticServer.resolveRequestPath('/scripts/serve.js') === null, '静态服务不应暴露部署脚本源码');
-  assert(staticServer.resolveRequestPath('/docs/00_项目总览.md') === null, '静态服务不应暴露项目文档目录');
+  assert(staticServer.resolveRequestPath('/docs/product/产品总览.md') === null, '静态服务不应暴露项目文档目录');
   assert(staticServer.resolveRequestPath('/..%2FHEXCORE2.0_secret%2Fsecret.txt') === null, '静态服务应拒绝同名前缀兄弟目录穿越');
   assert(staticServer.resolveRequestPath('/%E0%A4%A') === null, '静态服务应拒绝非法URL编码');
 }
@@ -3032,7 +3076,7 @@ function testMultiplayerCopyIsolation() {
   assert(multiplayerServer.resolveRequestPath('/src/main.js') === path.join(localAppRoot, 'src', 'main.js'), '多人端服务应解析副本内源码');
   assert(multiplayerServer.resolveRequestPath('/assets/hex-icons/camp-scout.png') === path.join(localAppRoot, 'assets', 'hex-icons', 'camp-scout.png'), '多人端服务应解析副本内资产');
   assert(multiplayerServer.resolveRequestPath('/scripts/serve.js') === null, '多人端服务不应暴露根目录脚本');
-  assert(multiplayerServer.resolveRequestPath('/docs/06_开发计划.md') === null, '多人端服务不应暴露根目录文档');
+  assert(multiplayerServer.resolveRequestPath('/docs/planning/当前待开发计划.md') === null, '多人端服务不应暴露根目录文档');
   assert(multiplayerServer.resolveRequestPath('/..%2F..%2Fpackage.json') === null, '多人端服务应拒绝穿越到项目根目录');
   assert(multiplayerServer.resolveRequestPath('/%E0%A4%A') === null, '多人端服务应拒绝非法URL编码');
 }
@@ -3318,6 +3362,135 @@ function testMultiplayerSharedRulePreflight() {
   assert(hexcorePreflight.ok && !hexcorePreflight.duplicate, '队长非自己回合仅在海克斯允许窗口可执行对应海克斯操作');
 }
 
+function testMultiplayerTurnTimers() {
+  let viewerRejected = false;
+  try {
+    multiplayerShared.createCommand({
+      commandId: 'cmd-timer-viewer',
+      tournamentId: 'tournament-timer',
+      type: multiplayerShared.COMMAND_TYPES.UPDATE_TURN_TIMERS,
+      actorId: 'viewer-timer',
+      role: multiplayerShared.ROLES.VIEWER,
+      baseVersion: 0,
+      payload: { hexcoreSeconds: 30, shopSeconds: 45 },
+    });
+  } catch (error) {
+    viewerRejected = /无权执行/.test(error.message);
+  }
+  assert(viewerRejected, '观众端不应具备修改回合计时的 command 权限');
+
+  const baseSnapshot = {
+    currentTeamId: 'team-1',
+    currentRound: 1,
+    settings: { initialGold: 6, roundIncome: 3, refreshCosts: [1, 2, 3, 4], turnTimers: { hexcoreSeconds: 0, shopSeconds: 0 } },
+    teams: [
+      { teamId: 'team-1', name: '计时1队', economy: { gold: 6 } },
+      { teamId: 'team-2', name: '计时2队', economy: { gold: 6 } },
+    ],
+    hexcoreAssignments: { 'team-1': [], 'team-2': [] },
+  };
+  const state = multiplayerRules.createAuthorityState({
+    tournamentId: 'tournament-timer',
+    snapshot: baseSnapshot,
+  });
+  const updateCommand = multiplayerShared.createCommand({
+    commandId: 'cmd-timer-update',
+    tournamentId: 'tournament-timer',
+    type: multiplayerShared.COMMAND_TYPES.UPDATE_TURN_TIMERS,
+    actorId: 'referee-timer',
+    role: multiplayerShared.ROLES.REFEREE,
+    baseVersion: 0,
+    payload: { hexcoreSeconds: 1, shopSeconds: 2 },
+  });
+  const updated = multiplayerRules.acceptCommandAsEvent(
+    state,
+    updateCommand,
+    { actorId: 'referee-timer', role: multiplayerShared.ROLES.REFEREE, teamId: '' },
+    multiplayerShared.EVENT_TYPES.TURN_TIMERS_UPDATED,
+    updateCommand.payload
+  );
+  assert(updated.state.snapshot.settings.turnTimers.hexcoreSeconds === 1 && updated.state.snapshot.settings.turnTimers.shopSeconds === 2, '裁判应能写入独立的海克斯和商店计时秒数');
+
+  const drawCommand = multiplayerShared.createCommand({
+    commandId: 'cmd-timer-hex-draw',
+    tournamentId: 'tournament-timer',
+    type: multiplayerShared.COMMAND_TYPES.START_HEXCORE_DRAW,
+    actorId: 'captain-timer-1',
+    role: multiplayerShared.ROLES.CAPTAIN,
+    teamId: 'team-1',
+    baseVersion: 1,
+    payload: {
+      teamId: 'team-1',
+      slots: ['camp-scout', 'discount-coupon'],
+      seenIds: ['camp-scout', 'discount-coupon'],
+      drawOrder: ['team-1', 'team-2'],
+    },
+  });
+  const hexDraw = multiplayerRules.acceptCommandAsEvent(
+    updated.state,
+    drawCommand,
+    { actorId: 'captain-timer-1', role: multiplayerShared.ROLES.CAPTAIN, teamId: 'team-1' },
+    multiplayerShared.EVENT_TYPES.HEXCORE_CANDIDATES_CREATED,
+    drawCommand.payload
+  );
+  const hexTimer = hexDraw.state.snapshot.activeTurnTimer;
+  assert(hexTimer && hexTimer.phase === 'hexcore_draw' && hexTimer.teamId === 'team-1' && hexTimer.durationMs === 1000, '生成海克斯候选后应启动海克斯选择倒计时');
+  const hexExpired = multiplayerRules.resolveExpiredTurnTimer(hexDraw.state, new Date(Date.parse(hexTimer.graceDeadlineAt) + 5).toISOString());
+  assert(
+    hexExpired.stateVersion === hexDraw.state.stateVersion + 1
+    && hexExpired.snapshot.hexcoreAssignments['team-1'][0].id === 'camp-scout'
+    && hexExpired.snapshot.currentTeamId === 'team-2'
+    && !hexExpired.snapshot.activeTurnTimer,
+    '海克斯倒计时超时后服务端应自动选择第一个候选并进入下一位队长'
+  );
+
+  const shopState = multiplayerRules.createAuthorityState({
+    tournamentId: 'tournament-shop-timer',
+    snapshot: {
+      ...baseSnapshot,
+      settings: { ...baseSnapshot.settings, turnTimers: { hexcoreSeconds: 0, shopSeconds: 1 } },
+      currentPhase: 'gold_shop',
+      players: [{ id: 'player-1', name: '选手1', status: 'available', camp: 'local', tier: 1 }],
+    },
+  });
+  const shopCommand = multiplayerShared.createCommand({
+    commandId: 'cmd-timer-shop-open',
+    tournamentId: 'tournament-shop-timer',
+    type: multiplayerShared.COMMAND_TYPES.OPEN_SHOP,
+    actorId: 'referee-timer',
+    role: multiplayerShared.ROLES.REFEREE,
+    teamId: 'team-1',
+    baseVersion: 0,
+    payload: { teamId: 'team-1' },
+  });
+  const shopOpened = multiplayerRules.acceptCommandAsEvent(
+    shopState,
+    shopCommand,
+    { actorId: 'referee-timer', role: multiplayerShared.ROLES.REFEREE, teamId: '' },
+    multiplayerShared.EVENT_TYPES.SHOP_OPENED,
+    {
+      teamId: 'team-1',
+      round: 1,
+      currentShop: {
+        id: 'timer-shop',
+        teamId: 'team-1',
+        round: 1,
+        cards: [{ slotId: 'slot-1', playerId: 'player-1', tier: 1, price: 1, camp: 'local' }],
+      },
+    }
+  );
+  const shopTimer = shopOpened.state.snapshot.activeTurnTimer;
+  assert(shopTimer && shopTimer.phase === 'gold_shop' && shopTimer.teamId === 'team-1', '打开金币商店后应启动抽选手卡倒计时');
+  const shopExpired = multiplayerRules.resolveExpiredTurnTimer(shopOpened.state, new Date(Date.parse(shopTimer.graceDeadlineAt) + 5).toISOString());
+  assert(
+    shopExpired.snapshot.roundStates['team-1']['1'].skipped
+    && shopExpired.snapshot.currentTeamId === 'team-2'
+    && shopExpired.snapshot.activeTurnTimer
+    && shopExpired.snapshot.activeTurnTimer.teamId === 'team-2',
+    '商店倒计时超时后服务端应自动跳过当前队长，并为下一队长启动商店计时'
+  );
+}
+
 async function testMultiplayerApiServer() {
   const server = multiplayerApiServer.createServer();
   const port = await listen(server);
@@ -3333,8 +3506,110 @@ async function testMultiplayerApiServer() {
       && Number.isInteger(Number(health.body.uptimeSeconds))
       && health.body.runtime
       && health.body.runtime.storage === 'memory'
-      && Number.isInteger(Number(health.body.runtime.tournamentCount)),
+      && Number.isInteger(Number(health.body.runtime.tournamentCount))
+      && Number.isInteger(Number(health.body.runtime.activeRoomCount))
+      && Number.isInteger(Number(health.body.runtime.maxRooms)),
       '多人端服务应提供健康检查、规则版本和基础运行状态'
+    );
+
+    const limitedStore = new MemoryTournamentStore({ maxRooms: 1 });
+    const limitedServer = multiplayerApiServer.createServer({ store: limitedStore });
+    const limitedPort = await listen(limitedServer);
+    let limitedCreatedA = null;
+    let limitedRefereeJoinA = null;
+    let limitedCreateBlocked = null;
+    let limitedRoomsBeforeArchive = null;
+    let limitedArchiveA = null;
+    let limitedJoinArchived = null;
+    let limitedCommandArchived = null;
+    let limitedCreatedB = null;
+    let limitedRefereeJoinB = null;
+    let limitedDeleteB = null;
+    let limitedSnapshotDeleted = null;
+    let limitedExportDeleted = null;
+    let limitedHealthAfterDelete = null;
+    try {
+      limitedCreatedA = await requestJson(limitedPort, 'POST', '/api/tournaments', {
+        id: 't-room-limit-a',
+        name: '房间上限A',
+        actorId: 'referee-room-limit',
+        teams: [{ teamId: 'limit-a-team', name: '上限A队', code: 'limit-a-captain-code', camp: 'local' }],
+        refereeCode: 'limit-a-referee-code',
+      });
+      limitedRefereeJoinA = await requestJson(limitedPort, 'POST', '/api/tournaments/t-room-limit-a/join', {
+        code: limitedCreatedA.body.room.refereeCode,
+        displayName: '上限裁判A',
+      });
+      limitedCreateBlocked = await requestJson(limitedPort, 'POST', '/api/tournaments', {
+        id: 't-room-limit-blocked',
+        name: '应被上限拦截',
+        actorId: 'referee-room-limit',
+      });
+      limitedRoomsBeforeArchive = await requestJson(limitedPort, 'GET', '/api/tournaments');
+      limitedArchiveA = await requestJson(limitedPort, 'POST', '/api/tournaments/t-room-limit-a/archive', {
+        sessionToken: limitedRefereeJoinA.body.session.sessionToken,
+      });
+      limitedJoinArchived = await requestJson(limitedPort, 'POST', '/api/tournaments/t-room-limit-a/join', {
+        code: limitedCreatedA.body.room.captainCodes[0].code,
+        displayName: '归档后队长',
+      });
+      limitedCommandArchived = await requestJson(limitedPort, 'POST', '/api/tournaments/t-room-limit-a/commands', {
+        sessionToken: limitedRefereeJoinA.body.session.sessionToken,
+        command: {
+          commandId: 'cmd-api-archive-rename',
+          type: multiplayerShared.COMMAND_TYPES.RENAME_TEAM,
+          baseVersion: 1,
+          payload: { teamId: 'limit-a-team', name: '归档改名' },
+        },
+      });
+      limitedCreatedB = await requestJson(limitedPort, 'POST', '/api/tournaments', {
+        id: 't-room-limit-b',
+        name: '房间上限B',
+        actorId: 'referee-room-limit',
+        teams: [{ teamId: 'limit-b-team', name: '上限B队', code: 'limit-b-captain-code', camp: 'local' }],
+        refereeCode: 'limit-b-referee-code',
+      });
+      limitedRefereeJoinB = await requestJson(limitedPort, 'POST', '/api/tournaments/t-room-limit-b/join', {
+        code: limitedCreatedB.body.room.refereeCode,
+        displayName: '上限裁判B',
+      });
+      limitedDeleteB = await requestJson(limitedPort, 'DELETE', '/api/tournaments/t-room-limit-b', {
+        sessionToken: limitedRefereeJoinB.body.session.sessionToken,
+      });
+      limitedSnapshotDeleted = await requestJson(limitedPort, 'GET', '/api/tournaments/t-room-limit-b/snapshot');
+      limitedExportDeleted = await requestJson(limitedPort, 'GET', '/api/tournaments/t-room-limit-b/export', null, {
+        headers: { Authorization: `Bearer ${limitedRefereeJoinB.body.session.sessionToken}` },
+      });
+      limitedHealthAfterDelete = await requestJson(limitedPort, 'GET', '/health');
+    } finally {
+      await closeServer(limitedServer);
+    }
+    const limitedRoomsText = JSON.stringify(limitedRoomsBeforeArchive.body);
+    assert(
+      limitedCreatedA.status === 201
+      && limitedRefereeJoinA.status === 200
+      && limitedCreateBlocked.status === 400
+      && /房间数量已达上限/.test(limitedCreateBlocked.body.error)
+      && limitedRoomsBeforeArchive.status === 200
+      && Array.isArray(limitedRoomsBeforeArchive.body.rooms)
+      && limitedRoomsBeforeArchive.body.rooms.some(room => room.tournamentId === 't-room-limit-a' && room.status === 'active')
+      && !limitedRoomsText.includes('limit-a-referee-code')
+      && !limitedRoomsText.includes('limit-a-captain-code')
+      && !limitedRoomsText.includes('codeHash')
+      && limitedArchiveA.status === 200
+      && limitedArchiveA.body.room.status === 'archived'
+      && limitedJoinArchived.status === 403
+      && /已归档/.test(limitedJoinArchived.body.error)
+      && limitedCommandArchived.status === 403
+      && /已归档/.test(limitedCommandArchived.body.error)
+      && limitedCreatedB.status === 201
+      && limitedRefereeJoinB.status === 200
+      && limitedDeleteB.status === 200
+      && limitedSnapshotDeleted.status === 404
+      && limitedExportDeleted.status === 404
+      && limitedHealthAfterDelete.body.runtime.activeRoomCount === 0
+      && limitedHealthAfterDelete.body.runtime.maxRooms === 1,
+      '多人端多房间生命周期应限制 active 房间数、归档后只读、删除后不可访问，且列表不泄漏房间码'
     );
 
     const durableFile = path.join(os.tmpdir(), `hexcore-store-${Date.now()}-${Math.random().toString(16).slice(2)}.json`);
@@ -3453,6 +3728,16 @@ async function testMultiplayerApiServer() {
         { teamId: 'team-3', name: '测试3队', code: 'captain-code-3', camp: 'local' },
         { teamId: 'team-4', name: '测试4队', code: 'captain-code-4', camp: 'outsider' },
       ],
+      playerProfiles: [
+        {
+          id: 'profile-secret',
+          commonName: '档案选手',
+          aliases: ['档案旧名'],
+          historicalIdentities: [{ tournamentName: '旧赛事', region: '一区', gameId: 'PROFILE_OLD', name: '档案旧名' }],
+          attendanceReliability: 'high_risk',
+          refereeNotes: 'profile-note-secret',
+        },
+      ],
       tournament: {
         type: 'single_elimination',
         status: 'running',
@@ -3508,8 +3793,9 @@ async function testMultiplayerApiServer() {
       && captainProjectionText.includes('r2m1')
       && !captainProjectionText.includes('r1m2')
       && !captainProjectionText.includes('schedule-secret')
-      && !captainProjectionText.includes('other-secret'),
-      '队长赛程投影只应返回本队相关场次，不暴露无关赛程或私有字段'
+      && !captainProjectionText.includes('other-secret')
+      && !captainProjectionText.includes('profile-note-secret'),
+      '队长赛程投影只应返回本队相关场次，不暴露无关赛程、私有字段或选手可靠性备注'
     );
 
     const viewerJoin = await requestJson(port, 'POST', '/api/tournaments/t-api/join', {
@@ -3523,6 +3809,34 @@ async function testMultiplayerApiServer() {
       displayName: '裁判用户',
     });
     assert(refereeJoin.status === 200 && refereeJoin.body.session.role === multiplayerShared.ROLES.REFEREE, '裁判应能通过创建时返回的裁判码加入房间');
+
+    const noCampProjectionCreated = await requestJson(port, 'POST', '/api/tournaments', {
+      id: 't-api-projection-nocamp',
+      name: '无阵营投影回归',
+      actorId: 'referee-projection',
+      settings: {
+        teamCount: 12,
+        totalTeams: 12,
+        playersPerTeam: 5,
+        campMode: 'no_camp',
+        pairingMode: 'random',
+      },
+    });
+    const noCampProjectionRefereeJoin = await requestJson(port, 'POST', '/api/tournaments/t-api-projection-nocamp/join', {
+      code: noCampProjectionCreated.body.room.refereeCode,
+      displayName: '无阵营投影裁判',
+    });
+    const noCampProjection = await requestJson(port, 'GET', `/api/tournaments/t-api-projection-nocamp/projection?view=referee&sessionToken=${encodeURIComponent(noCampProjectionRefereeJoin.body.session.sessionToken)}`);
+    assert(
+      noCampProjection.status === 200
+      && noCampProjection.body.tournament.snapshot.teams.length === 12
+      && noCampProjection.body.tournament.snapshot.settings.teamCount === 12
+      && noCampProjection.body.tournament.snapshot.settings.totalTeams === 12
+      && noCampProjection.body.tournament.snapshot.settings.playersPerTeam === 5
+      && noCampProjection.body.tournament.snapshot.settings.campMode === 'no_camp'
+      && noCampProjection.body.tournament.snapshot.settings.pairingMode === 'random',
+      '裁判投影必须包含动态队伍数量和规则模式，前端才能从默认 10 队切换到服务端 12 队无阵营状态'
+    );
 
     const room = await requestJson(port, 'GET', `/api/tournaments/t-api/room?sessionToken=${encodeURIComponent(refereeJoin.body.session.sessionToken)}`);
     assert(room.status === 200 && room.body.room.captainCodes[0].codeIssued === true, '裁判 session 应能读取房间码管理摘要');
@@ -3539,9 +3853,10 @@ async function testMultiplayerApiServer() {
       && refereeProjection.body.tournament.role === multiplayerShared.ROLES.REFEREE
       && refereeProjectionText.includes('r1m1')
       && refereeProjectionText.includes('r1m2')
+      && refereeProjectionText.includes('profile-note-secret')
       && !refereeProjectionText.includes('schedule-secret')
       && !refereeProjectionText.includes('other-secret'),
-      '裁判投影应能读取完整赛程公开字段，但不泄漏赛程私有字段'
+      '裁判投影应能读取完整赛程公开字段和选手档案，但不泄漏赛程私有字段'
     );
 
     const healthAfterCreate = await requestJson(port, 'GET', '/health');
@@ -3982,6 +4297,142 @@ async function testMultiplayerApiServer() {
       && afterBlockedRefresh.body.tournament.snapshot.roundStates['team-local']['1'].purchaseUsed
       && afterBlockedRefresh.body.tournament.snapshot.teams[0].economy.gold === 5 - generatedPlayerPrice,
       '服务端购买后应固化本轮权限，不能再通过刷新重置购买状态或再次扣费'
+    );
+
+    const noCampShopCreated = await requestJson(port, 'POST', '/api/tournaments', {
+      id: 't-no-camp-shop',
+      name: '无阵营服务端商店回归',
+      actorId: 'referee-no-camp-shop',
+      settings: { teamCount: 6, campMode: 'no_camp', initialGold: 9, refreshCosts: [1, 2, 3, 4] },
+      teams: Array.from({ length: 6 }, (_, index) => ({
+        teamId: `no-camp-team-${index + 1}`,
+        name: `无阵营${index + 1}队`,
+        camp: '',
+        code: `no-camp-shop-code-${index + 1}`,
+        economy: { gold: 9 },
+      })),
+      players: [
+        { id: 'no-camp-blank-1', name: '无阵营空白一号', gameId: 'NCB1', camp: '', tier: 1, score: 81, status: 'available' },
+        { id: 'no-camp-local-1', name: '无阵营本地一号', gameId: 'NCL1', camp: 'local', tier: 2, score: 82, status: 'available' },
+        { id: 'no-camp-outsider-1', name: '无阵营外地一号', gameId: 'NCO1', camp: 'outsider', tier: 3, score: 83, status: 'available' },
+        { id: 'no-camp-blank-2', name: '无阵营空白二号', gameId: 'NCB2', camp: '', tier: 4, score: 84, status: 'available' },
+        { id: 'no-camp-local-2', name: '无阵营本地二号', gameId: 'NCL2', camp: 'local', tier: 5, score: 85, status: 'available' },
+        { id: 'no-camp-outsider-2', name: '无阵营外地二号', gameId: 'NCO2', camp: 'outsider', tier: 2, score: 86, status: 'available' },
+      ],
+    });
+    const noCampShopJoin = await requestJson(port, 'POST', '/api/tournaments/t-no-camp-shop/join', {
+      code: noCampShopCreated.body.room.captainCodes[0].code,
+      displayName: '无阵营商店队长',
+    });
+    const noCampGeneratedShop = await requestJson(port, 'POST', '/api/tournaments/t-no-camp-shop/commands', {
+      sessionToken: noCampShopJoin.body.session.sessionToken,
+      command: {
+        commandId: 'cmd-api-no-camp-open-shop',
+        type: multiplayerShared.COMMAND_TYPES.OPEN_SHOP,
+        baseVersion: 1,
+        payload: { teamId: 'no-camp-team-1', round: 1 },
+      },
+    });
+    const noCampCards = noCampGeneratedShop.body.tournament.snapshot.currentShop.cards;
+    const noCampPurchase = await requestJson(port, 'POST', '/api/tournaments/t-no-camp-shop/commands', {
+      sessionToken: noCampShopJoin.body.session.sessionToken,
+      command: {
+        commandId: 'cmd-api-no-camp-purchase',
+        type: multiplayerShared.COMMAND_TYPES.PURCHASE_SHOP_CARD,
+        baseVersion: 2,
+        payload: { teamId: 'no-camp-team-1', slotId: noCampCards[0] && noCampCards[0].slotId },
+      },
+    });
+    assert(
+      noCampShopCreated.status === 201
+      && noCampGeneratedShop.status === 200
+      && noCampCards.length === 5
+      && noCampCards.some(card => !card.camp)
+      && noCampCards.some(card => card.camp === 'local')
+      && noCampCards.some(card => card.camp === 'outsider')
+      && noCampPurchase.status === 200
+      && noCampPurchase.body.tournament.snapshot.teams[0].team.includes(noCampCards[0].playerId),
+      '无阵营模式下服务端商店应从公共选手池生成，可购买无阵营、本地或外地选手'
+    );
+
+    const substituteCreated = await requestJson(port, 'POST', '/api/tournaments', {
+      id: 't-substitute-flow',
+      name: '替补流程回归',
+      actorId: 'referee-substitute',
+      teams: [
+        { teamId: 'sub-team-local', name: '替补本地队', camp: 'local', code: 'sub-local-code', team: ['sub-absent-local'], economy: { gold: 6 } },
+      ],
+      refereeCode: 'sub-referee-code',
+      viewerCode: 'sub-viewer-code',
+      players: [
+        { id: 'sub-absent-local', name: '缺席本地', gameId: 'SAL', camp: 'local', tier: 2, score: 82, status: 'drafted', teamId: 'sub-team-local', attendanceStatus: 'high_risk', refereeNotes: 'absent-secret' },
+        { id: 'sub-candidate-local', name: '替补本地', gameId: 'SCL', camp: 'local', tier: 2, score: 81, status: 'available', attendanceStatus: 'substitute', drawWeight: 0, refereeNotes: 'sub-secret' },
+        { id: 'sub-candidate-outsider', name: '替补外地', gameId: 'SCO', camp: 'outsider', tier: 2, score: 80, status: 'available', attendanceStatus: 'confirmed', drawWeight: 1 },
+      ],
+    });
+    const substituteRefereeJoin = await requestJson(port, 'POST', '/api/tournaments/t-substitute-flow/join', {
+      code: substituteCreated.body.room.refereeCode,
+      displayName: '替补裁判',
+    });
+    const substituteViewerJoin = await requestJson(port, 'POST', '/api/tournaments/t-substitute-flow/join', {
+      code: substituteCreated.body.room.viewerCode,
+      displayName: '替补观众',
+    });
+    const substituteCrossRejected = await requestJson(port, 'POST', '/api/tournaments/t-substitute-flow/commands', {
+      sessionToken: substituteRefereeJoin.body.session.sessionToken,
+      command: {
+        commandId: 'cmd-api-sub-cross-rejected',
+        type: multiplayerShared.COMMAND_TYPES.REPLACE_WITH_SUBSTITUTE,
+        baseVersion: 1,
+        payload: {
+          teamId: 'sub-team-local',
+          absentPlayerId: 'sub-absent-local',
+          substitutePlayerId: 'sub-candidate-outsider',
+        },
+      },
+    });
+    const substituteActivated = await requestJson(port, 'POST', '/api/tournaments/t-substitute-flow/commands', {
+      sessionToken: substituteRefereeJoin.body.session.sessionToken,
+      command: {
+        commandId: 'cmd-api-sub-activate',
+        type: multiplayerShared.COMMAND_TYPES.ACTIVATE_SUBSTITUTE,
+        baseVersion: 1,
+        payload: { playerId: 'sub-candidate-local' },
+      },
+    });
+    const substituteReplaced = await requestJson(port, 'POST', '/api/tournaments/t-substitute-flow/commands', {
+      sessionToken: substituteRefereeJoin.body.session.sessionToken,
+      command: {
+        commandId: 'cmd-api-sub-replace',
+        type: multiplayerShared.COMMAND_TYPES.REPLACE_WITH_SUBSTITUTE,
+        baseVersion: 2,
+        payload: {
+          teamId: 'sub-team-local',
+          absentPlayerId: 'sub-absent-local',
+          substitutePlayerId: 'sub-candidate-local',
+          replacementReason: '赛前缺席',
+        },
+      },
+    });
+    const substituteViewerProjection = await requestJson(port, 'GET', `/api/tournaments/t-substitute-flow/projection?view=viewer&sessionToken=${encodeURIComponent(substituteViewerJoin.body.session.sessionToken)}`);
+    const substituteText = JSON.stringify(substituteViewerProjection.body);
+    assert(
+      substituteCreated.status === 201
+      && substituteRefereeJoin.status === 200
+      && substituteViewerJoin.status === 200
+      && substituteCrossRejected.status === 400
+      && /替补必须匹配/.test(substituteCrossRejected.body.error)
+      && substituteActivated.status === 200
+      && substituteActivated.body.tournament.snapshot.lastSubstituteAction.type === 'activate'
+      && substituteReplaced.status === 200
+      && substituteReplaced.body.tournament.snapshot.teams[0].team.includes('sub-candidate-local')
+      && !substituteReplaced.body.tournament.snapshot.teams[0].team.includes('sub-absent-local')
+      && substituteReplaced.body.tournament.snapshot.lastSubstituteAction.type === 'replace'
+      && substituteViewerProjection.status === 200
+      && substituteViewerProjection.body.tournament.snapshot.teams[0].team.includes('sub-candidate-local')
+      && !substituteText.includes('absent-secret')
+      && !substituteText.includes('sub-secret'),
+      '多人端替补流程应支持裁判激活替补并替换缺席队员，双阵营校验阵营且公开投影不泄漏裁判备注'
     );
 
     const snowCreated = await requestJson(port, 'POST', '/api/tournaments', {
@@ -4671,6 +5122,168 @@ async function testMultiplayerApiServer() {
       '服务端海浪异阵营命中时应退回真实购买选手、返还购买者金币和购买权，并在轮末发放同阵营补偿'
     );
 
+    const hungryNoCampCreated = await requestJson(port, 'POST', '/api/tournaments', {
+      id: 't-hungry-wave-no-camp',
+      name: '无阵营海浪权威回归',
+      actorId: 'referee-hungry-no-camp',
+      currentTeamId: 'wave-no-camp-2',
+      settings: { teamCount: 6, campMode: 'no_camp', initialGold: 9, refreshCosts: [1, 2, 3, 4] },
+      teams: Array.from({ length: 6 }, (_, index) => ({
+        teamId: `wave-no-camp-${index + 1}`,
+        name: `无阵营海浪${index + 1}队`,
+        camp: '',
+        code: `wave-no-camp-code-${index + 1}`,
+        economy: { gold: index === 0 ? 0 : 9 },
+      })),
+      hexcoreAssignments: {
+        'wave-no-camp-1': [{ id: 'hungry-wave', status: 'passive' }],
+      },
+      hungryWaveRound: {
+        captainId: 'wave-no-camp-1',
+        round: 1,
+        active: true,
+      },
+      players: [
+        { id: 'wave-no-camp-player-1', name: '无阵营海浪一号', gameId: 'NHW1', camp: '', tier: 2, score: 82, status: 'available' },
+        { id: 'wave-no-camp-player-2', name: '无阵营海浪二号', gameId: 'NHW2', camp: 'outsider', tier: 3, score: 83, status: 'available' },
+        { id: 'wave-no-camp-player-3', name: '无阵营海浪三号', gameId: 'NHW3', camp: 'local', tier: 4, score: 84, status: 'available' },
+      ],
+    });
+    const hungryNoCampBuyerJoin = await requestJson(port, 'POST', '/api/tournaments/t-hungry-wave-no-camp/join', {
+      code: hungryNoCampCreated.body.room.captainCodes[1].code,
+      displayName: '无阵营海浪购买队长',
+    });
+    const hungryNoCampShop = await requestJson(port, 'POST', '/api/tournaments/t-hungry-wave-no-camp/commands', {
+      sessionToken: hungryNoCampBuyerJoin.body.session.sessionToken,
+      command: {
+        commandId: 'cmd-api-hungry-no-camp-shop',
+        type: multiplayerShared.COMMAND_TYPES.OPEN_SHOP,
+        baseVersion: 1,
+        payload: { teamId: 'wave-no-camp-2', round: 1 },
+      },
+    });
+    const hungryNoCampPlayerId = hungryNoCampShop.body.tournament.snapshot.currentShop.cards[0].playerId;
+    const hungryNoCampHitCommandId = hungryWaveCommandIdForRoll({
+      tournamentId: 't-hungry-wave-no-camp',
+      round: 1,
+      sourceTeamId: 'wave-no-camp-1',
+      buyerTeamId: 'wave-no-camp-2',
+      playerId: hungryNoCampPlayerId,
+      remaining: 5,
+      wantedHit: true,
+    });
+    const hungryNoCampPurchase = await requestJson(port, 'POST', '/api/tournaments/t-hungry-wave-no-camp/commands', {
+      sessionToken: hungryNoCampBuyerJoin.body.session.sessionToken,
+      command: {
+        commandId: hungryNoCampHitCommandId,
+        type: multiplayerShared.COMMAND_TYPES.PURCHASE_SHOP_CARD,
+        baseVersion: 2,
+        payload: { teamId: 'wave-no-camp-2', slotId: hungryNoCampShop.body.tournament.snapshot.currentShop.cards[0].slotId },
+      },
+    });
+    const hungryNoCampRoundEnd = await requestJson(port, 'POST', '/api/tournaments/t-hungry-wave-no-camp/commands', {
+      sessionToken: hungryNoCampBuyerJoin.body.session.sessionToken,
+      command: {
+        commandId: 'cmd-api-hungry-no-camp-round-end',
+        type: multiplayerShared.COMMAND_TYPES.SKIP_TURN,
+        baseVersion: 3,
+        payload: { teamId: 'wave-no-camp-2', round: 1 },
+      },
+    });
+    assert(
+      hungryNoCampShop.status === 200
+      && hungryNoCampShop.body.tournament.snapshot.currentShop.cards.length === 3
+      && hungryNoCampPurchase.status === 200
+      && hungryNoCampPurchase.body.tournament.snapshot.teams[0].team.includes(hungryNoCampPlayerId)
+      && !hungryNoCampPurchase.body.tournament.snapshot.teams[1].team.includes(hungryNoCampPlayerId)
+      && hungryNoCampPurchase.body.tournament.snapshot.teams[1].economy.gold === 9
+      && hungryNoCampPurchase.body.tournament.snapshot.roundStates['wave-no-camp-2']['1'].purchaseUsed === false
+      && hungryNoCampPurchase.body.tournament.snapshot.lastHungryWave.type === 'no_camp_steal'
+      && hungryNoCampPurchase.body.tournament.snapshot.lastHungryWave.pendingRoundReward === false
+      && hungryNoCampRoundEnd.status === 200
+      && hungryNoCampRoundEnd.body.tournament.snapshot.lastHungryWave.type === 'no_camp_steal',
+      '无阵营海浪命中后应直接夺取公共池购买选手，返还购买队长资源，不登记轮末阵营补偿'
+    );
+
+    const heavenlyNoCampCreated = await requestJson(port, 'POST', '/api/tournaments', {
+      id: 't-heavenly-no-camp',
+      name: '无阵营神兵天降权威回归',
+      actorId: 'referee-heavenly-no-camp',
+      currentTeamId: 'heavenly-no-camp-buyer',
+      settings: { teamCount: 6, campMode: 'no_camp', initialGold: 9, refreshCosts: [1, 2, 3, 4] },
+      teams: [
+        { teamId: 'heavenly-no-camp-source', name: '神兵来源队', camp: '', code: 'heavenly-no-camp-source-code', economy: { gold: 9 } },
+        { teamId: 'heavenly-no-camp-buyer', name: '神兵购买队', camp: '', code: 'heavenly-no-camp-buyer-code', economy: { gold: 9 } },
+        { teamId: 'heavenly-no-camp-3', name: '神兵三队', camp: '', code: 'heavenly-no-camp-code-3', economy: { gold: 9 } },
+        { teamId: 'heavenly-no-camp-4', name: '神兵四队', camp: '', code: 'heavenly-no-camp-code-4', economy: { gold: 9 } },
+        { teamId: 'heavenly-no-camp-5', name: '神兵五队', camp: '', code: 'heavenly-no-camp-code-5', economy: { gold: 9 } },
+        { teamId: 'heavenly-no-camp-6', name: '神兵六队', camp: '', code: 'heavenly-no-camp-code-6', economy: { gold: 9 } },
+      ],
+      hexcoreAssignments: {
+        'heavenly-no-camp-source': [{ id: 'heavenly-descent', status: 'available' }],
+      },
+      players: [
+        { id: 'heavenly-no-camp-player-1', name: '无阵营神兵一号', gameId: 'NHD1', camp: '', tier: 2, score: 82, status: 'available' },
+        { id: 'heavenly-no-camp-player-2', name: '无阵营神兵二号', gameId: 'NHD2', camp: 'local', tier: 3, score: 83, status: 'available' },
+        { id: 'heavenly-no-camp-player-3', name: '无阵营神兵三号', gameId: 'NHD3', camp: 'outsider', tier: 4, score: 84, status: 'available' },
+      ],
+    });
+    const heavenlyNoCampSourceJoin = await requestJson(port, 'POST', '/api/tournaments/t-heavenly-no-camp/join', {
+      code: heavenlyNoCampCreated.body.room.captainCodes[0].code,
+      displayName: '无阵营神兵来源队长',
+    });
+    const heavenlyNoCampBuyerJoin = await requestJson(port, 'POST', '/api/tournaments/t-heavenly-no-camp/join', {
+      code: heavenlyNoCampCreated.body.room.captainCodes[1].code,
+      displayName: '无阵营神兵购买队长',
+    });
+    const heavenlyNoCampShop = await requestJson(port, 'POST', '/api/tournaments/t-heavenly-no-camp/commands', {
+      sessionToken: heavenlyNoCampBuyerJoin.body.session.sessionToken,
+      command: {
+        commandId: 'cmd-api-heavenly-no-camp-shop',
+        type: multiplayerShared.COMMAND_TYPES.OPEN_SHOP,
+        baseVersion: 1,
+        payload: { teamId: 'heavenly-no-camp-buyer', round: 1 },
+      },
+    });
+    const heavenlyNoCampCard = heavenlyNoCampShop.body.tournament.snapshot.currentShop.cards[0];
+    const heavenlyNoCampPurchase = await requestJson(port, 'POST', '/api/tournaments/t-heavenly-no-camp/commands', {
+      sessionToken: heavenlyNoCampBuyerJoin.body.session.sessionToken,
+      command: {
+        commandId: 'cmd-api-heavenly-no-camp-purchase',
+        type: multiplayerShared.COMMAND_TYPES.PURCHASE_SHOP_CARD,
+        baseVersion: 2,
+        payload: { teamId: 'heavenly-no-camp-buyer', slotId: heavenlyNoCampCard && heavenlyNoCampCard.slotId },
+      },
+    });
+    const heavenlyNoCampUse = await requestJson(port, 'POST', '/api/tournaments/t-heavenly-no-camp/commands', {
+      sessionToken: heavenlyNoCampSourceJoin.body.session.sessionToken,
+      command: {
+        commandId: 'cmd-api-heavenly-no-camp-use',
+        type: multiplayerShared.COMMAND_TYPES.USE_HEXCORE,
+        baseVersion: 3,
+        payload: { teamId: 'heavenly-no-camp-source', hexcoreId: 'heavenly-descent' },
+      },
+    });
+    assert(
+      heavenlyNoCampCreated.status === 201
+      && heavenlyNoCampShop.status === 200
+      && heavenlyNoCampPurchase.status === 200
+      && heavenlyNoCampPurchase.body.tournament.snapshot.hexcoreActionWindows.some(window =>
+        window.hexcoreId === 'heavenly-descent'
+        && window.teamId === 'heavenly-no-camp-source'
+        && window.sourceTeamId === 'heavenly-no-camp-buyer'
+      )
+      && heavenlyNoCampUse.status === 200
+      && heavenlyNoCampUse.body.tournament.snapshot.teams[0].team.includes(heavenlyNoCampCard.playerId)
+      && !heavenlyNoCampUse.body.tournament.snapshot.teams[1].team.includes(heavenlyNoCampCard.playerId)
+      && heavenlyNoCampUse.body.tournament.snapshot.teams[1].economy.gold === 9
+      && heavenlyNoCampUse.body.tournament.snapshot.roundStates['heavenly-no-camp-buyer']['1'].purchaseUsed === false
+      && heavenlyNoCampUse.body.tournament.snapshot.roundStates['heavenly-no-camp-source']['2'].skipped === true
+      && heavenlyNoCampUse.body.tournament.snapshot.hexcoreAssignments['heavenly-no-camp-source'][0].status === 'used'
+      && heavenlyNoCampUse.body.tournament.snapshot.hexcoreActionWindows.every(window => window.hexcoreId !== 'heavenly-descent' || window.active === false),
+      '无阵营神兵天降应由服务端开启响应窗口，并允许夺取任意其他队长刚购买的公共池选手'
+    );
+
     const poorCreated = await requestJson(port, 'POST', '/api/tournaments', {
       id: 't-poor-refresh',
       name: '刷新金币不足回归',
@@ -5257,6 +5870,42 @@ function testTournamentScheduleRandomizesEntrants() {
   assert(app.innerHTML.includes('全随机对抗'), '赛程页应显示当前为全随机对抗模式');
 }
 
+function testNoCampTournamentScheduleUsesRandomMode() {
+  const { H, app } = createHarness({ sourceFiles: multiplayerSourceFiles });
+  installReadyTestData(H);
+  H.state.settings.campMode = 'no_camp';
+  H.state.settings.pairingMode = 'random';
+  H.state.ui = H.state.ui || {};
+  delete H.state.ui.tournamentCampVersus;
+  H.normalizeState(H.state);
+  H.ui.render();
+  H.actions.setActiveView('tournament');
+  const initialNoCampScheduleHtml = app.innerHTML;
+  const initialForbidden = ['阵营对抗', '生成班德尔保卫战', '本地队伍', '外地队伍']
+    .filter(text => initialNoCampScheduleHtml.includes(text));
+  assert(
+    !initialForbidden.length,
+    `无阵营赛程页不应显示阵营对抗、班德尔保卫战或本地/外地槽位文案：${initialForbidden.join('、')}`
+  );
+  H.actions.generateTournamentSchedule();
+  const firstRound = H.state.tournament.rounds[0];
+  assert(
+    H.state.tournament.pairingMode === 'random'
+    && firstRound.pairingMode !== 'camp_versus'
+    && firstRound.matches.every(match => match.pairingMode !== 'camp_versus'),
+    '无阵营模式下未手动选择时应默认生成全随机赛程'
+  );
+  H.actions.setActiveView('tournament');
+  assert(
+    app.innerHTML.includes('全随机对抗')
+    && !app.innerHTML.includes('左蓝本地')
+    && !app.innerHTML.includes('右红外地')
+    && !app.innerHTML.includes('阵营A')
+    && !app.innerHTML.includes('阵营B'),
+    '无阵营赛程生成后仍不应出现阵营槽位或阵营等待文案'
+  );
+}
+
 function testTournamentManualByeAndReorder() {
   const { H, app, elements } = createReadyHarness();
   H.actions.generateTournamentSchedule();
@@ -5378,7 +6027,7 @@ function testPostTaskIncompleteRetryLimit() {
   const stateFile = path.join(stateDir, 'state.json');
   const args = [
     '--status=incomplete',
-    '--doc=docs/06_开发计划.md',
+    '--doc=docs/planning/当前待开发计划.md',
     '--skip-gates=true',
     '--max-attempts=2',
     `--state-file=${stateFile}`,
@@ -5490,8 +6139,8 @@ function testHexcoreLibraryResponsiveStyles() {
   assert(css.includes('.hex-library-icon') && css.includes('flex: 0 0 64px;'), '海克斯库图标容器应固定尺寸，避免随标题压缩变形');
   assert(css.includes('.hex-library-desc > span') && css.includes('-webkit-line-clamp: 3'), '海克斯库描述应在卡片内摘要显示');
   assert(css.includes('.hex-detail-backdrop') && css.includes('.hex-detail-modal') && css.includes('overflow-y: auto'), '海克斯详情应使用固定尺寸弹窗并在正文区域滚动');
-  assert(css.includes('.hex-draw-actions') && css.includes('grid-template-columns: minmax(64px, 0.72fr) minmax(92px, 1fr);'), '海克斯候选卡的详情、刷新、选择按钮应使用两行自适应布局，避免中文按钮被截断');
-  assert(css.includes('.hex-draw-actions > button') && css.includes('min-height: 36px;') && css.includes('overflow-wrap: anywhere;'), '海克斯候选卡底部按钮应统一尺寸、字重，并允许中文按钮完整换行显示');
+  assert(css.includes('.hex-draw-actions') && css.includes('grid-template-columns: repeat(3, minmax(0, 1fr));'), '海克斯候选卡底部操作应使用三等分短按钮布局，避免中文按钮被截断');
+  assert(css.includes('.hex-draw-actions > button') && css.includes('min-height: 38px;') && css.includes('white-space: nowrap;') && css.includes('text-overflow: clip;'), '海克斯候选卡底部按钮应统一尺寸并避免省略号截断');
   assert(
     css.includes('.cannon-choice-grid button') && css.includes('display: inline-flex;')
     && css.includes('flex-direction: row;') && css.includes('justify-content: center;')
@@ -5499,7 +6148,7 @@ function testHexcoreLibraryResponsiveStyles() {
     && css.includes('white-space: nowrap;'),
     '大炮已充能选择按钮应使用单行横向居中布局，避免文字贴上边或换行'
   );
-  assert(css.includes('.hex-draw-actions .hex-detail-trigger') && css.includes('.hex-select-btn') && css.includes('grid-column: 1 / -1;') && css.includes('linear-gradient(180deg, #12d9ff, #00aee4)'), '海克斯候选卡详情/刷新/选择按钮应共用按钮基线，并保留选择按钮跨列主操作强调');
+  assert(css.includes('.hex-draw-actions .hex-detail-trigger') && css.includes('.hex-select-btn') && css.includes('linear-gradient(180deg, #12d9ff, #00aee4)') && uiSource.includes('title="选择此海克斯"'), '海克斯候选卡详情/刷新/选择按钮应共用按钮基线，并通过 title/aria-label 保留完整语义');
   assert(css.includes('.workspace > .workspace-main') && css.includes('overflow-y: auto;'), '实时抽选主内容超出视口高度时应在内容容器内纵向滚动');
   assert(uiSource.includes('function hexcoreIcon') && uiSource.includes('assets/hex-icons/${safeId}.png') && uiSource.includes('hex-svg-fallback'), '海克斯图标应优先加载同名本地 PNG，并保留 SVG 兜底');
   assert(
@@ -5810,11 +6459,18 @@ function testMultiplayerJoinGateAndCors() {
     && ui.includes('room-code-row-head')
     && ui.includes('joinGateMessagePanel()')
     && ui.includes('joinGateAccessPanel(apiBase)')
+    && ui.includes('roomListPanel()')
+    && ui.includes('roomLifecyclePanel()')
     && ui.includes('现场访问检查')
     && ui.includes('当前页面')
     && ui.includes('推荐页面')
     && ui.includes('window.hexcoreUI.copyJoinGateAccessText()')
     && ui.includes('window.hexcoreUI.checkJoinApiHealth()')
+    && ui.includes('window.hexcoreUI.loadRoomList()')
+    && ui.includes('window.hexcoreUI.archiveCurrentRoom()')
+    && ui.includes('window.hexcoreUI.deleteCurrentRoom()')
+    && ui.includes('join-room-list')
+    && ui.includes('检测中')
     && ui.includes('join-api-check')
     && ui.includes('客户电脑和手机不能直接使用 127.0.0.1')
     && ui.includes('message.tips')
@@ -5871,6 +6527,13 @@ function testMultiplayerJoinGateAndCors() {
     && main.includes('copyCreatedRoomCodes')
     && main.includes('copyJoinGateAccessText')
     && main.includes('checkJoinApiHealth')
+    && main.includes('loadRoomList')
+    && main.includes('archiveCurrentRoom')
+    && main.includes('/archive')
+    && main.includes('deleteCurrentRoom')
+    && main.includes("method: 'DELETE'")
+    && main.includes('/api/tournaments')
+    && main.includes('Hexcore2.state.ui.roomList')
     && main.includes('fetchApiHealth(apiBase)')
     && main.includes('检测不会提交赛事 ID、加入码或会话凭据')
     && main.includes('${base}/health')
@@ -5959,6 +6622,10 @@ function testMultiplayerJoinGateAndCors() {
     && css.includes('.join-api-check')
     && css.includes('.join-api-check.success')
     && css.includes('.join-api-check.warn')
+    && css.includes('.room-list-panel')
+    && css.includes('.room-list-row')
+    && css.includes('.room-list-status.archived')
+    && css.includes('.room-lifecycle-panel')
     && css.includes('.created-room-panel')
     && css.includes('.created-room-panel-stale')
     && css.includes('.form-hint')
@@ -5984,6 +6651,7 @@ function testMultiplayerJoinGateAndCors() {
 
 function testMultiplayerClientSubmitsAuthoritativeCommands() {
   const main = fs.readFileSync(path.join(root, 'apps/multiplayer/src/main.js'), 'utf8');
+  const refereeConsole = fs.readFileSync(path.join(root, 'apps/multiplayer/src/ui/referee-console.js'), 'utf8');
   assert(
     main.includes('function multiplayerSession()')
     && main.includes('async function submitRoomCommand(type, payload = {}, options = {})')
@@ -6009,9 +6677,10 @@ function testMultiplayerClientSubmitsAuthoritativeCommands() {
   assert(
     main.includes('function serverSyncedHexcoreUsePayload')
     && main.includes("submitRoomCommand('UseHexcore', syncedPayload)")
-    && main.includes("id !== 'snow-cat' && id !== 'storm-fog'")
+    && main.includes("id !== 'snow-cat' && id !== 'storm-fog' && id !== 'heavenly-descent'")
+    && main.includes("submitRoomCommand('UseHexcore', { teamId: sourceCaptain.id, hexcoreId: 'heavenly-descent' })")
     && main.includes('targetTeamId'),
-    '目标型主动海克斯应通过 UseHexcore command 交给服务端权威校验和同步，当前覆盖雪定饿的喵与骤雨血雾清风'
+    '目标型与响应型主动海克斯应通过 UseHexcore command 交给服务端权威校验和同步，当前覆盖雪定饿的喵、骤雨血雾清风与神兵天降'
   );
   assert(
     main.includes('syncSessionFromTournament(responsePayload.tournament)')
@@ -6053,6 +6722,22 @@ function testMultiplayerClientSubmitsAuthoritativeCommands() {
     && main.includes('applyRoomProjection(responsePayload.tournament)'),
     '多人端应在 command 成功、SSE 快照/事件到达和断线恢复时应用服务端公开投影；队长/裁判恢复请求用 Authorization，SSE 只能使用短期 streamToken，避免长期 sessionToken 进入订阅 URL',
   );
+  assert(
+    main.includes("await submitRoomCommand('ActivateSubstitute'")
+    && main.includes("await submitRoomCommand('ReplaceWithSubstitute'")
+    && main.includes('function applyLastSubstituteProjection')
+    && main.includes('applyLastSubstituteProjection(snapshot.lastSubstituteAction)')
+    && main.includes("Hexcore2.state.multiplayer.roomStatus")
+    && main.includes("snapshot.roomStatus")
+    && main.includes("player.attendanceStatus = 'unavailable'")
+    && main.includes("substitute.status = 'drafted'")
+    && refereeConsole.includes('window.hexcoreUI.activateSubstitute')
+    && refereeConsole.includes('window.hexcoreUI.replaceWithSubstitute')
+    && refereeConsole.includes('roomArchivedNotice()')
+    && refereeConsole.includes('归档房间只读')
+    && refereeConsole.includes('substitute-replace-tools'),
+    '多人端替补激活和替换应通过服务端 command 提交，并在投影/SSE 到达后回填队伍和选手状态',
+  );
   const rules = fs.readFileSync(path.join(root, 'packages/rules/index.js'), 'utf8');
   const projections = fs.readFileSync(path.join(root, 'apps/server/projections.js'), 'utf8');
   const server = fs.readFileSync(path.join(root, 'apps/server/server.js'), 'utf8');
@@ -6071,7 +6756,6 @@ function testMultiplayerClientSubmitsAuthoritativeCommands() {
     && server.includes('bearerSessionTokenFromRequest(req) || String(body.sessionToken'),
     '服务端应把海克斯候选、刷新和选择写入权威状态，并通过公开投影/SSE 同步给裁判、队长和观众',
   );
-  const refereeConsole = fs.readFileSync(path.join(root, 'apps/multiplayer/src/ui/referee-console.js'), 'utf8');
   assert(
     refereeConsole.includes('function projectedHungryWaveBanner()')
     && refereeConsole.includes('Hexcore2.state.multiplayer.lastHungryWave')
@@ -6083,11 +6767,12 @@ function testMultiplayerClientSubmitsAuthoritativeCommands() {
   const postgresBackup = fs.readFileSync(path.join(root, 'scripts/postgres-backup.ps1'), 'utf8');
   const postgresRestore = fs.readFileSync(path.join(root, 'scripts/postgres-restore.ps1'), 'utf8');
   const postgresStore = fs.readFileSync(path.join(root, 'apps/server/postgres-store.js'), 'utf8');
-  const multiplayerOpsDoc = fs.readFileSync(path.join(root, 'docs/17_多人端部署运维说明.md'), 'utf8');
+  const multiplayerOpsDoc = fs.readFileSync(path.join(root, 'docs/multiplayer/多人端部署运维说明.md'), 'utf8');
   const dockerfile = fs.readFileSync(path.join(root, 'Dockerfile'), 'utf8');
   const compose = fs.readFileSync(path.join(root, 'docker-compose.yml'), 'utf8');
   const dockerignore = fs.readFileSync(path.join(root, '.dockerignore'), 'utf8');
   const dockerEnv = fs.readFileSync(path.join(root, '.env.docker.example'), 'utf8');
+  const envExample = fs.readFileSync(path.join(root, '.env.example'), 'utf8');
   assert(
     postgresSchema.includes('CREATE TABLE IF NOT EXISTS hexcore_tournaments')
     && postgresSchema.includes('CREATE TABLE IF NOT EXISTS hexcore_room_access')
@@ -6147,6 +6832,7 @@ function testMultiplayerClientSubmitsAuthoritativeCommands() {
     && compose.includes('postgres:16-alpine')
     && compose.includes('HEXCORE_POSTGRES_PASSWORD:?')
     && compose.includes('HEXCORE_POSTGRES_URL: postgres://')
+    && compose.includes('HEXCORE_MAX_ROOMS: ${HEXCORE_MAX_ROOMS:-20}')
     && compose.includes('hexcore-postgres-data')
     && compose.includes('${HEXCORE_APP_PORT:-4186}:4186')
     && compose.includes('${HEXCORE_API_PORT:-4196}:4196')
@@ -6154,10 +6840,191 @@ function testMultiplayerClientSubmitsAuthoritativeCommands() {
     && dockerignore.includes('.env')
     && dockerignore.includes('*.dump')
     && dockerEnv.includes('HEXCORE_POSTGRES_PASSWORD=change-this-local-password')
+    && dockerEnv.includes('HEXCORE_MAX_ROOMS=20')
+    && envExample.includes('HEXCORE_POSTGRES_PASSWORD=change-this-local-password')
+    && envExample.includes('HEXCORE_POSTGRES_DB=hexcore')
+    && envExample.includes('HEXCORE_POSTGRES_USER=hexcore')
+    && envExample.includes('HEXCORE_APP_PORT=4186')
+    && envExample.includes('HEXCORE_API_PORT=4196')
+    && envExample.includes('HEXCORE_MAX_ROOMS=20')
+    && envExample.includes('HEXCORE_SESSION_TTL_HOURS=48')
     && multiplayerOpsDoc.includes('Docker 本机演示')
     && multiplayerOpsDoc.includes('docker compose up -d --build')
+    && multiplayerOpsDoc.includes('HEXCORE_MAX_ROOMS')
     && multiplayerOpsDoc.includes('HEXCORE_POSTGRES_PASSWORD'),
     'Docker 部署应提供应用镜像、PostgreSQL Compose 编排、健康检查和不提交正式密码的环境变量示例',
+  );
+}
+
+async function testM12DynamicRulesBaseline() {
+  const { H } = createHarness({ sourceFiles: multiplayerSourceFiles });
+  const variableState = H.createDefaultState();
+  variableState.settings.teamCount = 12;
+  variableState.settings.totalTeams = 12;
+  variableState.settings.minTeams = 6;
+  variableState.settings.maxTeams = 20;
+  variableState.settings.campMode = 'dual_camp';
+  variableState.settings.pairingMode = 'camp_versus';
+  variableState.captains = Array.from({ length: 12 }, (_, index) => ({
+    id: `team-${index + 1}`,
+    name: `海斗${index + 1}队`,
+    team: [],
+    playerId: `captain-${index + 1}`,
+  }));
+  variableState.players = variableState.captains.map((captain, index) => ({
+    id: captain.playerId,
+    name: `队长${index + 1}`,
+    gameId: `CAP_${index + 1}`,
+    camp: index < 6 ? 'local' : 'outsider',
+    score: 100 - index,
+    tier: 0,
+    status: 'captain',
+    isCaptain: true,
+  }));
+  const normalized = H.normalizeState(variableState);
+  H.state = normalized;
+  assert(normalized.captains.length === 12, 'M12：状态归一化应保留 12 队，而不是压回 10 队');
+  assert(normalized.settings.minTeams === 6 && normalized.settings.maxTeams === 20, 'M12：队伍范围应归一化为 6-20');
+  assert(normalized.settings.teamCount === 12 && normalized.settings.totalTeams === 12, 'M12：teamCount/totalTeams 应与实际队伍数量一致');
+  const checklist = H.selectors.workflowChecklist();
+  assert(!checklist.blockingItems.some(item => item.id === 'team-count'), 'M12：12 队双阵营状态不应被队伍数量检查拦截');
+
+  const noCampHarness = createHarness({ sourceFiles: multiplayerSourceFiles });
+  installReadyTestData(noCampHarness.H);
+  noCampHarness.H.state.draft.phase = 'setup';
+  noCampHarness.H.economyEngine.ensureAll();
+  const noCamp = noCampHarness.H;
+  noCamp.state.settings.campMode = 'no_camp';
+  const buyer = noCamp.state.captains[0];
+  const target = noCamp.state.players.find(player =>
+    player.status === 'available'
+    && player.camp !== noCamp.selectors.captainCamp(buyer.id)
+    && player.tier >= 1
+    && !noCamp.selectors.isCaptainPlayer(player.id)
+  );
+  assert(target, 'M12 测试前提：应存在异阵营可选选手');
+  const purchase = noCamp.assignmentEngine.purchase(buyer.id, target.id, 'gold_shop_purchase');
+  assert(purchase.ok, 'M12：无阵营模式下应允许从公共卡池购买任意可选选手');
+
+  const store = new MemoryTournamentStore();
+  const created = store.createTournament({
+    id: 'm12-room-count',
+    settings: { teamCount: 12, campMode: 'dual_camp' },
+  });
+  const initialRoom = store.consumeInitialRoomAccess(created.tournamentId);
+  assert(created.snapshot.teams.length === 12, 'M12：服务端创建 12 队房间时权威快照应包含 12 队');
+  assert(initialRoom.captainCodes.length === 12, 'M12：服务端创建 12 队房间时应生成 12 个队长码');
+  let oddDualCampRejected = false;
+  try {
+    store.createTournament({
+      id: 'm12-odd-dual-camp',
+      settings: { teamCount: 7, campMode: 'dual_camp' },
+    });
+  } catch (error) {
+    oddDualCampRejected = /双阵营模式队伍数量必须为偶数/.test(error.message);
+  }
+  assert(oddDualCampRejected, 'M12：双阵营模式应拒绝奇数队伍数量，避免本地/外地无法平分');
+
+  const projectionTeams = Array.from({ length: 12 }, (_, index) => ({
+    teamId: `team-${index + 1}`,
+    name: `无阵营${index + 1}队`,
+    camp: '',
+    team: [],
+    economy: { gold: 6 },
+  }));
+  const roomSession = {
+    tournamentId: 'm12-projection-room',
+    role: 'referee',
+    teamId: '',
+    apiBase: 'http://127.0.0.1:4196',
+    sessionToken: 'sess-m12-projection',
+    stateVersion: 1,
+  };
+  const projectionHarness = createHarness({
+    sourceFiles: multiplayerSourceFiles,
+    locationSearch: '?role=referee',
+    localStorageItems: {
+      hexcore2_multiplayer_session_v1: JSON.stringify(roomSession),
+    },
+    fetch: async url => {
+      const text = String(url || '');
+      if (text.includes('/projection?')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            ok: true,
+            tournament: {
+              view: 'referee',
+              role: 'referee',
+              tournamentId: roomSession.tournamentId,
+              stateVersion: 1,
+              snapshot: {
+                name: '投影无阵营 12 队',
+                roomStatus: 'active',
+                currentRound: 1,
+                currentTeamId: 'team-1',
+                teams: projectionTeams,
+                settings: {
+                  minTeams: 6,
+                  maxTeams: 20,
+                  teamCount: 12,
+                  totalTeams: 12,
+                  playersPerTeam: 5,
+                  campMode: 'no_camp',
+                  pairingMode: 'random',
+                  allowSubstitutes: true,
+                  initialGold: 6,
+                  roundIncome: 3,
+                  refreshCosts: [1, 2, 3, 4],
+                  turnTimers: { hexcoreSeconds: 0, shopSeconds: 0 },
+                },
+                tournament: { status: 'empty', pairingMode: 'random', rounds: [] },
+                roundStates: {},
+                hexcoreAssignments: {},
+                hexcoreDraft: { captainId: '', teamId: '', slots: [], chosen: [], seenIds: [], refreshUsed: false, drawOrder: [] },
+                hexcoreActionWindows: [],
+              },
+              events: [],
+            },
+          }),
+        };
+      }
+      if (text.includes('/stream-token')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ ok: true, streamToken: 'stream-m12-projection', expiresAt: new Date(Date.now() + 60000).toISOString() }),
+        };
+      }
+      throw new Error(`未预期的多人端请求：${text}`);
+    },
+    EventSource: function EventSourceStub() {
+      this.readyState = 1;
+      this.addEventListener = () => {};
+      this.close = () => { this.readyState = 2; };
+    },
+  });
+  await delay(30);
+  assert(projectionHarness.H.state.captains.length === 12, 'M12：前端应用服务端投影时应把本地默认 10 队替换为服务端 12 队');
+  assert(projectionHarness.H.state.captains[0].id === 'team-1' && projectionHarness.H.state.captains[11].id === 'team-12', 'M12：前端应用服务端投影时应保留服务端 team-* 队伍 ID');
+  assert(projectionHarness.H.state.settings.teamCount === 12 && projectionHarness.H.state.settings.campMode === 'no_camp', 'M12：前端应用服务端投影时应同步 teamCount 和 campMode');
+  projectionHarness.H.state.ui.activeView = 'schedule';
+  projectionHarness.H.ui.render();
+  assert(!projectionHarness.app.innerHTML.includes('阵营对抗') && !projectionHarness.app.innerHTML.includes('生成班德尔保卫战'), 'M12：无阵营服务端投影进入赛程页后不应显示阵营对抗入口');
+
+  const multiplayerMain = fs.readFileSync(path.join(root, 'apps/multiplayer/src/main.js'), 'utf8');
+  const multiplayerRefereeConsole = fs.readFileSync(path.join(root, 'apps/multiplayer/src/ui/referee-console.js'), 'utf8');
+  assert(
+    multiplayerRefereeConsole.includes('id="create-team-count"')
+    && multiplayerRefereeConsole.includes('id="create-camp-mode"')
+    && multiplayerRefereeConsole.includes('id="create-players-per-team"')
+    && multiplayerRefereeConsole.includes('no-camp-pool-grid')
+    && multiplayerRefereeConsole.includes('公共选手池')
+    && multiplayerRefereeConsole.includes('公共卡池可选选手')
+    && multiplayerRefereeConsole.includes('无阵营模式使用公共选手池')
+    && multiplayerMain.includes('pairingMode: campMode === \'no_camp\' ? \'random\' : \'camp_versus\''),
+    'M12：多人端创建赛事入口应提供队伍数量、规则模式和每队人数，并按无阵营默认随机赛程'
   );
 }
 
@@ -6198,6 +7065,7 @@ async function run() {
     testUiNavigationAndSecurity,
     testMultiplayerCopyIsolation,
     testMultiplayerSharedRulePreflight,
+    testMultiplayerTurnTimers,
     testMultiplayerApiServer,
     testMultiplayerSessionExpiry,
     testRuleTemplateSaveAndLoad,
@@ -6205,6 +7073,7 @@ async function run() {
     testRecoverDraftState,
     testTournamentByeAndBracketLinks,
     testTournamentScheduleRandomizesEntrants,
+    testNoCampTournamentScheduleUsesRandomMode,
     testTournamentManualByeAndReorder,
     testTournamentReportsIncompleteTeamsBeforeMissingCamps,
     testBandleDefenseScheduleAndScoring,
@@ -6220,6 +7089,7 @@ async function run() {
     testMultiplayerViewerUiIsReadonlyCurrentCaptainPerspective,
     testMultiplayerJoinGateAndCors,
     testMultiplayerClientSubmitsAuthoritativeCommands,
+    testM12DynamicRulesBaseline,
   ];
 
   for (const test of tests) {

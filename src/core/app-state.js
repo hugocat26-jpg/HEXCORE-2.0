@@ -58,6 +58,46 @@
     outsider: '外地人',
   };
 
+  const ATTENDANCE_STATUS_LABELS = {
+    confirmed: '已确认',
+    pending: '待确认',
+    high_risk: '高风险',
+    substitute: '替补',
+    unavailable: '缺席',
+  };
+
+  const ATTENDANCE_WEIGHT_DEFAULTS = {
+    confirmed: 1,
+    pending: 0.7,
+    high_risk: 0.4,
+    substitute: 0,
+    unavailable: 0,
+  };
+
+  function normalizeAttendanceStatus(value) {
+    const text = String(value || '').trim().toLowerCase();
+    if (['confirmed', 'confirm', 'ok', '已确认', '确认', '正常'].includes(text)) return 'confirmed';
+    if (['pending', 'wait', '待确认', '未确认', '待定'].includes(text)) return 'pending';
+    if (['high_risk', 'high-risk', 'risk', '高风险', '风险', '可能缺席'].includes(text)) return 'high_risk';
+    if (['substitute', 'sub', '替补', '候补'].includes(text)) return 'substitute';
+    if (['unavailable', 'absent', 'missing', '缺席', '不可用', '禁用'].includes(text)) return 'unavailable';
+    return 'confirmed';
+  }
+
+  function clampRatio(value, fallback) {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return fallback;
+    return Math.max(0, Math.min(1, Math.round(number * 100) / 100));
+  }
+
+  function effectiveDrawWeight(player) {
+    if (!player || player.status !== 'available') return 0;
+    const status = normalizeAttendanceStatus(player.attendanceStatus);
+    if (status === 'unavailable' || status === 'substitute') return 0;
+    const fallback = ATTENDANCE_WEIGHT_DEFAULTS[status] ?? 1;
+    return clampRatio(player.drawWeight, fallback);
+  }
+
   function normalizeCamp(value) {
     const text = String(value || '').trim().toLowerCase();
     if (text === 'local' || text === '本地' || text === '本地人') return 'local';
@@ -259,6 +299,7 @@
       if (oldId) playerIdMap.set(oldId, id);
       playerIdMap.set(id, id);
       const status = ['available', 'drafted', 'disabled', 'captain'].includes(item.status) ? item.status : 'available';
+      const attendanceStatus = normalizeAttendanceStatus(item.attendanceStatus || item.出勤状态);
       const meta = performanceMeta(item);
       const seasonResults = meta.seasonResults;
       const fmvpSeasons = normalizeFmvpSeasons(item, seasonResults);
@@ -278,6 +319,12 @@
           : sanitizeText(item.heroes, '待,定,位', 40).split(/[，,、|/]/).map(hero => hero.trim()).filter(Boolean).slice(0, 5),
         manifesto: sanitizeText(item.manifesto, '', 80),
         status,
+        profileId: sanitizeText(item.profileId || item.档案ID, '', 48),
+        commonName: sanitizeText(item.commonName || item.常用名称, '', 32),
+        tournamentName: sanitizeText(item.tournamentName || item.赛事名称, '', 40),
+        region: sanitizeText(item.region || item.大区, '', 24),
+        attendanceStatus,
+        drawWeight: clampRatio(item.drawWeight ?? item.抽取权重, ATTENDANCE_WEIGHT_DEFAULTS[attendanceStatus] ?? 1),
         teamId: sanitizeText(item.teamId, '', 48),
         isCaptain: Boolean(item.isCaptain),
         isFmvp: Boolean(item.isFmvp || fmvpSeasons.length),
@@ -290,6 +337,33 @@
         role: item.role === 'captain' ? 'captain' : undefined,
       };
       return player && typeof player === 'object' ? Object.assign(player, normalized) : normalized;
+    });
+  }
+
+  function sanitizePlayerProfiles(profiles) {
+    const source = Array.isArray(profiles) ? profiles : [];
+    const usedIds = new Set();
+    return source.map((profile, index) => {
+      const item = profile && typeof profile === 'object' ? profile : {};
+      const id = safeId(item.id || item.profileId, `profile-${index + 1}`, usedIds);
+      return {
+        id,
+        commonName: sanitizeText(item.commonName || item.name, `选手档案${index + 1}`, 32),
+        aliases: Array.isArray(item.aliases)
+          ? item.aliases.map(alias => sanitizeText(alias, '', 32)).filter(Boolean).slice(0, 12)
+          : sanitizeText(item.aliases || item.别名, '', 160).split(/[，,、|/]/).map(alias => alias.trim()).filter(Boolean).slice(0, 12),
+        historicalIdentities: Array.isArray(item.historicalIdentities)
+          ? item.historicalIdentities.map(identity => ({
+            tournamentName: sanitizeText(identity && identity.tournamentName, '', 40),
+            region: sanitizeText(identity && identity.region, '', 24),
+            gameId: sanitizeText(identity && identity.gameId, '', 40),
+            name: sanitizeText(identity && identity.name, '', 32),
+          })).filter(identity => identity.name || identity.gameId || identity.tournamentName).slice(0, 30)
+          : [],
+        attendanceReliability: normalizeAttendanceStatus(item.attendanceReliability || item.attendanceStatus),
+        refereeNotes: sanitizeText(item.refereeNotes || item.notes || item.裁判备注, '', 240),
+        updatedAt: sanitizeText(item.updatedAt, '', 40),
+      };
     });
   }
 
@@ -661,6 +735,7 @@
     },
     captains: defaultCaptains(10),
     players: [],
+    playerProfiles: [],
     hexcoreAssignments: {},
     hexcoreDraft: {
       captainId: '',
@@ -737,6 +812,11 @@
     const captainIdMap = new Map();
     const playerIdMap = new Map();
     state.players = sanitizePlayers(state.players, playerIdMap);
+    state.playerProfiles = sanitizePlayerProfiles(state.playerProfiles);
+    const profileIds = new Set(state.playerProfiles.map(profile => profile.id));
+    state.players.forEach(player => {
+      if (player.profileId && !profileIds.has(player.profileId)) player.profileId = '';
+    });
     state.captains = sanitizeCaptains(state.captains, captainIdMap, playerIdMap, state.settings.playersPerTeam);
     if (state.captains.length !== defaultState.settings.totalTeams) {
       const keptCaptains = state.captains.slice(0, defaultState.settings.totalTeams);
@@ -945,6 +1025,7 @@
       return Hexcore2.state.players.filter(player =>
         player.tier === tier
         && player.status === 'available'
+        && effectiveDrawWeight(player) > 0
         && (!camp || player.camp === camp)
         && !Hexcore2.selectors.isCaptainPlayer(player.id)
       );
@@ -953,12 +1034,20 @@
       const camp = Hexcore2.selectors.captainCamp(captainId);
       return Hexcore2.state.players.filter(player =>
         player.status === 'available'
+        && effectiveDrawWeight(player) > 0
         && player.camp === camp
         && player.tier >= 1
         && player.tier <= 5
         && !Hexcore2.selectors.isCaptainPlayer(player.id)
         && !excludedIds.has(player.id)
       );
+    },
+    attendanceLabel(status) {
+      return ATTENDANCE_STATUS_LABELS[normalizeAttendanceStatus(status)] || ATTENDANCE_STATUS_LABELS.confirmed;
+    },
+    effectiveDrawWeight,
+    playerProfile(profileId) {
+      return Hexcore2.state.playerProfiles.find(profile => profile.id === profileId) || null;
     },
     currentHexcores() {
       const captain = Hexcore2.selectors.currentCaptain();
@@ -1031,7 +1120,7 @@
       const openSlots = state.captains.reduce((sum, captain) => (
         sum + Math.max(0, Hexcore2.selectors.teamMemberCapacity(captain.id) - captain.team.length)
       ), 0);
-      const availablePlayers = state.players.filter(player => player.status === 'available' && player.tier >= 1 && player.tier <= 5 && !Hexcore2.selectors.isCaptainPlayer(player.id));
+      const availablePlayers = state.players.filter(player => player.status === 'available' && effectiveDrawWeight(player) > 0 && player.tier >= 1 && player.tier <= 5 && !Hexcore2.selectors.isCaptainPlayer(player.id));
       const tierCounts = [1, 2, 3, 4, 5].map(tier => ({
         tier,
         name: state.settings.tierNames[tier],
@@ -1050,6 +1139,7 @@
           && player.tier >= 1
           && player.tier <= 5
           && player.status !== 'disabled'
+          && !['substitute', 'unavailable'].includes(normalizeAttendanceStatus(player.attendanceStatus))
           && !Hexcore2.selectors.isCaptainPlayer(player.id)
         ).length;
         const minDrawable = captainCampCounts[camp] * Math.max(0, (Number(state.settings.playersPerTeam) || 5) - 1);

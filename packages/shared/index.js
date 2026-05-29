@@ -53,11 +53,14 @@ const COMMAND_TYPES = Object.freeze({
   RENAME_TEAM: 'RenameTeam',
   USE_HEXCORE: 'UseHexcore',
   SKIP_TURN: 'SkipTurn',
+  UPDATE_TURN_TIMERS: 'UpdateTurnTimers',
   PAUSE_TOURNAMENT: 'PauseTournament',
   RESUME_TOURNAMENT: 'ResumeTournament',
   FORCE_REFEREE_RULING: 'ForceRefereeRuling',
   ROLLBACK_TO_VERSION: 'RollbackToVersion',
   RECORD_MATCH_SCORE: 'RecordMatchScore',
+  ACTIVATE_SUBSTITUTE: 'ActivateSubstitute',
+  REPLACE_WITH_SUBSTITUTE: 'ReplaceWithSubstitute',
 });
 
 const EVENT_TYPES = Object.freeze({
@@ -73,11 +76,14 @@ const EVENT_TYPES = Object.freeze({
   TEAM_RENAMED: 'TeamRenamed',
   HEXCORE_USED: 'HexcoreUsed',
   TURN_SKIPPED: 'TurnSkipped',
+  TURN_TIMERS_UPDATED: 'TurnTimersUpdated',
   TOURNAMENT_PAUSED: 'TournamentPaused',
   TOURNAMENT_RESUMED: 'TournamentResumed',
   REFEREE_RULING_FORCED: 'RefereeRulingForced',
   STATE_ROLLED_BACK: 'StateRolledBack',
   MATCH_SCORE_RECORDED: 'MatchScoreRecorded',
+  SUBSTITUTE_ACTIVATED: 'SubstituteActivated',
+  PLAYER_REPLACED_BY_SUBSTITUTE: 'PlayerReplacedBySubstitute',
 });
 
 const ROLE_COMMANDS = Object.freeze({
@@ -101,11 +107,14 @@ const ROLE_COMMANDS = Object.freeze({
     COMMAND_TYPES.RENAME_TEAM,
     COMMAND_TYPES.USE_HEXCORE,
     COMMAND_TYPES.SKIP_TURN,
+    COMMAND_TYPES.UPDATE_TURN_TIMERS,
     COMMAND_TYPES.PAUSE_TOURNAMENT,
     COMMAND_TYPES.RESUME_TOURNAMENT,
     COMMAND_TYPES.FORCE_REFEREE_RULING,
     COMMAND_TYPES.ROLLBACK_TO_VERSION,
     COMMAND_TYPES.RECORD_MATCH_SCORE,
+    COMMAND_TYPES.ACTIVATE_SUBSTITUTE,
+    COMMAND_TYPES.REPLACE_WITH_SUBSTITUTE,
   ],
   [ROLES.SUPERVISOR]: [],
   [ROLES.CAPTAIN]: [
@@ -135,11 +144,14 @@ const REQUIRED_PAYLOAD_FIELDS = Object.freeze({
   [COMMAND_TYPES.RENAME_TEAM]: ['teamId', 'name'],
   [COMMAND_TYPES.USE_HEXCORE]: ['teamId', 'hexcoreId'],
   [COMMAND_TYPES.SKIP_TURN]: ['teamId'],
+  [COMMAND_TYPES.UPDATE_TURN_TIMERS]: ['hexcoreSeconds', 'shopSeconds'],
   [COMMAND_TYPES.PAUSE_TOURNAMENT]: ['reason'],
   [COMMAND_TYPES.RESUME_TOURNAMENT]: ['reason'],
   [COMMAND_TYPES.FORCE_REFEREE_RULING]: ['reason', 'patchSummary'],
   [COMMAND_TYPES.ROLLBACK_TO_VERSION]: ['targetStateVersion', 'reason'],
   [COMMAND_TYPES.RECORD_MATCH_SCORE]: ['matchId', 'scoreA', 'scoreB'],
+  [COMMAND_TYPES.ACTIVATE_SUBSTITUTE]: ['playerId'],
+  [COMMAND_TYPES.REPLACE_WITH_SUBSTITUTE]: ['teamId', 'absentPlayerId', 'substitutePlayerId'],
 });
 
 function valuesOf(map) {

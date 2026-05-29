@@ -13,11 +13,40 @@ CREATE TABLE IF NOT EXISTS hexcore_tournaments (
   state_version INTEGER NOT NULL DEFAULT 0,
   state_json JSONB NOT NULL,
   state_checksum TEXT NOT NULL,
+  room_status TEXT NOT NULL DEFAULT 'active',
+  archived_at TIMESTAMPTZ,
+  deleted_at TIMESTAMPTZ,
+  deleted_by TEXT NOT NULL DEFAULT '',
+  last_room_updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT hexcore_tournaments_room_status
+    CHECK (room_status IN ('active', 'archived', 'deleted')),
   CONSTRAINT hexcore_tournaments_id_safe
     CHECK (tournament_id ~ '^[A-Za-z0-9._:-]{1,80}$')
 );
+
+ALTER TABLE hexcore_tournaments
+  ADD COLUMN IF NOT EXISTS room_status TEXT NOT NULL DEFAULT 'active';
+ALTER TABLE hexcore_tournaments
+  ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ;
+ALTER TABLE hexcore_tournaments
+  ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
+ALTER TABLE hexcore_tournaments
+  ADD COLUMN IF NOT EXISTS deleted_by TEXT NOT NULL DEFAULT '';
+ALTER TABLE hexcore_tournaments
+  ADD COLUMN IF NOT EXISTS last_room_updated_at TIMESTAMPTZ NOT NULL DEFAULT now();
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'hexcore_tournaments_room_status'
+  ) THEN
+    ALTER TABLE hexcore_tournaments
+      ADD CONSTRAINT hexcore_tournaments_room_status
+      CHECK (room_status IN ('active', 'archived', 'deleted'));
+  END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS hexcore_room_access (
   tournament_id VARCHAR(80) PRIMARY KEY

@@ -1,7 +1,7 @@
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
-const { MemoryTournamentStore, hashSecret, roomAccessSummary } = require('./memory-store');
+const { MemoryTournamentStore, hashSecret, roomAccessSummary, roomLifecycleSummary } = require('./memory-store');
 const { ROLES } = require('../../packages/shared');
 
 function clone(value) {
@@ -24,7 +24,7 @@ function loadPg() {
 
 class PostgresTournamentStore extends MemoryTournamentStore {
   constructor(options = {}) {
-    super({ dataFile: '', sessionTtlMs: options.sessionTtlMs });
+    super({ dataFile: '', sessionTtlMs: options.sessionTtlMs, maxRooms: options.maxRooms });
     const connectionString = String(options.connectionString || process.env.HEXCORE_POSTGRES_URL || '').trim();
     if (!connectionString) throw new Error('HEXCORE_POSTGRES_URL 不能为空');
     const { Pool } = loadPg();
@@ -56,6 +56,9 @@ class PostgresTournamentStore extends MemoryTournamentStore {
       storage: this.storageLabel(),
       tournamentCount: this.tournaments.size,
       roomCount: this.roomAccess.size,
+      activeRoomCount: this.activeRoomCount(),
+      maxRooms: this.maxRooms,
+      postgresConnected: Boolean(this.pool),
       sessionTtlSeconds: Math.max(1, Math.ceil(this.sessionTtlMs / 1000)),
       subscriberCount,
       crossInstanceEventPolling: true,
@@ -105,14 +108,30 @@ class PostgresTournamentStore extends MemoryTournamentStore {
       await client.query('BEGIN');
       for (const [id, state] of this.tournaments.entries()) {
         await client.query(
-          `INSERT INTO hexcore_tournaments (tournament_id, state_version, state_json, state_checksum, updated_at)
-           VALUES ($1, $2, $3::jsonb, $4, now())
+          `INSERT INTO hexcore_tournaments
+             (tournament_id, state_version, state_json, state_checksum, room_status, archived_at, deleted_at, deleted_by, last_room_updated_at, updated_at)
+           VALUES ($1, $2, $3::jsonb, $4, $5, $6, $7, $8, $9, now())
            ON CONFLICT (tournament_id) DO UPDATE
            SET state_version = excluded.state_version,
                state_json = excluded.state_json,
                state_checksum = excluded.state_checksum,
+               room_status = excluded.room_status,
+               archived_at = excluded.archived_at,
+               deleted_at = excluded.deleted_at,
+               deleted_by = excluded.deleted_by,
+               last_room_updated_at = excluded.last_room_updated_at,
                updated_at = excluded.updated_at`,
-          [id, Number(state.stateVersion) || 0, JSON.stringify(state), checksumJson(state)]
+          [
+            id,
+            Number(state.stateVersion) || 0,
+            JSON.stringify(state),
+            checksumJson(state),
+            roomStatusFromAccess(this.roomAccess.get(id)),
+            nullableDate(this.roomAccess.get(id) && this.roomAccess.get(id).archivedAt),
+            nullableDate(this.roomAccess.get(id) && this.roomAccess.get(id).deletedAt),
+            String((this.roomAccess.get(id) && this.roomAccess.get(id).deletedBy) || ''),
+            nullableDate((this.roomAccess.get(id) && this.roomAccess.get(id).updatedAt) || (state.snapshot && state.snapshot.createdAt)),
+          ]
         );
         await this.persistTournamentDetailRows(client, id, state);
       }
@@ -258,6 +277,48 @@ class PostgresTournamentStore extends MemoryTournamentStore {
     if (!access) return null;
     await this.requireManagementSession(id, sessionToken, '房间码管理信息');
     return roomAccessSummary(access);
+  }
+
+  async archiveTournament(id, sessionToken) {
+    const access = this.roomAccess.get(id);
+    const state = this.tournaments.get(id);
+    if (!access || !state) return null;
+    await this.requireManagementSession(id, sessionToken, '房间生命周期管理');
+    const now = new Date().toISOString();
+    const nextAccess = {
+      ...access,
+      status: 'archived',
+      archivedAt: access.archivedAt || now,
+      updatedAt: now,
+    };
+    const nextState = clone(state);
+    nextState.snapshot = nextState.snapshot && typeof nextState.snapshot === 'object' ? nextState.snapshot : {};
+    nextState.snapshot.roomStatus = 'archived';
+    this.roomAccess.set(id, nextAccess);
+    this.tournaments.set(id, nextState);
+    await this.persistToPostgres();
+    return roomLifecycleSummary(id, nextAccess);
+  }
+
+  async deleteTournament(id, sessionToken) {
+    const access = this.roomAccess.get(id);
+    if (!access || !this.tournaments.has(id)) return null;
+    const session = await this.requireManagementSession(id, sessionToken, '房间生命周期管理');
+    const now = new Date().toISOString();
+    this.tournaments.delete(id);
+    this.roomAccess.delete(id);
+    this.initialRoomAccess.delete(id);
+    this.subscribers.delete(id);
+    for (const [hash, current] of Array.from(this.sessions.entries())) {
+      if (current && current.tournamentId === id) this.sessions.delete(hash);
+    }
+    await this.pool.query('DELETE FROM hexcore_tournaments WHERE tournament_id = $1', [id]);
+    return {
+      tournamentId: id,
+      status: 'deleted',
+      deletedAt: now,
+      deletedBy: session.actorId || '',
+    };
   }
 
   async getAuditLog(id, sessionToken) {
@@ -412,6 +473,16 @@ function publicEventSummary(event = {}) {
 function latestEventSeq(state = {}) {
   const events = Array.isArray(state.events) ? state.events : [];
   return events.reduce((max, event) => Math.max(max, Number(event && event.eventSeq) || 0), 0);
+}
+
+function roomStatusFromAccess(access = {}) {
+  const status = String(access && access.status || 'active').trim();
+  return ['active', 'archived', 'deleted'].includes(status) ? status : 'active';
+}
+
+function nullableDate(value) {
+  const text = String(value || '').trim();
+  return text ? text : null;
 }
 
 module.exports = {

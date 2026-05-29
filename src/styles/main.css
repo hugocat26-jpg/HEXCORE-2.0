@@ -5052,7 +5052,7 @@ h2 span {
 .hex-draw-actions {
   width: 100%;
   display: grid;
-  grid-template-columns: minmax(64px, 0.72fr) minmax(92px, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 7px;
   margin-top: auto;
   padding-top: 10px;
@@ -5061,18 +5061,22 @@ h2 span {
 .hex-draw-actions > button,
 .hex-refresh-btn,
 .hex-select-btn {
-  min-height: 36px;
+  min-width: 0;
+  min-height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border: 1px solid rgba(255, 255, 255, 0.2);
   border-radius: 7px;
   background: rgba(255, 255, 255, 0.08);
   color: #dbe7ef;
-  padding: 0 8px;
+  padding: 0 6px;
   font-size: 12px;
   font-weight: 900;
   line-height: 1.15;
-  white-space: normal;
+  white-space: nowrap;
   overflow: hidden;
-  overflow-wrap: anywhere;
+  text-overflow: clip;
 }
 
 .hex-draw-actions > button:hover:not(:disabled),
@@ -5093,7 +5097,6 @@ h2 span {
 }
 
 .hex-select-btn {
-  grid-column: 1 / -1;
   border-color: rgba(0, 209, 255, 0.62);
   background: linear-gradient(180deg, #12d9ff, #00aee4);
   color: #f6fdff;

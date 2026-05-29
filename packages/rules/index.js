@@ -28,6 +28,53 @@ function safeBoolean(value) {
   return Boolean(value);
 }
 
+function normalizeTurnTimerSettings(input = {}) {
+  return {
+    hexcoreSeconds: safePositiveNumber(input.hexcoreSeconds, 0, 3600),
+    shopSeconds: safePositiveNumber(input.shopSeconds, 0, 3600),
+  };
+}
+
+function turnTimerSettings(snapshot = {}) {
+  const settings = snapshot.settings && typeof snapshot.settings === 'object' ? snapshot.settings : {};
+  return normalizeTurnTimerSettings(settings.turnTimers || {});
+}
+
+function clearActiveTurnTimer(snapshot) {
+  delete snapshot.activeTurnTimer;
+  return snapshot;
+}
+
+function startActiveTurnTimer(snapshot, phase, teamId, createdAt) {
+  const cleanPhase = safeText(phase, '', 40);
+  const cleanTeamId = safeText(teamId, '', 80);
+  if (!cleanPhase || !cleanTeamId) return clearActiveTurnTimer(snapshot);
+  const settings = turnTimerSettings(snapshot);
+  const seconds = cleanPhase === 'hexcore_draw' ? settings.hexcoreSeconds : settings.shopSeconds;
+  if (!seconds) return clearActiveTurnTimer(snapshot);
+  const startedMs = Date.parse(createdAt || '') || Date.now();
+  const durationMs = seconds * 1000;
+  const deadlineMs = startedMs + durationMs;
+  snapshot.activeTurnTimer = {
+    timerId: `${cleanPhase}:${cleanTeamId}:${startedMs}`,
+    phase: cleanPhase,
+    teamId: cleanTeamId,
+    round: safePositiveNumber(snapshot.currentRound, 1, 8),
+    startedAt: new Date(startedMs).toISOString(),
+    deadlineAt: new Date(deadlineMs).toISOString(),
+    graceDeadlineAt: new Date(deadlineMs + 3000).toISOString(),
+    durationMs,
+  };
+  return snapshot;
+}
+
+function normalizeTurnTimerPayload(payload = {}) {
+  return normalizeTurnTimerSettings({
+    hexcoreSeconds: payload.hexcoreSeconds,
+    shopSeconds: payload.shopSeconds,
+  });
+}
+
 function createAuthorityState(input = {}) {
   const tournamentId = String(input.tournamentId || 'tournament-local-dev').trim();
   if (!tournamentId) throw new Error('tournamentId 不能为空');
@@ -252,15 +299,30 @@ function purchasedCardFromShop(snapshot, teamId, slotId) {
   }) || null;
 }
 
+function roundStateSnapshot(snapshot, teamId, round) {
+  const cleanTeamId = safeText(teamId, '', 80);
+  const roundKey = String(safePositiveNumber(round || snapshot.currentRound, 1, 8));
+  const roundStates = snapshot.roundStates && typeof snapshot.roundStates === 'object' ? snapshot.roundStates : {};
+  const teamStates = roundStates[cleanTeamId] && typeof roundStates[cleanTeamId] === 'object' ? roundStates[cleanTeamId] : {};
+  return normalizeRoundState(teamStates[roundKey] || {});
+}
+
 function nextTurnPointer(snapshot, teamId) {
   const teams = Array.isArray(snapshot.teams) ? snapshot.teams : [];
   if (!teams.length) return { nextTeamId: '', nextRound: safePositiveNumber(snapshot.currentRound, 1, 8) };
   const currentIndex = Math.max(0, teamIndex(snapshot, teamId));
-  const nextIndex = (currentIndex + 1) % teams.length;
-  const nextRound = nextIndex === 0
-    ? safePositiveNumber(snapshot.currentRound, 1, 8) + 1
-    : safePositiveNumber(snapshot.currentRound, 1, 8);
-  const nextTeam = teams[nextIndex] || {};
+  const currentRound = safePositiveNumber(snapshot.currentRound, 1, 8);
+  let nextIndex = (currentIndex + 1) % teams.length;
+  let nextRound = nextIndex === 0 ? currentRound + 1 : currentRound;
+  let nextTeam = teams[nextIndex] || {};
+  for (let checked = 0; checked < teams.length * 2; checked += 1) {
+    const nextTeamId = safeText(nextTeam.teamId || nextTeam.id, '', 80);
+    if (nextTeamId && !roundStateSnapshot(snapshot, nextTeamId, nextRound).skipped) break;
+    nextIndex = (nextIndex + 1) % teams.length;
+    if (nextIndex === 0) nextRound += 1;
+    nextTeam = teams[nextIndex] || {};
+    if (nextRound > 8) break;
+  }
   return {
     nextTeamId: safeText(nextTeam.teamId || nextTeam.id, '', 80),
     nextRound: Math.min(8, nextRound),
@@ -332,6 +394,8 @@ function normalizeHexcoreActionWindow(input = {}) {
     active: input.active === false ? false : true,
     sourceTeamId: safeText(input.sourceTeamId, '', 80),
     slotId: safeText(input.slotId, '', 64),
+    playerId: safeText(input.playerId, '', 80),
+    price: safePositiveNumber(input.price, 0, 99),
     expiresAt: safePositiveNumber(input.expiresAt, 0),
   };
 }
@@ -488,6 +552,11 @@ function teamById(snapshot = {}, teamId = '') {
 function teamCamp(snapshot = {}, teamId = '') {
   const team = teamById(snapshot, teamId);
   return safeText(team && team.camp, '', 40);
+}
+
+function isNoCampMode(snapshot = {}) {
+  const settings = snapshot.settings && typeof snapshot.settings === 'object' ? snapshot.settings : {};
+  return safeText(settings.campMode, '', 40) === 'no_camp';
 }
 
 function normalizeTournamentScore(value) {
@@ -653,6 +722,100 @@ function playerById(snapshot = {}, playerId = '') {
   return Array.isArray(snapshot.players)
     ? snapshot.players.find(player => safeText(player && (player.id || player.playerId), '', 80) === cleanPlayerId)
     : null;
+}
+
+function normalizeAttendanceStatus(value) {
+  const text = safeText(value, '', 40).toLowerCase();
+  if (['confirmed', 'confirm', 'ok', '已确认', '确认', '正常'].includes(text)) return 'confirmed';
+  if (['pending', 'wait', '待确认', '未确认', '待定'].includes(text)) return 'pending';
+  if (['high_risk', 'high-risk', 'risk', '高风险', '风险', '可能缺席'].includes(text)) return 'high_risk';
+  if (['substitute', 'sub', '替补', '候补'].includes(text)) return 'substitute';
+  if (['unavailable', 'absent', 'missing', '缺席', '不可用', '禁用'].includes(text)) return 'unavailable';
+  return 'confirmed';
+}
+
+function activateSubstitutePlayer(snapshot, payload = {}) {
+  const playerId = safeText(payload.playerId || payload.substitutePlayerId, '', 80);
+  if (!playerId || !Array.isArray(snapshot.players)) throw new Error('需要选择有效替补选手');
+  let activated = false;
+  snapshot.players = snapshot.players.map(player => {
+    const currentId = safeText(player && (player.id || player.playerId), '', 80);
+    if (currentId !== playerId) return player;
+    if (normalizeAttendanceStatus(player.attendanceStatus) !== 'substitute') throw new Error('目标选手不是替补状态');
+    if (safeText(player.teamId, '', 80)) throw new Error('已入队选手不能作为替补激活');
+    activated = true;
+    return {
+      ...player,
+      attendanceStatus: 'confirmed',
+      drawWeight: 1,
+      status: safeText(player.status || 'available', 'available', 40) === 'disabled' ? 'disabled' : 'available',
+    };
+  });
+  if (!activated) throw new Error('未找到替补选手');
+  snapshot.lastSubstituteAction = {
+    type: 'activate',
+    playerId,
+    resolvedAt: safeText(payload.resolvedAt, new Date().toISOString(), 40),
+  };
+  return snapshot;
+}
+
+function replacePlayerWithSubstitute(snapshot, payload = {}) {
+  const teamId = safeText(payload.teamId, '', 80);
+  const absentPlayerId = safeText(payload.absentPlayerId || payload.playerId, '', 80);
+  const substitutePlayerId = safeText(payload.substitutePlayerId, '', 80);
+  if (!teamId || !absentPlayerId || !substitutePlayerId) throw new Error('替补替换需要队伍、缺席选手和替补选手');
+  const team = teamById(snapshot, teamId);
+  const absent = playerById(snapshot, absentPlayerId);
+  const substitute = playerById(snapshot, substitutePlayerId);
+  if (!team) throw new Error('未找到目标队伍');
+  if (!absent) throw new Error('未找到缺席选手');
+  if (!substitute) throw new Error('未找到替补选手');
+  const members = Array.isArray(team.team) ? team.team.map(item => safeText(item, '', 80)).filter(Boolean) : [];
+  const memberIndex = members.indexOf(absentPlayerId);
+  if (memberIndex < 0) throw new Error('缺席选手不在目标队伍中');
+  if (safeText(substitute.teamId, '', 80)) throw new Error('替补选手已在其它队伍中');
+  if (safeText(substitute.status || 'available', 'available', 40) === 'disabled') throw new Error('替补选手已禁用');
+  if (normalizeAttendanceStatus(substitute.attendanceStatus) !== 'confirmed') throw new Error('替补选手需要先激活');
+  if (!isNoCampMode(snapshot) && teamCamp(snapshot, teamId) && safeText(substitute.camp, '', 40) !== teamCamp(snapshot, teamId)) {
+    throw new Error('双阵营模式下替补必须匹配目标队伍阵营');
+  }
+  const nextMembers = [...members];
+  nextMembers[memberIndex] = substitutePlayerId;
+  snapshot.teams = (Array.isArray(snapshot.teams) ? snapshot.teams : []).map(current => {
+    const currentId = safeText(current && (current.teamId || current.id), '', 80);
+    return currentId === teamId ? { ...current, team: nextMembers } : current;
+  });
+  snapshot.players = (Array.isArray(snapshot.players) ? snapshot.players : []).map(player => {
+    const currentId = safeText(player && (player.id || player.playerId), '', 80);
+    if (currentId === absentPlayerId) {
+      return {
+        ...player,
+        status: 'unavailable',
+        attendanceStatus: 'unavailable',
+        teamId: '',
+      };
+    }
+    if (currentId === substitutePlayerId) {
+      return {
+        ...player,
+        status: 'drafted',
+        attendanceStatus: 'confirmed',
+        drawWeight: 1,
+        teamId,
+      };
+    }
+    return player;
+  });
+  snapshot.lastSubstituteAction = {
+    type: 'replace',
+    teamId,
+    absentPlayerId,
+    substitutePlayerId,
+    reason: safeText(payload.reason || payload.replacementReason, '', 160),
+    resolvedAt: safeText(payload.resolvedAt, new Date().toISOString(), 40),
+  };
+  return snapshot;
 }
 
 function activeHungryWave(snapshot = {}, round = 1) {
@@ -832,7 +995,8 @@ function teamMemberCount(snapshot = {}, teamId = '') {
 
 function hungryWaveRewardCandidate(snapshot = {}, teamId = '') {
   const camp = teamCamp(snapshot, teamId);
-  if (!camp || !Array.isArray(snapshot.players)) return null;
+  const noCampMode = isNoCampMode(snapshot);
+  if ((!noCampMode && !camp) || !Array.isArray(snapshot.players)) return null;
   const captainPlayerIds = new Set((Array.isArray(snapshot.teams) ? snapshot.teams : [])
     .map(team => safeText(team && (team.playerId || team.captainPlayerId), '', 80))
     .filter(Boolean));
@@ -840,7 +1004,7 @@ function hungryWaveRewardCandidate(snapshot = {}, teamId = '') {
     .filter(player => {
       const playerId = safeText(player && (player.id || player.playerId), '', 80);
       if (!playerId || captainPlayerIds.has(playerId) || player.isCaptain) return false;
-      if (safeText(player.camp, '', 40) !== camp) return false;
+      if (!noCampMode && safeText(player.camp, '', 40) !== camp) return false;
       if (safeText(player.status || 'available', 'available', 40) !== 'available') return false;
       if (safeText(player.teamId, '', 80)) return false;
       return true;
@@ -899,13 +1063,16 @@ function resolveHungryWaveAfterPurchase(snapshot, buyerId, playerId, pricePaid, 
     };
   }
   const player = playerById(snapshot, cleanPlayerId);
-  const sameCamp = player && teamCamp(snapshot, wave.captainId) && teamCamp(snapshot, wave.captainId) === safeText(player.camp, '', 40);
+  const noCampMode = isNoCampMode(snapshot);
+  const sourceCamp = teamCamp(snapshot, wave.captainId);
+  const sameCamp = !noCampMode && player && sourceCamp && sourceCamp === safeText(player.camp, '', 40);
+  const directSteal = noCampMode || sameCamp;
   refundTeamGold(snapshot, cleanBuyerId, pricePaid);
   removePlayerFromTeam(snapshot, cleanBuyerId, cleanPlayerId);
   setRoundState(snapshot, cleanBuyerId, round, { freeShopUsed: true, purchaseUsed: false, skipped: false });
   grantHungryWaveFreeRefresh(snapshot, cleanBuyerId, round);
   const result = {
-    type: sameCamp ? 'same_camp_steal' : 'opposite_camp_return',
+    type: noCampMode ? 'no_camp_steal' : (sameCamp ? 'same_camp_steal' : 'opposite_camp_return'),
     sourceTeamId: wave.captainId,
     buyerTeamId: cleanBuyerId,
     playerId: cleanPlayerId,
@@ -914,9 +1081,9 @@ function resolveHungryWaveAfterPurchase(snapshot, buyerId, playerId, pricePaid, 
     roll: hitRoll.roll,
     chanceBase: hitRoll.chanceBase,
     resolvedAt: event.createdAt,
-    pendingRoundReward: !sameCamp,
+    pendingRoundReward: !directSteal,
   };
-  if (sameCamp) {
+  if (directSteal) {
     addPlayerToTeam(snapshot, wave.captainId, cleanPlayerId);
     replacePlayerTeam(snapshot, cleanPlayerId, wave.captainId);
   } else {
@@ -927,7 +1094,7 @@ function resolveHungryWaveAfterPurchase(snapshot, buyerId, playerId, pricePaid, 
     checkedTeamIds: nextChecked,
     consumed: true,
     triggered: true,
-    pendingRoundReward: !sameCamp,
+    pendingRoundReward: !directSteal,
     resolvedAt: event.createdAt,
   };
   snapshot.lastHungryWave = result;
@@ -1008,6 +1175,150 @@ function resolveHungryWaveRoundEnd(snapshot, round, event) {
   return result;
 }
 
+function eligibleHeavenlyOwners(snapshot = {}, buyerTeamId = '', player = null) {
+  const cleanBuyerId = safeText(buyerTeamId, '', 80);
+  const noCampMode = isNoCampMode(snapshot);
+  const playerCamp = safeText(player && player.camp, '', 40);
+  if (!noCampMode && !playerCamp) return [];
+  return teamIdsWithHexcore(snapshot, 'heavenly-descent')
+    .filter(teamId => {
+      if (!teamId || teamId === cleanBuyerId) return false;
+      if (noCampMode) return true;
+      return teamCamp(snapshot, teamId) === playerCamp;
+    });
+}
+
+function replaceHeavenlyWindowsAfterPurchase(snapshot, buyerTeamId, playerId, slotId, pricePaid, round, event) {
+  const cleanBuyerId = safeText(buyerTeamId, '', 80);
+  const cleanPlayerId = safeText(playerId, '', 80);
+  const player = playerById(snapshot, cleanPlayerId);
+  const buyer = teamById(snapshot, cleanBuyerId);
+  const buyerMembers = Array.isArray(buyer && buyer.team) ? buyer.team.map(item => safeText(item, '', 80)).filter(Boolean) : [];
+  const currentWindows = Array.isArray(snapshot.hexcoreActionWindows)
+    ? snapshot.hexcoreActionWindows.map(normalizeHexcoreActionWindow)
+    : [];
+  const otherWindows = currentWindows.filter(window => window.hexcoreId !== 'heavenly-descent');
+  if (!player || safeText(player.teamId, '', 80) !== cleanBuyerId || !buyerMembers.includes(cleanPlayerId)) {
+    snapshot.hexcoreActionWindows = otherWindows;
+    return snapshot;
+  }
+  const owners = eligibleHeavenlyOwners(snapshot, cleanBuyerId, player);
+  const createdMs = Date.parse(event.createdAt || '') || Date.now();
+  snapshot.hexcoreActionWindows = [
+    ...otherWindows,
+    ...owners.map(teamId => ({
+      windowId: `heavenly-${event.eventSeq}-${teamId}`,
+      teamId,
+      hexcoreId: 'heavenly-descent',
+      round: safePositiveNumber(round, 1, 8),
+      active: true,
+      sourceTeamId: cleanBuyerId,
+      slotId: safeText(slotId, '', 64),
+      playerId: cleanPlayerId,
+      price: safePositiveNumber(pricePaid, 0, 99),
+      expiresAt: createdMs + 10000,
+    })),
+  ];
+  return snapshot;
+}
+
+function markCurrentShopCardHeavenlyResolved(snapshot, buyerTeamId, slotId, playerId, event) {
+  const cleanBuyerId = safeText(buyerTeamId, '', 80);
+  const cleanSlotId = safeText(slotId, '', 64);
+  const cleanPlayerId = safeText(playerId, '', 80);
+  if (!snapshot.currentShop || safeText(snapshot.currentShop.teamId || snapshot.currentShop.captainId, '', 80) !== cleanBuyerId) return snapshot;
+  if (!Array.isArray(snapshot.currentShop.cards)) return snapshot;
+  snapshot.currentShop.cards = snapshot.currentShop.cards.map(card => {
+    const cardSlotId = safeText(card && (card.slotId || card.index), '', 64);
+    const cardPlayerId = safeText(card && card.playerId, '', 80);
+    if (cardSlotId !== cleanSlotId && cardPlayerId !== cleanPlayerId) return card;
+    return {
+      ...card,
+      purchased: true,
+      purchasedAt: card.purchasedAt || event.createdAt,
+      heavenlyResolved: true,
+    };
+  });
+  return snapshot;
+}
+
+function resolveHeavenlyDescentUse(snapshot, payload = {}, event = {}) {
+  const sourceTeamId = safeText(payload.teamId, '', 80);
+  if (!sourceTeamId) throw new Error('神兵天降需要有效发动队伍');
+  if (!teamHasHexcore(snapshot, sourceTeamId, 'heavenly-descent')) {
+    throw new Error('当前队伍未持有神兵天降');
+  }
+  const windows = Array.isArray(snapshot.hexcoreActionWindows)
+    ? snapshot.hexcoreActionWindows.map(normalizeHexcoreActionWindow)
+    : [];
+  const requestedWindowId = safeText(payload.windowId, '', 80);
+  const window = windows.find(item =>
+    item
+    && item.active !== false
+    && item.teamId === sourceTeamId
+    && item.hexcoreId === 'heavenly-descent'
+    && (!requestedWindowId || item.windowId === requestedWindowId)
+  );
+  if (!window) throw new Error('当前没有可发动的神兵天降窗口');
+  const eventMs = Date.parse(event.createdAt || '') || Date.now();
+  if (window.expiresAt && eventMs > window.expiresAt) {
+    snapshot.hexcoreActionWindows = windows.map(item =>
+      item.hexcoreId === 'heavenly-descent' && item.teamId === sourceTeamId
+        ? { ...item, active: false, expiredAt: event.createdAt }
+        : item
+    );
+    throw new Error('神兵天降发动窗口已过期');
+  }
+  const buyerTeamId = safeText(window.sourceTeamId, '', 80);
+  const playerId = safeText(window.playerId, '', 80);
+  const player = playerById(snapshot, playerId);
+  const buyerTeam = teamById(snapshot, buyerTeamId);
+  const buyerMembers = Array.isArray(buyerTeam && buyerTeam.team) ? buyerTeam.team.map(item => safeText(item, '', 80)).filter(Boolean) : [];
+  if (!buyerTeamId || !player || !buyerMembers.includes(playerId) || safeText(player.teamId, '', 80) !== buyerTeamId) {
+    throw new Error('神兵天降目标购买结果已变化');
+  }
+  if (sourceTeamId === buyerTeamId) throw new Error('神兵天降不能响应自己的购买');
+  if (!isNoCampMode(snapshot)) {
+    const sourceCamp = teamCamp(snapshot, sourceTeamId);
+    if (!sourceCamp || safeText(player.camp, '', 40) !== sourceCamp) {
+      throw new Error('神兵天降只能夺取同阵营选手');
+    }
+  }
+
+  refundTeamGold(snapshot, buyerTeamId, window.price);
+  removePlayerFromTeam(snapshot, buyerTeamId, playerId);
+  releasePlayerToPool(snapshot, playerId);
+  setRoundState(snapshot, buyerTeamId, window.round, { freeShopUsed: true, purchaseUsed: false, skipped: false });
+  markCurrentShopCardHeavenlyResolved(snapshot, buyerTeamId, window.slotId, playerId, event);
+
+  const assignedToSource = teamMemberCount(snapshot, sourceTeamId) < teamMemberCapacity(snapshot, sourceTeamId);
+  if (assignedToSource) {
+    addPlayerToTeam(snapshot, sourceTeamId, playerId);
+    replacePlayerTeam(snapshot, playerId, sourceTeamId);
+    setRoundState(snapshot, sourceTeamId, safePositiveNumber(window.round, 1, 8) + 1, {
+      skipped: true,
+      skipReason: 'heavenly-descent',
+    });
+  }
+  markHexcoreUsed(snapshot, sourceTeamId, 'heavenly-descent');
+  snapshot.hexcoreActionWindows = windows.map(item =>
+    item.hexcoreId === 'heavenly-descent'
+      ? { ...item, active: false, resolvedAt: event.createdAt }
+      : item
+  );
+  snapshot.lastHeavenlyDescent = {
+    sourceTeamId,
+    buyerTeamId,
+    playerId,
+    round: safePositiveNumber(window.round, 1, 8),
+    priceRefunded: safePositiveNumber(window.price, 0, 99),
+    assignedToSource,
+    noCampMode: isNoCampMode(snapshot),
+    resolvedAt: event.createdAt,
+  };
+  return snapshot;
+}
+
 function canApplyClientProjection(payload = {}) {
   return [ROLES.SUPER_ADMIN, ROLES.TOURNAMENT_ADMIN, ROLES.REFEREE].includes(payload.commandRole);
 }
@@ -1053,6 +1364,13 @@ function applyEventToSnapshot(snapshot, event) {
       return { ...team, name, renameUsed: true };
     }) : [];
   }
+  if (event.type === EVENT_TYPES.TURN_TIMERS_UPDATED) {
+    next.settings = next.settings && typeof next.settings === 'object' ? { ...next.settings } : {};
+    next.settings.turnTimers = normalizeTurnTimerPayload(payload);
+    if (next.activeTurnTimer && next.activeTurnTimer.phase && next.activeTurnTimer.teamId) {
+      startActiveTurnTimer(next, next.activeTurnTimer.phase, next.activeTurnTimer.teamId, event.createdAt);
+    }
+  }
   if (event.type === EVENT_TYPES.HEXCORE_DRAW_ORDER_SET) {
     const validTeamIds = new Set(teamIdsFrom(next));
     const teamIds = Array.isArray(payload.teamIds)
@@ -1074,6 +1392,7 @@ function applyEventToSnapshot(snapshot, event) {
     };
     next.currentTeamId = drawOrder[0] || next.currentTeamId || '';
     next.currentPhase = drawOrder.length ? 'hexcore_draw' : next.currentPhase;
+    clearActiveTurnTimer(next);
   }
   if (event.type === EVENT_TYPES.HEXCORE_CANDIDATES_CREATED) {
     const draft = normalizeHexcoreDraft(payload);
@@ -1086,6 +1405,7 @@ function applyEventToSnapshot(snapshot, event) {
     next.hexcoreDraft = draft;
     next.currentTeamId = draft.teamId;
     next.currentPhase = 'hexcore_draw';
+    startActiveTurnTimer(next, 'hexcore_draw', draft.teamId, event.createdAt);
   }
   if (event.type === EVENT_TYPES.HEXCORE_CANDIDATE_REFRESHED) {
     const teamId = safeText(payload.teamId || payload.captainId, '', 80);
@@ -1128,6 +1448,7 @@ function applyEventToSnapshot(snapshot, event) {
     });
     next.currentTeamId = nextTeamId || teamId;
     next.currentPhase = nextTeamId ? 'hexcore_draw' : 'gold_shop';
+    clearActiveTurnTimer(next);
   }
   if (event.type === EVENT_TYPES.SHOP_OPENED || event.type === EVENT_TYPES.SHOP_REFRESHED) {
     const teamId = safeText(payload.teamId, '', 80);
@@ -1148,6 +1469,8 @@ function applyEventToSnapshot(snapshot, event) {
       next.currentRound = nextPointer.nextRound;
       next.currentPhase = 'gold_shop';
       if (next.currentRound > round) applyRoundIncome(next, next.currentRound);
+      if (next.currentTeamId && next.currentRound <= 4) startActiveTurnTimer(next, 'gold_shop', next.currentTeamId, event.createdAt);
+      else clearActiveTurnTimer(next);
       return next;
     }
     const currentShopForTeam = next.currentShop
@@ -1195,6 +1518,9 @@ function applyEventToSnapshot(snapshot, event) {
     });
     if (trustedProjection) applyHexcoreWindows(next, payload.hexcoreActionWindows);
     if (trustedProjection) applyShopDisturbances(next, payload.shopDisturbances);
+    if (event.type === EVENT_TYPES.SHOP_OPENED || !next.activeTurnTimer) {
+      startActiveTurnTimer(next, 'gold_shop', teamId, event.createdAt);
+    }
   }
   if (event.type === EVENT_TYPES.SHOP_CARD_PURCHASED) {
     const teamId = safeText(payload.teamId, '', 80);
@@ -1230,6 +1556,7 @@ function applyEventToSnapshot(snapshot, event) {
     const purchaseDisplayPlayerId = purchasedCard ? purchasedCard.displayPlayerId : '';
     assignPurchasedPlayer(next, teamId, purchasePlayerId);
     const hungryWaveResult = resolveHungryWaveAfterPurchase(next, teamId, purchasePlayerId, pricePaid, event);
+    replaceHeavenlyWindowsAfterPurchase(next, teamId, purchasePlayerId, slotId, pricePaid, round, event);
     next.lastPurchase = {
       teamId,
       slotId,
@@ -1245,6 +1572,7 @@ function applyEventToSnapshot(snapshot, event) {
       setRoundState(next, teamId, round, { freeShopUsed: true, purchaseUsed: true, skipped: false });
     }
     if (canApplyClientProjection(payload)) applyHexcoreWindows(next, payload.hexcoreActionWindows);
+    clearActiveTurnTimer(next);
   }
   if (event.type === EVENT_TYPES.TURN_SKIPPED) {
     const teamId = safeText(payload.teamId, '', 80);
@@ -1262,10 +1590,18 @@ function applyEventToSnapshot(snapshot, event) {
       applyRoundIncome(next, next.currentRound);
     }
     if (trustedProjection) applyHexcoreWindows(next, payload.hexcoreActionWindows);
+    if (next.currentTeamId && next.currentRound <= 4) {
+      startActiveTurnTimer(next, 'gold_shop', next.currentTeamId, event.createdAt);
+    } else {
+      clearActiveTurnTimer(next);
+    }
   }
   if (event.type === EVENT_TYPES.HEXCORE_USED) {
     const teamId = safeText(payload.teamId, '', 80);
     const hexcoreId = safeText(payload.hexcoreId, '', 80);
+    if (hexcoreId === 'heavenly-descent') {
+      resolveHeavenlyDescentUse(next, payload, event);
+    }
     if (hexcoreId === 'snow-cat') {
       const targetTeamId = safeText(payload.targetTeamId || payload.targetCaptainId, '', 80);
       if (!targetTeamId || !teamExists(next, targetTeamId)) throw new Error('雪定饿的喵需要选择有效目标队伍');
@@ -1327,6 +1663,12 @@ function applyEventToSnapshot(snapshot, event) {
   if (event.type === EVENT_TYPES.MATCH_SCORE_RECORDED) {
     recordTournamentMatchScore(next, payload);
   }
+  if (event.type === EVENT_TYPES.SUBSTITUTE_ACTIVATED) {
+    activateSubstitutePlayer(next, payload);
+  }
+  if (event.type === EVENT_TYPES.PLAYER_REPLACED_BY_SUBSTITUTE) {
+    replacePlayerWithSubstitute(next, payload);
+  }
   if (event.type === EVENT_TYPES.REFEREE_RULING_FORCED) {
     next.lastRefereeRuling = {
       eventSeq: event.eventSeq,
@@ -1386,6 +1728,8 @@ const AUDITED_EVENT_TYPES = new Set([
   EVENT_TYPES.REFEREE_RULING_FORCED,
   EVENT_TYPES.STATE_ROLLED_BACK,
   EVENT_TYPES.MATCH_SCORE_RECORDED,
+  EVENT_TYPES.SUBSTITUTE_ACTIVATED,
+  EVENT_TYPES.PLAYER_REPLACED_BY_SUBSTITUTE,
 ]);
 
 function auditEntryFromEvent(event, auditSeq) {
@@ -1480,6 +1824,53 @@ function acceptCommandAsEvent(state, command, roleBinding, eventType, payload = 
   };
 }
 
+function resolveExpiredTurnTimer(state, nowInput = new Date().toISOString()) {
+  assertAuthorityState(state);
+  const timer = state.snapshot && state.snapshot.activeTurnTimer;
+  if (!timer || typeof timer !== 'object') return state;
+  const graceMs = Date.parse(timer.graceDeadlineAt || timer.deadlineAt || '');
+  const nowMs = Date.parse(nowInput) || Date.now();
+  if (!graceMs || nowMs < graceMs) return state;
+  const teamId = safeText(timer.teamId, '', 80);
+  if (!teamId) return appendEvent(state, {
+    type: EVENT_TYPES.REFEREE_RULING_FORCED,
+    actorId: 'system-timeout',
+    payload: { reason: '回合计时异常', patchSummary: '计时器缺少队伍，未执行自动流转' },
+    createdAt: new Date(nowMs).toISOString(),
+  });
+  if (timer.phase === 'hexcore_draw') {
+    const draft = normalizeHexcoreDraft(state.snapshot.hexcoreDraft || {});
+    const hexcoreId = draft.teamId === teamId ? draft.slots.find(id => id && !(draft.chosen || []).includes(id)) : '';
+    if (!hexcoreId) return state;
+    return appendEvent(state, {
+      type: EVENT_TYPES.HEXCORE_PICKED,
+      actorId: 'system-timeout',
+      payload: {
+        teamId,
+        hexcoreId,
+        hexcoreStatus: 'available',
+        timeout: true,
+        summary: '海克斯选择倒计时结束，系统自动选择第一个候选',
+      },
+      createdAt: new Date(nowMs).toISOString(),
+    });
+  }
+  if (timer.phase === 'gold_shop') {
+    return appendEvent(state, {
+      type: EVENT_TYPES.TURN_SKIPPED,
+      actorId: 'system-timeout',
+      payload: {
+        teamId,
+        round: safePositiveNumber(timer.round || state.snapshot.currentRound, 1, 8),
+        timeout: true,
+        summary: '商店回合倒计时结束，系统自动跳过当前队长',
+      },
+      createdAt: new Date(nowMs).toISOString(),
+    });
+  }
+  return state;
+}
+
 module.exports = {
   acceptCommandAsEvent,
   appendEvent,
@@ -1487,4 +1878,5 @@ module.exports = {
   createAuthorityState,
   normalizeRoleBinding,
   preflightCommand,
+  resolveExpiredTurnTimer,
 };

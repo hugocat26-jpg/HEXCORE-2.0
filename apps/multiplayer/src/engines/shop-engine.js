@@ -12,6 +12,27 @@
     return [...items].sort(() => Math.random() - 0.5);
   }
 
+  function drawWeight(player) {
+    if (Hexcore2.selectors && typeof Hexcore2.selectors.effectiveDrawWeight === 'function') {
+      return Hexcore2.selectors.effectiveDrawWeight(player);
+    }
+    return player && player.status === 'available' ? 1 : 0;
+  }
+
+  function chooseWeightedPlayer(players) {
+    const entries = (players || [])
+      .map(player => ({ player, weight: drawWeight(player) }))
+      .filter(item => item.weight > 0);
+    if (!entries.length) return null;
+    const total = entries.reduce((sum, item) => sum + item.weight, 0);
+    let roll = Math.random() * total;
+    for (const item of entries) {
+      roll -= item.weight;
+      if (roll <= 0) return item.player;
+    }
+    return entries[entries.length - 1].player;
+  }
+
   function roundNumber(round) {
     const value = Number(round || Hexcore2.state.draft.round);
     return Math.max(1, Math.min(4, Math.round(value) || 1));
@@ -24,6 +45,7 @@
     const camp = Hexcore2.selectors.captainCamp ? Hexcore2.selectors.captainCamp(captainId) : '';
     return Hexcore2.state.players.filter(player =>
       player.status === 'available'
+      && drawWeight(player) > 0
       && player.camp === camp
       && player.tier >= 1
       && player.tier <= 5
@@ -62,7 +84,7 @@
       map.get(player.tier).push(player);
     });
     map.forEach((players, tier) => {
-      map.set(tier, shuffle(players));
+      map.set(tier, shuffle(players).filter(player => drawWeight(player) > 0));
     });
     return map;
   }
@@ -115,8 +137,10 @@
     const effect = consumeOneEffect(captainId, 'reserved_seat');
     if (!effect || !effect.playerId || excludedIds.has(effect.playerId)) return null;
     const player = Hexcore2.state.players.find(item => item.id === effect.playerId);
-    const camp = Hexcore2.selectors.captainCamp(captainId);
-    if (!player || player.status !== 'available' || player.camp !== camp) return null;
+    const eligibility = Hexcore2.selectors.canAssignPlayerToCaptain
+      ? Hexcore2.selectors.canAssignPlayerToCaptain(captainId, player && player.id)
+      : { ok: true };
+    if (!player || player.status !== 'available' || drawWeight(player) <= 0 || !eligibility.ok) return null;
     trackApplied(appliedEffects, effect, { appliedPlayerId: player.id });
     return player;
   }
@@ -217,7 +241,7 @@
         const candidatesByTier = buildCandidatesByTier(captainId, excludedIds, { minTier: ballroomPlan.minTier });
         const tier = chooseWeightedTier(weights, candidatesByTier);
         const candidates = candidatesByTier.get(tier) || [];
-        const player = candidates[0];
+        const player = chooseWeightedPlayer(candidates);
         if (!player) break;
         excludedIds.add(player.id);
         cards.push(cardFromPlayer(player, cards.length));

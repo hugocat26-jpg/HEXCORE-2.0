@@ -12,6 +12,7 @@ class MemoryTournamentStore {
   constructor(options = {}) {
     this.dataFile = options.dataFile || process.env.HEXCORE_DATA_FILE || '';
     this.sessionTtlMs = normalizeSessionTtlMs(options.sessionTtlMs);
+    this.maxRooms = normalizeMaxRooms(options.maxRooms);
     this.tournaments = new Map();
     this.subscribers = new Map();
     this.roomAccess = new Map();
@@ -24,6 +25,11 @@ class MemoryTournamentStore {
     const id = String(input.id || input.tournamentId || `tournament-${Date.now()}`).trim();
     if (!/^[A-Za-z0-9._:-]{1,80}$/.test(id)) throw new Error('赛事 ID 必须是 1-80 位安全标识');
     if (this.tournaments.has(id)) throw new Error(`赛事已存在：${id}`);
+    if (this.activeRoomCount() >= this.maxRooms) {
+      const error = new Error(`active 房间数量已达上限：${this.maxRooms}`);
+      error.statusCode = 400;
+      throw error;
+    }
     const state = createAuthorityState({
       tournamentId: id,
       rulesVersion: input.rulesVersion,
@@ -31,11 +37,13 @@ class MemoryTournamentStore {
         tournamentId: id,
         name: String(input.name || 'HEXCORE 多人测试赛事').trim().slice(0, 80),
         createdAt: new Date().toISOString(),
+        roomStatus: 'active',
         currentTeamId: teamIdFromInput(input),
         currentRound: safePositiveNumber(input.currentRound, 1, 8),
         settings: normalizeSettings(input.settings),
         teams: normalizeTeams(input),
         players: normalizePlayers(input),
+        playerProfiles: normalizePlayerProfiles(input),
         hexcoreAssignments: normalizeHexcoreAssignments(input),
         hungryWaveRound: normalizeHungryWaveRound(input),
         tournament: normalizeTournament(input.tournament || (input.snapshot && input.snapshot.tournament)),
@@ -57,6 +65,7 @@ class MemoryTournamentStore {
 
   replaceTournament(id, nextState) {
     if (!this.tournaments.has(id)) throw new Error(`赛事不存在：${id}`);
+    this.assertRoomWritable(id);
     this.tournaments.set(id, clone(nextState));
     this.persistToDisk();
     const event = nextState.events[nextState.events.length - 1] || null;
@@ -128,20 +137,55 @@ class MemoryTournamentStore {
     return this.dataFile ? 'memory+file' : 'memory';
   }
 
+  activeRoomCount() {
+    return Array.from(this.roomAccess.values()).filter(access => roomStatus(access) === 'active').length;
+  }
+
   publicStats() {
     const subscriberCount = Array.from(this.subscribers.values()).reduce((sum, bucket) => sum + bucket.size, 0);
     return {
       storage: this.storageLabel(),
       tournamentCount: this.tournaments.size,
       roomCount: this.roomAccess.size,
+      activeRoomCount: this.activeRoomCount(),
+      maxRooms: this.maxRooms,
+      postgresConnected: false,
       sessionTtlSeconds: Math.max(1, Math.ceil(this.sessionTtlMs / 1000)),
       subscriberCount,
     };
   }
 
+  listRooms() {
+    return Array.from(this.roomAccess.entries()).map(([id, access]) => {
+      const state = this.tournaments.get(id) || {};
+      const snapshot = state.snapshot || {};
+      const teams = Array.isArray(snapshot.teams) ? snapshot.teams : [];
+      const settings = snapshot.settings && typeof snapshot.settings === 'object' ? snapshot.settings : {};
+      const subscriberBucket = this.subscribers.get(id);
+      return {
+        tournamentId: id,
+        name: String(snapshot.name || id).trim().slice(0, 80),
+        status: roomStatus(access),
+        createdAt: String(access.createdAt || snapshot.createdAt || '').trim(),
+        updatedAt: String(access.updatedAt || access.createdAt || snapshot.createdAt || '').trim(),
+        archivedAt: String(access.archivedAt || '').trim(),
+        teamCount: safePositiveNumber(settings.teamCount || settings.totalTeams || teams.length, teams.length || 0, 20),
+        campMode: String(settings.campMode || 'dual_camp').trim(),
+        pairingMode: String(settings.pairingMode || '').trim(),
+        storage: this.storageLabel(),
+        subscriberCount: subscriberBucket ? subscriberBucket.size : 0,
+      };
+    }).filter(room => room.status !== 'deleted');
+  }
+
   joinTournament(id, input = {}) {
     const access = this.roomAccess.get(id);
     if (!access) throw new Error(`赛事不存在：${id}`);
+    if (roomStatus(access) === 'archived') {
+      const error = new Error('房间已归档，不能加入');
+      error.statusCode = 403;
+      throw error;
+    }
     const code = String(input.code || '').trim();
     const displayName = String(input.displayName || '未命名用户').trim().slice(0, 40);
     const binding = bindingFromCode(access, code);
@@ -163,6 +207,63 @@ class MemoryTournamentStore {
     this.sessions.set(session.sessionTokenHash, session);
     this.persistToDisk();
     return clone({ ...session, sessionToken, sessionTokenHash: undefined });
+  }
+
+  assertRoomWritable(id) {
+    const access = this.roomAccess.get(id);
+    if (!access) {
+      const error = new Error('赛事不存在');
+      error.statusCode = 404;
+      throw error;
+    }
+    if (roomStatus(access) === 'archived') {
+      const error = new Error('房间已归档，不能执行操作');
+      error.statusCode = 403;
+      throw error;
+    }
+    return true;
+  }
+
+  archiveTournament(id, sessionToken) {
+    const access = this.roomAccess.get(id);
+    const state = this.tournaments.get(id);
+    if (!access || !state) return null;
+    this.requireManagementSession(id, sessionToken, '房间生命周期管理');
+    const now = new Date().toISOString();
+    const nextAccess = {
+      ...access,
+      status: 'archived',
+      archivedAt: access.archivedAt || now,
+      updatedAt: now,
+    };
+    const nextState = clone(state);
+    nextState.snapshot = nextState.snapshot && typeof nextState.snapshot === 'object' ? nextState.snapshot : {};
+    nextState.snapshot.roomStatus = 'archived';
+    this.roomAccess.set(id, nextAccess);
+    this.tournaments.set(id, nextState);
+    this.persistToDisk();
+    return roomLifecycleSummary(id, nextAccess);
+  }
+
+  deleteTournament(id, sessionToken) {
+    const access = this.roomAccess.get(id);
+    if (!access || !this.tournaments.has(id)) return null;
+    const session = this.requireManagementSession(id, sessionToken, '房间生命周期管理');
+    const now = new Date().toISOString();
+    this.tournaments.delete(id);
+    this.roomAccess.delete(id);
+    this.initialRoomAccess.delete(id);
+    this.subscribers.delete(id);
+    for (const [hash, current] of Array.from(this.sessions.entries())) {
+      if (current && current.tournamentId === id) this.sessions.delete(hash);
+    }
+    this.persistToDisk();
+    return {
+      tournamentId: id,
+      status: 'deleted',
+      deletedAt: now,
+      deletedBy: session.actorId || '',
+    };
   }
 
   getSession(sessionToken, tournamentId) {
@@ -257,11 +358,24 @@ function normalizeSessionTtlMs(value) {
   return Math.round(hours * 60 * 60 * 1000);
 }
 
+function normalizeMaxRooms(value) {
+  const configured = Number(value ?? process.env.HEXCORE_MAX_ROOMS);
+  if (Number.isInteger(configured) && configured >= 1 && configured <= 500) return configured;
+  return 20;
+}
+
+function roomStatus(access = {}) {
+  const status = String(access.status || 'active').trim();
+  return ['active', 'archived', 'deleted'].includes(status) ? status : 'active';
+}
+
 function normalizeTeams(input = {}) {
+  const settings = normalizeSettings(input.settings);
+  const teamCount = safePositiveNumber(settings.teamCount, 10, 20);
   const teams = Array.isArray(input.teams) && input.teams.length
     ? input.teams
-    : Array.from({ length: 10 }, (_, index) => ({ teamId: `team-${index + 1}`, name: `队伍${index + 1}` }));
-  return teams.map((team, index) => ({
+    : Array.from({ length: teamCount }, (_, index) => ({ teamId: `team-${index + 1}`, name: `队伍${index + 1}` }));
+  return teams.slice(0, 20).map((team, index) => ({
     teamId: String(team.teamId || team.id || `team-${index + 1}`).trim(),
     name: String(team.name || `队伍${index + 1}`).trim().slice(0, 40),
     camp: String(team.camp || '').trim().slice(0, 40),
@@ -300,13 +414,34 @@ function normalizeTeamEconomy(input = {}, team = {}) {
 
 function normalizeSettings(settings = {}) {
   const source = settings && typeof settings === 'object' ? settings : {};
+  const teamCount = Math.max(6, safePositiveNumber(source.teamCount || source.totalTeams, 10, 20));
+  const campMode = ['dual_camp', 'no_camp'].includes(String(source.campMode || '').trim()) ? String(source.campMode).trim() : 'dual_camp';
+  if (campMode === 'dual_camp' && teamCount % 2 !== 0) {
+    throw new Error('双阵营模式队伍数量必须为偶数');
+  }
+  const pairingMode = ['camp_versus', 'random', 'manual'].includes(String(source.pairingMode || '').trim())
+    ? String(source.pairingMode).trim()
+    : (campMode === 'no_camp' ? 'random' : 'camp_versus');
   const refreshCosts = Array.isArray(source.refreshCosts) && source.refreshCosts.length
     ? source.refreshCosts.slice(0, 4).map(cost => safePositiveNumber(cost, 1, 9))
     : [1, 2, 3, 4];
   return {
+    minTeams: 6,
+    maxTeams: 20,
+    teamCount,
+    totalTeams: teamCount,
+    playersPerTeam: Math.max(2, safePositiveNumber(source.playersPerTeam, 5, 8)),
+    teamSizeIncludesCaptain: true,
+    campMode,
+    pairingMode,
+    allowSubstitutes: source.allowSubstitutes !== false,
     initialGold: safePositiveNumber(source.initialGold, 6, 99),
     roundIncome: safePositiveNumber(source.roundIncome, 3, 99),
     refreshCosts,
+    turnTimers: {
+      hexcoreSeconds: safePositiveNumber(source.turnTimers && source.turnTimers.hexcoreSeconds, 0, 3600),
+      shopSeconds: safePositiveNumber(source.turnTimers && source.turnTimers.shopSeconds, 0, 3600),
+    },
   };
 }
 
@@ -324,9 +459,62 @@ function normalizePlayers(input = {}) {
     score: safePositiveNumber(player.score || player.tier, 0, 999),
     heroes: Array.isArray(player.heroes) ? player.heroes.map(hero => String(hero || '').trim().slice(0, 24)).filter(Boolean).slice(0, 3) : [],
     status: String(player.status || 'available').trim().slice(0, 40),
+    profileId: String(player.profileId || '').trim().slice(0, 80),
+    tournamentName: String(player.tournamentName || '').trim().slice(0, 80),
+    region: String(player.region || '').trim().slice(0, 40),
+    attendanceStatus: normalizeAttendanceStatus(player.attendanceStatus),
+    drawWeight: normalizeDrawWeight(player.drawWeight, player.attendanceStatus),
     teamId: String(player.teamId || '').trim().slice(0, 80),
     isCaptain: Boolean(player.isCaptain),
   })).filter(player => player.id);
+}
+
+function normalizeAttendanceStatus(value) {
+  const text = String(value || '').trim().toLowerCase();
+  if (['confirmed', 'confirm', 'ok', '已确认', '确认', '正常'].includes(text)) return 'confirmed';
+  if (['pending', 'wait', '待确认', '未确认', '待定'].includes(text)) return 'pending';
+  if (['high_risk', 'high-risk', 'risk', '高风险', '风险', '可能缺席'].includes(text)) return 'high_risk';
+  if (['substitute', 'sub', '替补', '候补'].includes(text)) return 'substitute';
+  if (['unavailable', 'absent', 'missing', '缺席', '不可用', '禁用'].includes(text)) return 'unavailable';
+  return 'confirmed';
+}
+
+function normalizeDrawWeight(value, status) {
+  const defaults = {
+    confirmed: 1,
+    pending: 0.7,
+    high_risk: 0.4,
+    substitute: 0,
+    unavailable: 0,
+  };
+  const fallback = defaults[normalizeAttendanceStatus(status)] ?? 1;
+  const number = Number(value);
+  if (!Number.isFinite(number)) return fallback;
+  return Math.max(0, Math.min(1, Math.round(number * 100) / 100));
+}
+
+function normalizePlayerProfiles(input = {}) {
+  const profiles = Array.isArray(input.playerProfiles)
+    ? input.playerProfiles
+    : (input.snapshot && Array.isArray(input.snapshot.playerProfiles) ? input.snapshot.playerProfiles : []);
+  return profiles.map((profile, index) => ({
+    id: String(profile.id || profile.profileId || `profile-${index + 1}`).trim().slice(0, 80),
+    commonName: String(profile.commonName || profile.name || `选手档案${index + 1}`).trim().slice(0, 40),
+    aliases: Array.isArray(profile.aliases)
+      ? profile.aliases.map(alias => String(alias || '').trim().slice(0, 40)).filter(Boolean).slice(0, 12)
+      : [],
+    historicalIdentities: Array.isArray(profile.historicalIdentities)
+      ? profile.historicalIdentities.map(identity => ({
+        tournamentName: String(identity && identity.tournamentName || '').trim().slice(0, 80),
+        region: String(identity && identity.region || '').trim().slice(0, 40),
+        gameId: String(identity && identity.gameId || '').trim().slice(0, 80),
+        name: String(identity && identity.name || '').trim().slice(0, 40),
+      })).filter(identity => identity.tournamentName || identity.region || identity.gameId || identity.name).slice(0, 30)
+      : [],
+    attendanceReliability: normalizeAttendanceStatus(profile.attendanceReliability || profile.attendanceStatus),
+    refereeNotes: String(profile.refereeNotes || profile.notes || '').trim().slice(0, 240),
+    updatedAt: String(profile.updatedAt || '').trim().slice(0, 40),
+  })).filter(profile => profile.id);
 }
 
 function normalizeHexcoreAssignments(input = {}) {
@@ -447,6 +635,7 @@ function createRoomAccess(id, input = {}) {
     : normalizeTeams(input);
   const refereeCode = safeProvidedCode(input.refereeCode) || generateSecret('ref');
   const viewerCode = safeProvidedCode(input.viewerCode) || generateSecret('view');
+  const createdAt = new Date().toISOString();
   const captainCodes = teams.map((team, index) => ({
     teamId: String(team.teamId || team.id || `team-${index + 1}`).trim(),
     teamName: String(team.name || `队伍${index + 1}`).trim().slice(0, 40),
@@ -455,12 +644,15 @@ function createRoomAccess(id, input = {}) {
   return {
     initial: {
       tournamentId: id,
+      status: 'active',
       refereeCode,
       viewerCode,
       captainCodes,
+      createdAt,
     },
     stored: {
       tournamentId: id,
+      status: 'active',
       refereeCodeHash: hashSecret(refereeCode),
       viewerCodeHash: hashSecret(viewerCode),
       captainCodes: captainCodes.map(item => ({
@@ -468,7 +660,9 @@ function createRoomAccess(id, input = {}) {
         teamName: item.teamName,
         codeHash: hashSecret(item.code),
       })),
-      createdAt: new Date().toISOString(),
+      createdAt,
+      updatedAt: createdAt,
+      archivedAt: '',
     },
   };
 }
@@ -509,6 +703,7 @@ function safePositiveNumber(value, fallback = 0, max = Number.MAX_SAFE_INTEGER) 
 function roomAccessSummary(access) {
   return clone({
     tournamentId: access.tournamentId,
+    status: roomStatus(access),
     refereeCode: { issued: Boolean(access.refereeCodeHash) },
     viewerCode: { issued: Boolean(access.viewerCodeHash) },
     captainCodes: access.captainCodes.map(item => ({
@@ -517,7 +712,19 @@ function roomAccessSummary(access) {
       codeIssued: Boolean(item.codeHash),
     })),
     createdAt: access.createdAt,
+    updatedAt: access.updatedAt || access.createdAt || '',
+    archivedAt: access.archivedAt || '',
   });
+}
+
+function roomLifecycleSummary(id, access = {}) {
+  return {
+    tournamentId: id,
+    status: roomStatus(access),
+    createdAt: String(access.createdAt || '').trim(),
+    updatedAt: String(access.updatedAt || access.createdAt || '').trim(),
+    archivedAt: String(access.archivedAt || '').trim(),
+  };
 }
 
 module.exports = {
@@ -526,5 +733,6 @@ module.exports = {
   createRoomAccess,
   generateSecret,
   hashSecret,
+  roomLifecycleSummary,
   roomAccessSummary,
 };

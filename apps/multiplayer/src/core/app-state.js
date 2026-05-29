@@ -53,16 +53,75 @@
   };
 
   const CAMPS = ['local', 'outsider'];
+  const TEAM_COUNT_MIN = 6;
+  const TEAM_COUNT_MAX = 20;
+  const DEFAULT_TEAM_COUNT = 10;
+  const CAMP_MODES = ['dual_camp', 'no_camp'];
+  const PAIRING_MODES = ['camp_versus', 'random', 'manual'];
   const CAMP_LABELS = {
     local: '本地人',
     outsider: '外地人',
   };
+
+  const ATTENDANCE_STATUS_LABELS = {
+    confirmed: '已确认',
+    pending: '待确认',
+    high_risk: '高风险',
+    substitute: '替补',
+    unavailable: '缺席',
+  };
+
+  const ATTENDANCE_WEIGHT_DEFAULTS = {
+    confirmed: 1,
+    pending: 0.7,
+    high_risk: 0.4,
+    substitute: 0,
+    unavailable: 0,
+  };
+
+  function normalizeAttendanceStatus(value) {
+    const text = String(value || '').trim().toLowerCase();
+    if (['confirmed', 'confirm', 'ok', '已确认', '确认', '正常'].includes(text)) return 'confirmed';
+    if (['pending', 'wait', '待确认', '未确认', '待定'].includes(text)) return 'pending';
+    if (['high_risk', 'high-risk', 'risk', '高风险', '风险', '可能缺席'].includes(text)) return 'high_risk';
+    if (['substitute', 'sub', '替补', '候补'].includes(text)) return 'substitute';
+    if (['unavailable', 'absent', 'missing', '缺席', '不可用', '禁用'].includes(text)) return 'unavailable';
+    return 'confirmed';
+  }
+
+  function clampRatio(value, fallback) {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return fallback;
+    return Math.max(0, Math.min(1, Math.round(number * 100) / 100));
+  }
+
+  function effectiveDrawWeight(player) {
+    if (!player || player.status !== 'available') return 0;
+    const status = normalizeAttendanceStatus(player.attendanceStatus);
+    if (status === 'unavailable' || status === 'substitute') return 0;
+    const fallback = ATTENDANCE_WEIGHT_DEFAULTS[status] ?? 1;
+    return clampRatio(player.drawWeight, fallback);
+  }
 
   function normalizeCamp(value) {
     const text = String(value || '').trim().toLowerCase();
     if (text === 'local' || text === '本地' || text === '本地人') return 'local';
     if (text === 'outsider' || text === 'away' || text === '外地' || text === '外地人') return 'outsider';
     return '';
+  }
+
+  function normalizeCampMode(value) {
+    return CAMP_MODES.includes(String(value || '').trim()) ? String(value || '').trim() : 'dual_camp';
+  }
+
+  function normalizePairingMode(value, campMode = 'dual_camp') {
+    const text = String(value || '').trim();
+    if (PAIRING_MODES.includes(text)) return text;
+    return campMode === 'no_camp' ? 'random' : 'camp_versus';
+  }
+
+  function isNoCampMode() {
+    return normalizeCampMode(Hexcore2.state && Hexcore2.state.settings && Hexcore2.state.settings.campMode) === 'no_camp';
   }
 
   function normalizeResultLabel(value) {
@@ -259,6 +318,7 @@
       if (oldId) playerIdMap.set(oldId, id);
       playerIdMap.set(id, id);
       const status = ['available', 'drafted', 'disabled', 'captain'].includes(item.status) ? item.status : 'available';
+      const attendanceStatus = normalizeAttendanceStatus(item.attendanceStatus || item.出勤状态);
       const meta = performanceMeta(item);
       const seasonResults = meta.seasonResults;
       const fmvpSeasons = normalizeFmvpSeasons(item, seasonResults);
@@ -278,6 +338,12 @@
           : sanitizeText(item.heroes, '待,定,位', 40).split(/[，,、|/]/).map(hero => hero.trim()).filter(Boolean).slice(0, 5),
         manifesto: sanitizeText(item.manifesto, '', 80),
         status,
+        profileId: sanitizeText(item.profileId || item.档案ID, '', 48),
+        commonName: sanitizeText(item.commonName || item.常用名称, '', 32),
+        tournamentName: sanitizeText(item.tournamentName || item.赛事名称, '', 40),
+        region: sanitizeText(item.region || item.大区, '', 24),
+        attendanceStatus,
+        drawWeight: clampRatio(item.drawWeight ?? item.抽取权重, ATTENDANCE_WEIGHT_DEFAULTS[attendanceStatus] ?? 1),
         teamId: sanitizeText(item.teamId, '', 48),
         isCaptain: Boolean(item.isCaptain),
         isFmvp: Boolean(item.isFmvp || fmvpSeasons.length),
@@ -290,6 +356,33 @@
         role: item.role === 'captain' ? 'captain' : undefined,
       };
       return player && typeof player === 'object' ? Object.assign(player, normalized) : normalized;
+    });
+  }
+
+  function sanitizePlayerProfiles(profiles) {
+    const source = Array.isArray(profiles) ? profiles : [];
+    const usedIds = new Set();
+    return source.map((profile, index) => {
+      const item = profile && typeof profile === 'object' ? profile : {};
+      const id = safeId(item.id || item.profileId, `profile-${index + 1}`, usedIds);
+      return {
+        id,
+        commonName: sanitizeText(item.commonName || item.name, `选手档案${index + 1}`, 32),
+        aliases: Array.isArray(item.aliases)
+          ? item.aliases.map(alias => sanitizeText(alias, '', 32)).filter(Boolean).slice(0, 12)
+          : sanitizeText(item.aliases || item.别名, '', 160).split(/[，,、|/]/).map(alias => alias.trim()).filter(Boolean).slice(0, 12),
+        historicalIdentities: Array.isArray(item.historicalIdentities)
+          ? item.historicalIdentities.map(identity => ({
+            tournamentName: sanitizeText(identity && identity.tournamentName, '', 40),
+            region: sanitizeText(identity && identity.region, '', 24),
+            gameId: sanitizeText(identity && identity.gameId, '', 40),
+            name: sanitizeText(identity && identity.name, '', 32),
+          })).filter(identity => identity.name || identity.gameId || identity.tournamentName).slice(0, 30)
+          : [],
+        attendanceReliability: normalizeAttendanceStatus(item.attendanceReliability || item.attendanceStatus),
+        refereeNotes: sanitizeText(item.refereeNotes || item.notes || item.裁判备注, '', 240),
+        updatedAt: sanitizeText(item.updatedAt, '', 40),
+      };
     });
   }
 
@@ -321,10 +414,12 @@
     };
   }
 
-  function sanitizeCaptains(captains, captainIdMap, playerIdMap, playersPerTeam) {
-    const source = Array.isArray(captains) && captains.length ? captains : clone(defaultState.captains);
+  function sanitizeCaptains(captains, captainIdMap, playerIdMap, playersPerTeam, targetTeamCount = DEFAULT_TEAM_COUNT) {
+    const count = clampNumber(targetTeamCount, TEAM_COUNT_MIN, TEAM_COUNT_MAX, DEFAULT_TEAM_COUNT);
+    const defaults = defaultCaptains(count);
+    const source = Array.isArray(captains) && captains.length ? captains : defaults;
     const usedIds = new Set();
-    return source.slice(0, defaultState.settings.maxTeams).map((captain, index) => {
+    const normalized = source.slice(0, count).map((captain, index) => {
       const item = captain && typeof captain === 'object' ? captain : {};
       const oldId = String(item.id ?? '').trim();
       const id = safeId(oldId, `c${index + 1}`, usedIds);
@@ -359,6 +454,26 @@
       };
       return captain && typeof captain === 'object' ? Object.assign(captain, normalized) : normalized;
     });
+    while (normalized.length < count) {
+      const index = normalized.length;
+      const item = defaults[index] || { id: `c${index + 1}`, name: defaultCaptainName(index + 1), team: [] };
+      const oldId = String(item.id ?? '').trim();
+      const id = safeId(oldId, `c${index + 1}`, usedIds);
+      captainIdMap.set(id, id);
+      normalized.push({
+        id,
+        name: sanitizeText(item.name, defaultCaptainName(index + 1), 40),
+        record: '',
+        team: [],
+        playerId: '',
+        playerGameId: '',
+        economy: normalizeCaptainEconomy({}),
+        hexcoreEconomy: {},
+        sponsorFlowUsed: 0,
+        giantSlayerDiscountUsed: {},
+      });
+    }
+    return normalized;
   }
 
   function releaseRemovedCaptains(keptCaptains, removedCaptains, players) {
@@ -642,25 +757,34 @@
   const defaultState = {
     mode: 'referee_single_client',
     settings: {
-      minTeams: 10,
-      maxTeams: 10,
-      totalTeams: 10,
+      minTeams: TEAM_COUNT_MIN,
+      maxTeams: TEAM_COUNT_MAX,
+      totalTeams: DEFAULT_TEAM_COUNT,
+      teamCount: DEFAULT_TEAM_COUNT,
       playersPerTeam: 5,
       teamSizeIncludesCaptain: true,
       teamCountCustomized: false,
+      campMode: 'dual_camp',
+      pairingMode: 'camp_versus',
+      allowSubstitutes: true,
       drawCount: 5,
       shopSize: 5,
       economyMode: 'gold_shop',
       initialGold: 6,
       roundIncome: 3,
       refreshCosts: [1, 2, 3, 4],
+      turnTimers: {
+        hexcoreSeconds: 0,
+        shopSeconds: 0,
+      },
       roundTiers: [1, 2, 3, 4],
       disabledHexcores: [],
       ruleTemplates: [],
       tierNames: { 0: '队长锁定', 1: '1费基础', 2: '2费轮换', 3: '3费主力', 4: '4费顶配', 5: '5费核心' },
     },
-    captains: defaultCaptains(10),
+    captains: defaultCaptains(DEFAULT_TEAM_COUNT),
     players: [],
+    playerProfiles: [],
     hexcoreAssignments: {},
     hexcoreDraft: {
       captainId: '',
@@ -670,12 +794,13 @@
       refreshUsed: false,
       drawOrder: [],
     },
+    activeTurnTimer: null,
     draft: {
       phase: 'setup',
       round: 1,
       maxRounds: 4,
-      baseOrder: defaultCaptains(10).map(captain => captain.id),
-      currentOrder: defaultCaptains(10).map(captain => captain.id),
+      baseOrder: defaultCaptains(DEFAULT_TEAM_COUNT).map(captain => captain.id),
+      currentOrder: defaultCaptains(DEFAULT_TEAM_COUNT).map(captain => captain.id),
       currentIndex: 0,
       selectedSlot: 0,
       currentDraw: null,
@@ -705,9 +830,17 @@
     const legacyNoGoldState = !state.settings || state.settings.economyMode !== 'gold_shop';
     state.settings = state.settings || clone(defaultState.settings);
     state.settings.tierNames = normalizeTierNames(state.settings.tierNames);
-    state.settings.minTeams = 10;
-    state.settings.maxTeams = 10;
-    state.settings.totalTeams = 10;
+    state.settings.minTeams = TEAM_COUNT_MIN;
+    state.settings.maxTeams = TEAM_COUNT_MAX;
+    const requestedTeamCount = clampNumber(
+      state.settings.teamCount ?? state.settings.totalTeams ?? (Array.isArray(state.captains) && state.captains.length ? state.captains.length : DEFAULT_TEAM_COUNT),
+      TEAM_COUNT_MIN,
+      TEAM_COUNT_MAX,
+      DEFAULT_TEAM_COUNT
+    );
+    state.settings.campMode = normalizeCampMode(state.settings.campMode);
+    state.settings.pairingMode = normalizePairingMode(state.settings.pairingMode, state.settings.campMode);
+    state.settings.allowSubstitutes = state.settings.allowSubstitutes !== false;
     const savedPlayersPerTeam = clampNumber(state.settings.playersPerTeam, 1, 8, defaultState.settings.playersPerTeam);
     state.settings.playersPerTeam = state.settings.teamSizeIncludesCaptain === true
       ? clampNumber(savedPlayersPerTeam, 2, 8, defaultState.settings.playersPerTeam)
@@ -722,6 +855,11 @@
     state.settings.refreshCosts = Array.isArray(state.settings.refreshCosts) && state.settings.refreshCosts.length
       ? state.settings.refreshCosts.slice(0, 4).map(cost => clampNumber(cost, 1, 4, 1))
       : [...defaultState.settings.refreshCosts];
+    const timers = state.settings.turnTimers && typeof state.settings.turnTimers === 'object' ? state.settings.turnTimers : {};
+    state.settings.turnTimers = {
+      hexcoreSeconds: clampNumber(timers.hexcoreSeconds, 0, 3600, 0),
+      shopSeconds: clampNumber(timers.shopSeconds, 0, 3600, 0),
+    };
     state.settings.roundTiers = Array.isArray(state.settings.roundTiers) && state.settings.roundTiers.length
       ? state.settings.roundTiers.map(tier => Math.max(1, Math.min(5, Number(tier) || 1)))
       : [...defaultState.settings.roundTiers];
@@ -737,10 +875,15 @@
     const captainIdMap = new Map();
     const playerIdMap = new Map();
     state.players = sanitizePlayers(state.players, playerIdMap);
-    state.captains = sanitizeCaptains(state.captains, captainIdMap, playerIdMap, state.settings.playersPerTeam);
-    if (state.captains.length !== defaultState.settings.totalTeams) {
-      const keptCaptains = state.captains.slice(0, defaultState.settings.totalTeams);
-      const removedCaptains = state.captains.slice(defaultState.settings.totalTeams);
+    state.playerProfiles = sanitizePlayerProfiles(state.playerProfiles);
+    const profileIds = new Set(state.playerProfiles.map(profile => profile.id));
+    state.players.forEach(player => {
+      if (player.profileId && !profileIds.has(player.profileId)) player.profileId = '';
+    });
+    state.captains = sanitizeCaptains(state.captains, captainIdMap, playerIdMap, state.settings.playersPerTeam, requestedTeamCount);
+    if (state.captains.length !== requestedTeamCount) {
+      const keptCaptains = state.captains.slice(0, requestedTeamCount);
+      const removedCaptains = state.captains.slice(requestedTeamCount);
       releaseRemovedCaptains(keptCaptains, removedCaptains, state.players);
       state.captains = keptCaptains;
       state.draft = {
@@ -749,7 +892,7 @@
         currentOrder: state.captains.map(captain => captain.id),
       };
     }
-    state.settings.teamCountCustomized = false;
+    state.settings.teamCountCustomized = Boolean(state.settings.teamCountCustomized || state.captains.length !== DEFAULT_TEAM_COUNT);
     if (legacyNoGoldState && !state.legacyNoGoldBackup) {
       state.legacyNoGoldBackup = {
         migratedAt: new Date().toISOString(),
@@ -772,6 +915,7 @@
       };
     }
     state.settings.totalTeams = state.captains.length;
+    state.settings.teamCount = state.captains.length;
     reconcilePlayerTeamIds(state.captains, state.players);
     rebalancePlayerTiers(state.captains, state.players);
     state.hexcoreAssignments = normalizeHexcoreAssignments(state.hexcoreAssignments, state.captains);
@@ -856,6 +1000,41 @@
       if (!state.ui.joinApiCheck.text) delete state.ui.joinApiCheck;
     } else {
       delete state.ui.joinApiCheck;
+    }
+    if (state.ui.roomList && typeof state.ui.roomList === 'object') {
+      const runtime = state.ui.roomList.runtime && typeof state.ui.roomList.runtime === 'object' ? state.ui.roomList.runtime : {};
+      state.ui.roomList = {
+        level: ['success', 'warn', 'info'].includes(state.ui.roomList.level) ? state.ui.roomList.level : 'info',
+        text: sanitizeText(state.ui.roomList.text, '', 180),
+        fetchedAt: sanitizeText(state.ui.roomList.fetchedAt, '', 40),
+        runtime: {
+          storage: sanitizeText(runtime.storage, 'unknown', 40),
+          activeRoomCount: clampNumber(runtime.activeRoomCount, 0, 999, 0),
+          maxRooms: clampNumber(runtime.maxRooms, 0, 999, 0),
+          roomCount: clampNumber(runtime.roomCount, 0, 999, 0),
+          tournamentCount: clampNumber(runtime.tournamentCount, 0, 999, 0),
+          subscriberCount: clampNumber(runtime.subscriberCount, 0, 9999, 0),
+          postgresConnected: Boolean(runtime.postgresConnected),
+        },
+        rooms: Array.isArray(state.ui.roomList.rooms)
+          ? state.ui.roomList.rooms.map(room => ({
+            tournamentId: sanitizeText(room.tournamentId, '', 80),
+            name: sanitizeText(room.name, '', 80),
+            status: ['active', 'archived'].includes(String(room.status || '')) ? String(room.status) : 'active',
+            createdAt: sanitizeText(room.createdAt, '', 40),
+            updatedAt: sanitizeText(room.updatedAt, '', 40),
+            archivedAt: sanitizeText(room.archivedAt, '', 40),
+            teamCount: clampNumber(room.teamCount, 0, 20, 0),
+            campMode: ['dual_camp', 'no_camp'].includes(String(room.campMode || '')) ? String(room.campMode) : 'dual_camp',
+            pairingMode: ['camp_versus', 'random', 'manual'].includes(String(room.pairingMode || '')) ? String(room.pairingMode) : '',
+            storage: sanitizeText(room.storage, 'unknown', 40),
+            subscriberCount: clampNumber(room.subscriberCount, 0, 9999, 0),
+          })).filter(room => room.tournamentId).slice(0, 80)
+          : [],
+      };
+      if (!state.ui.roomList.text && !state.ui.roomList.rooms.length) delete state.ui.roomList;
+    } else {
+      delete state.ui.roomList;
     }
     delete state.ui.roomCommandSubmitting;
     state.ui.playerFilter = typeof state.ui.playerFilter === 'string' ? state.ui.playerFilter.slice(0, 32) : 'all';
@@ -971,6 +1150,12 @@
     campLabel(camp) {
       return CAMP_LABELS[camp] || '未分阵营';
     },
+    isCampMode() {
+      return !isNoCampMode();
+    },
+    campMode() {
+      return normalizeCampMode(Hexcore2.state.settings && Hexcore2.state.settings.campMode);
+    },
     isCaptainPlayer(playerId) {
       return Hexcore2.state.captains.some(captain => captain.playerId === playerId);
     },
@@ -986,7 +1171,8 @@
       return Hexcore2.state.players.filter(player =>
         player.tier === tier
         && player.status === 'available'
-        && (!camp || player.camp === camp)
+        && effectiveDrawWeight(player) > 0
+        && (isNoCampMode() || !camp || player.camp === camp)
         && !Hexcore2.selectors.isCaptainPlayer(player.id)
       );
     },
@@ -994,12 +1180,31 @@
       const camp = Hexcore2.selectors.captainCamp(captainId);
       return Hexcore2.state.players.filter(player =>
         player.status === 'available'
-        && player.camp === camp
+        && effectiveDrawWeight(player) > 0
+        && (isNoCampMode() || player.camp === camp)
         && player.tier >= 1
         && player.tier <= 5
         && !Hexcore2.selectors.isCaptainPlayer(player.id)
         && !excludedIds.has(player.id)
       );
+    },
+    eligiblePlayersForCaptain(captainId, excludedIds = new Set()) {
+      return Hexcore2.selectors.availableCampPlayers(captainId, excludedIds);
+    },
+    canAssignPlayerToCaptain(captainId, playerId) {
+      const player = Hexcore2.state.players.find(item => item.id === playerId);
+      if (!player) return { ok: false, reason: '目标队员不存在' };
+      if (isNoCampMode()) return { ok: true, reason: '' };
+      const camp = Hexcore2.selectors.captainCamp(captainId);
+      if (!camp || player.camp !== camp) return { ok: false, reason: '不能选择异阵营选手' };
+      return { ok: true, reason: '' };
+    },
+    attendanceLabel(status) {
+      return ATTENDANCE_STATUS_LABELS[normalizeAttendanceStatus(status)] || ATTENDANCE_STATUS_LABELS.confirmed;
+    },
+    effectiveDrawWeight,
+    playerProfile(profileId) {
+      return Hexcore2.state.playerProfiles.find(profile => profile.id === profileId) || null;
     },
     currentHexcores() {
       const captain = Hexcore2.selectors.currentCaptain();
@@ -1035,7 +1240,10 @@
     },
     workflowChecklist() {
       const state = Hexcore2.state;
-      const teamCountOk = state.captains.length === 10;
+      const minTeams = clampNumber(state.settings.minTeams, TEAM_COUNT_MIN, TEAM_COUNT_MAX, TEAM_COUNT_MIN);
+      const maxTeams = clampNumber(state.settings.maxTeams, TEAM_COUNT_MIN, TEAM_COUNT_MAX, TEAM_COUNT_MAX);
+      const teamCountOk = state.captains.length >= minTeams && state.captains.length <= maxTeams && state.captains.length === state.settings.teamCount;
+      const noCamp = isNoCampMode();
       const namedCaptains = state.captains.filter(captain => String(captain.name || '').trim()).length;
       const assignedCaptainCount = state.captains.filter(captain => Boolean(Hexcore2.selectors.captainPlayer(captain.id))).length;
       const missingHexcoreCaptains = state.captains.filter(captain => (state.hexcoreAssignments[captain.id] || []).length < 1);
@@ -1061,7 +1269,7 @@
           const player = state.players.find(item => item.id === playerId);
           if (!player) rosterIssues.push(`${captain.name} 包含缺失选手`);
           if (player && player.teamId !== captain.id) rosterIssues.push(`${player.name} 归属不一致`);
-          if (player && captainCamp && player.camp !== captainCamp) {
+          if (!noCamp && player && captainCamp && player.camp !== captainCamp) {
             rosterIssues.push(`${captain.name} 含异阵营队员 ${player.name}`);
           }
         });
@@ -1072,7 +1280,7 @@
       const openSlots = state.captains.reduce((sum, captain) => (
         sum + Math.max(0, Hexcore2.selectors.teamMemberCapacity(captain.id) - captain.team.length)
       ), 0);
-      const availablePlayers = state.players.filter(player => player.status === 'available' && player.tier >= 1 && player.tier <= 5 && !Hexcore2.selectors.isCaptainPlayer(player.id));
+      const availablePlayers = state.players.filter(player => player.status === 'available' && effectiveDrawWeight(player) > 0 && player.tier >= 1 && player.tier <= 5 && !Hexcore2.selectors.isCaptainPlayer(player.id));
       const tierCounts = [1, 2, 3, 4, 5].map(tier => ({
         tier,
         name: state.settings.tierNames[tier],
@@ -1080,17 +1288,20 @@
       }));
       const weakTiers = [];
       const campIssues = [];
-      CAMPS.forEach(camp => {
+      if (!noCamp) CAMPS.forEach(camp => {
         const limit = Hexcore2.selectors.campTeamLimit(camp);
         const requiredPlayers = captainCampCounts[camp] * Math.max(1, Number(state.settings.playersPerTeam) || 5);
         if (campCounts[camp] < requiredPlayers) campIssues.push(`${CAMP_LABELS[camp]} ${campCounts[camp]}/${requiredPlayers}，不足以支撑当前阵营队伍`);
-        if (captainCampCounts[camp] !== 5) campIssues.push(`${CAMP_LABELS[camp]}队长 ${captainCampCounts[camp]}/5`);
+        if (state.captains.length % 2 !== 0) campIssues.push('双阵营模式队伍数量必须为偶数');
+        const expectedCampCaptains = Math.floor(state.captains.length / 2);
+        if (captainCampCounts[camp] !== expectedCampCaptains) campIssues.push(`${CAMP_LABELS[camp]}队长 ${captainCampCounts[camp]}/${expectedCampCaptains}`);
         if (captainCampCounts[camp] > limit) campIssues.push(`${CAMP_LABELS[camp]}队伍 ${captainCampCounts[camp]}/${limit}，超过阵营人数/5`);
         const drawablePool = state.players.filter(player =>
           player.camp === camp
           && player.tier >= 1
           && player.tier <= 5
           && player.status !== 'disabled'
+          && !['substitute', 'unavailable'].includes(normalizeAttendanceStatus(player.attendanceStatus))
           && !Hexcore2.selectors.isCaptainPlayer(player.id)
         ).length;
         const minDrawable = captainCampCounts[camp] * Math.max(0, (Number(state.settings.playersPerTeam) || 5) - 1);
@@ -1101,14 +1312,16 @@
           id: 'team-count',
           label: '队伍数量',
           status: teamCountOk ? 'pass' : 'block',
-          detail: `当前 ${state.captains.length}/10 队`,
+          detail: `当前 ${state.captains.length} 队，允许 ${minTeams}-${maxTeams} 队`,
           view: 'rules',
         },
         {
           id: 'camp-count',
           label: '阵营人数',
           status: campIssues.length ? 'block' : 'pass',
-          detail: campIssues.length ? campIssues.slice(0, 4).join('；') : `本地人${campCounts.local}，外地人${campCounts.outsider}；超过组队需求的选手保持空闲`,
+          detail: noCamp
+            ? '无阵营模式使用公共卡池，不校验本地/外地比例'
+            : (campIssues.length ? campIssues.slice(0, 4).join('；') : `本地人${campCounts.local}，外地人${campCounts.outsider}；超过组队需求的选手保持空闲`),
           view: 'players',
         },
         {
