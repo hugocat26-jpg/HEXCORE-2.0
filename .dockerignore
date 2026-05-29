@@ -1,0 +1,15 @@
+node_modules
+npm-debug.log
+.git
+.gitignore
+tmp
+output
+test-results
+scripts/__pycache__
+__pycache__
+*.sqlite
+*.sqlite-*
+*.dump
+.env
+.env.*
+!.env.docker.example

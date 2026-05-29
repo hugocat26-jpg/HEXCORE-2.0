@@ -5993,7 +5993,12 @@ function testMultiplayerClientSubmitsAuthoritativeCommands() {
   const postgresSchema = fs.readFileSync(path.join(root, 'apps/server/postgres/schema.sql'), 'utf8');
   const postgresBackup = fs.readFileSync(path.join(root, 'scripts/postgres-backup.ps1'), 'utf8');
   const postgresRestore = fs.readFileSync(path.join(root, 'scripts/postgres-restore.ps1'), 'utf8');
+  const postgresStore = fs.readFileSync(path.join(root, 'apps/server/postgres-store.js'), 'utf8');
   const multiplayerOpsDoc = fs.readFileSync(path.join(root, 'docs/17_多人端部署运维说明.md'), 'utf8');
+  const dockerfile = fs.readFileSync(path.join(root, 'Dockerfile'), 'utf8');
+  const compose = fs.readFileSync(path.join(root, 'docker-compose.yml'), 'utf8');
+  const dockerignore = fs.readFileSync(path.join(root, '.dockerignore'), 'utf8');
+  const dockerEnv = fs.readFileSync(path.join(root, '.env.docker.example'), 'utf8');
   assert(
     postgresSchema.includes('CREATE TABLE IF NOT EXISTS hexcore_tournaments')
     && postgresSchema.includes('CREATE TABLE IF NOT EXISTS hexcore_room_access')
@@ -6004,6 +6009,7 @@ function testMultiplayerClientSubmitsAuthoritativeCommands() {
     && postgresSchema.includes('session_json::TEXT NOT LIKE')
     && postgresSchema.includes('access_json::TEXT NOT LIKE')
     && postgresSchema.includes('access_json::TEXT NOT LIKE \'%"code":%\'')
+    && postgresSchema.includes("'supervisor'")
     && postgresBackup.includes('$env:HEXCORE_POSTGRES_URL')
     && postgresBackup.includes('$env:PGDATABASE = $env:HEXCORE_POSTGRES_URL')
     && postgresBackup.includes('pg_dump')
@@ -6012,9 +6018,46 @@ function testMultiplayerClientSubmitsAuthoritativeCommands() {
     && postgresRestore.includes('$env:PGDATABASE = $env:HEXCORE_POSTGRES_URL')
     && postgresRestore.includes('pg_restore')
     && !postgresRestore.includes('--dbname=$env:HEXCORE_POSTGRES_URL')
+    && postgresStore.includes('class PostgresTournamentStore extends MemoryTournamentStore')
+    && postgresStore.includes('static async create')
+    && postgresStore.includes('await this.pool.query(schema)')
+    && postgresStore.includes('const previous = this.tournaments.get(id)')
+    && postgresStore.includes('this.tournaments.set(id, previous)')
+    && postgresStore.includes('if (event) this.publish(id, event, nextState)')
+    && postgresStore.includes('storageLabel()')
+    && postgresStore.includes("return 'postgres'")
+    && postgresStore.includes('session_token_hash')
+    && postgresStore.includes('hashSecret(String(sessionToken || \'\'))')
+    && postgresStore.includes('roomAccessSummary(access)')
+    && server.includes('const postgresUrl = String(options.postgresUrl || process.env.HEXCORE_POSTGRES_URL || \'\').trim()')
+    && server.includes('return PostgresTournamentStore.create')
+    && server.includes('const storePromise = Promise.resolve(createTournamentStore(options))')
+    && server.includes('const store = await storePromise')
+    && server.includes('await store.getSessionBinding')
+    && server.includes('await store.replaceTournament')
     && multiplayerOpsDoc.includes('HEXCORE_POSTGRES_URL')
-    && multiplayerOpsDoc.includes('不能用请求内阻塞式 `psql` 命令临时代替'),
-    'PostgreSQL 正式持久化第一阶段应提供 schema、备份/恢复脚本和安全部署说明，且不保存房间码或 sessionToken 明文',
+    && multiplayerOpsDoc.includes('请求链路不能用阻塞式外部 `psql` 命令临时代替'),
+    'PostgreSQL 正式持久化应提供异步 store 适配器、schema、备份/恢复脚本和安全部署说明，且不保存房间码或 sessionToken 明文',
+  );
+  assert(
+    dockerfile.includes('FROM node:24-slim')
+    && dockerfile.includes('npm ci --omit=dev')
+    && dockerfile.includes('HEALTHCHECK')
+    && dockerfile.includes('/health')
+    && compose.includes('postgres:16-alpine')
+    && compose.includes('HEXCORE_POSTGRES_PASSWORD:?')
+    && compose.includes('HEXCORE_POSTGRES_URL: postgres://')
+    && compose.includes('hexcore-postgres-data')
+    && compose.includes('${HEXCORE_APP_PORT:-4186}:4186')
+    && compose.includes('${HEXCORE_API_PORT:-4196}:4196')
+    && dockerignore.includes('node_modules')
+    && dockerignore.includes('.env')
+    && dockerignore.includes('*.dump')
+    && dockerEnv.includes('HEXCORE_POSTGRES_PASSWORD=change-this-local-password')
+    && multiplayerOpsDoc.includes('Docker 本机演示')
+    && multiplayerOpsDoc.includes('docker compose up -d --build')
+    && multiplayerOpsDoc.includes('HEXCORE_POSTGRES_PASSWORD'),
+    'Docker 部署应提供应用镜像、PostgreSQL Compose 编排、健康检查和不提交正式密码的环境变量示例',
   );
 }
 

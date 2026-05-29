@@ -11,5 +11,8 @@
     "serve": "node scripts/serve.js",
     "test": "node scripts/regression.js",
     "post-task": "node scripts/post-task-hook.js"
+  },
+  "dependencies": {
+    "pg": "^8.21.0"
   }
 }

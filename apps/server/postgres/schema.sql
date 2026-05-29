@@ -46,7 +46,7 @@ CREATE TABLE IF NOT EXISTS hexcore_sessions (
   session_json JSONB NOT NULL,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT hexcore_sessions_role
-    CHECK (role IN ('referee', 'tournament_admin', 'super_admin', 'captain', 'viewer')),
+    CHECK (role IN ('referee', 'tournament_admin', 'super_admin', 'supervisor', 'captain', 'viewer')),
   CONSTRAINT hexcore_sessions_no_plain_token
     CHECK (
       session_json::TEXT NOT LIKE '%"sessionToken"%'

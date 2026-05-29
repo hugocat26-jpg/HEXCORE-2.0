@@ -4,3 +4,7 @@ test-results/
 scripts/__pycache__/
 __pycache__/
 public/assets/11/
+node_modules/
+.env
+.env.*
+!.env.docker.example

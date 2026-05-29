@@ -153,6 +153,11 @@ function publicSnapshot(state) {
 
 function createTournamentStore(options = {}) {
   if (options.store) return options.store;
+  const postgresUrl = String(options.postgresUrl || process.env.HEXCORE_POSTGRES_URL || '').trim();
+  if (postgresUrl) {
+    const { PostgresTournamentStore } = require('./postgres-store');
+    return PostgresTournamentStore.create({ connectionString: postgresUrl, sessionTtlMs: options.sessionTtlMs });
+  }
   const sqliteFile = String(options.sqliteFile || process.env.HEXCORE_SQLITE_FILE || '').trim();
   if (sqliteFile) {
     const { SqliteTournamentStore } = require('./sqlite-store');
@@ -164,7 +169,7 @@ function createTournamentStore(options = {}) {
   });
 }
 
-function projectionOptionsFromRequest(req, parsed, store, tournamentId, view, options = {}) {
+async function projectionOptionsFromRequest(req, parsed, store, tournamentId, view, options = {}) {
   if (view !== 'captain' && view !== 'referee') return {};
   const streamToken = String(parsed.searchParams.get('streamToken') || '').trim();
   let binding = null;
@@ -175,7 +180,7 @@ function projectionOptionsFromRequest(req, parsed, store, tournamentId, view, op
   } else {
     binding = streamToken && options.streamTokens
       ? options.streamTokens.resolve(tournamentId, streamToken)
-      : store.getSessionBinding(sessionTokenFromRequest(req, parsed), tournamentId);
+      : await store.getSessionBinding(sessionTokenFromRequest(req, parsed), tournamentId);
   }
   if (!binding) {
     const error = new Error(options.requireStreamToken || streamToken ? 'streamToken 无效或已过期，请重新加入房间' : `需要有效${view === 'referee' ? '裁判' : '队长'} sessionToken 才能读取${view === 'referee' ? '裁判' : '队长'}投影`);
@@ -199,12 +204,13 @@ function projectionOptionsFromRequest(req, parsed, store, tournamentId, view, op
 }
 
 function createServer(options = {}) {
-  const store = createTournamentStore(options);
+  const storePromise = Promise.resolve(createTournamentStore(options));
   const streamTokens = createStreamTokenStore(options.streamTokenTtlMs || STREAM_TOKEN_TTL_MS);
   const startedAtMs = Date.now();
   const startedAt = new Date(startedAtMs).toISOString();
   const server = http.createServer(async (req, res) => {
     try {
+      const store = await storePromise;
       const parsed = new URL(req.url, `http://${host}:${port}`);
       const pathname = parsed.pathname;
 
@@ -227,31 +233,31 @@ function createServer(options = {}) {
           rulesVersion: RULES_VERSION,
           startedAt,
           uptimeSeconds: Math.max(0, Math.round((Date.now() - startedAtMs) / 1000)),
-          runtime: store.publicStats ? store.publicStats() : { storage: 'unknown' },
+          runtime: store.publicStats ? await store.publicStats() : { storage: 'unknown' },
         });
         return;
       }
 
       if (req.method === 'POST' && pathname === '/api/tournaments') {
         const body = await readJson(req);
-        const state = store.createTournament(body);
+        const state = await store.createTournament(body);
         const next = appendEvent(state, {
           type: EVENT_TYPES.TOURNAMENT_CREATED,
           actorId: String(body.actorId || 'system'),
           payload: { name: state.snapshot.name, rulesVersion: state.rulesVersion },
         });
-        store.replaceTournament(state.tournamentId, next);
+        await store.replaceTournament(state.tournamentId, next);
         sendJson(res, 201, {
           ok: true,
           tournament: publicSnapshot(next),
-          room: store.consumeInitialRoomAccess(state.tournamentId),
+          room: await store.consumeInitialRoomAccess(state.tournamentId),
         });
         return;
       }
 
       const snapshotTournamentId = req.method === 'GET' ? matchTournamentRoute(pathname, '/snapshot') : null;
       if (snapshotTournamentId) {
-        const state = store.getTournament(snapshotTournamentId);
+        const state = await store.getTournament(snapshotTournamentId);
         if (!state) {
           sendJson(res, 404, { ok: false, error: '赛事不存在' });
           return;
@@ -262,20 +268,20 @@ function createServer(options = {}) {
 
       const projectionTournamentId = req.method === 'GET' ? matchTournamentRoute(pathname, '/projection') : null;
       if (projectionTournamentId) {
-        const state = store.getTournament(projectionTournamentId);
+        const state = await store.getTournament(projectionTournamentId);
         if (!state) {
           sendJson(res, 404, { ok: false, error: '赛事不存在' });
           return;
         }
         const view = normalizeProjectionView(parsed.searchParams.get('view') || 'public');
-        const projectionOptions = projectionOptionsFromRequest(req, parsed, store, projectionTournamentId, view);
+        const projectionOptions = await projectionOptionsFromRequest(req, parsed, store, projectionTournamentId, view);
         sendJson(res, 200, { ok: true, tournament: createReadOnlyProjection(state, view, projectionOptions) });
         return;
       }
 
       const roomTournamentId = req.method === 'GET' ? matchTournamentRoute(pathname, '/room') : null;
       if (roomTournamentId) {
-        const access = store.getRoomAccess(roomTournamentId, sessionTokenFromRequest(req, parsed));
+        const access = await store.getRoomAccess(roomTournamentId, sessionTokenFromRequest(req, parsed));
         if (!access) {
           sendJson(res, 404, { ok: false, error: '赛事不存在' });
           return;
@@ -286,7 +292,7 @@ function createServer(options = {}) {
 
       const auditTournamentId = req.method === 'GET' ? matchTournamentRoute(pathname, '/audit') : null;
       if (auditTournamentId) {
-        const auditLog = store.getAuditLog(auditTournamentId, sessionTokenFromRequest(req, parsed));
+        const auditLog = await store.getAuditLog(auditTournamentId, sessionTokenFromRequest(req, parsed));
         if (!auditLog) {
           sendJson(res, 404, { ok: false, error: '赛事不存在' });
           return;
@@ -297,7 +303,7 @@ function createServer(options = {}) {
 
       const exportTournamentId = req.method === 'GET' ? matchTournamentRoute(pathname, '/export') : null;
       if (exportTournamentId) {
-        const backup = store.getTournamentBackup(exportTournamentId, bearerSessionTokenFromRequest(req));
+        const backup = await store.getTournamentBackup(exportTournamentId, bearerSessionTokenFromRequest(req));
         if (!backup) {
           sendJson(res, 404, { ok: false, error: '赛事不存在' });
           return;
@@ -309,8 +315,8 @@ function createServer(options = {}) {
       const joinTournamentId = req.method === 'POST' ? matchTournamentRoute(pathname, '/join') : null;
       if (joinTournamentId) {
         const body = await readJson(req);
-        const session = store.joinTournament(joinTournamentId, body);
-        const state = store.getTournament(joinTournamentId);
+        const session = await store.joinTournament(joinTournamentId, body);
+        const state = await store.getTournament(joinTournamentId);
         sendJson(res, 200, { ok: true, session, tournament: publicSnapshot(state) });
         return;
       }
@@ -319,7 +325,7 @@ function createServer(options = {}) {
       if (streamTokenTournamentId) {
         const body = await readJson(req);
         const sessionToken = bearerSessionTokenFromRequest(req) || String(body.sessionToken || '').trim();
-        const binding = store.getSessionBinding(sessionToken, streamTokenTournamentId);
+        const binding = await store.getSessionBinding(sessionToken, streamTokenTournamentId);
         if (!binding) {
           const error = new Error('sessionToken 无效或已过期，无法创建实时订阅凭据');
           error.statusCode = 401;
@@ -331,13 +337,13 @@ function createServer(options = {}) {
 
       const eventTournamentId = req.method === 'GET' ? matchTournamentRoute(pathname, '/events') : null;
       if (eventTournamentId) {
-        const state = store.getTournament(eventTournamentId);
+        const state = await store.getTournament(eventTournamentId);
         if (!state) {
           sendJson(res, 404, { ok: false, error: '赛事不存在' });
           return;
         }
         const view = normalizeProjectionView(parsed.searchParams.get('view') || 'public');
-        const projectionOptions = projectionOptionsFromRequest(req, parsed, store, eventTournamentId, view, { streamTokens, requireStreamToken: true });
+        const projectionOptions = await projectionOptionsFromRequest(req, parsed, store, eventTournamentId, view, { streamTokens, requireStreamToken: true });
         res.writeHead(200, {
           'Content-Type': 'text/event-stream; charset=utf-8',
           'Cache-Control': 'no-store',
@@ -346,7 +352,7 @@ function createServer(options = {}) {
           'Access-Control-Allow-Origin': '*',
         });
         res.write(`event: snapshot\ndata: ${JSON.stringify(createReadOnlyProjection(state, view, projectionOptions))}\n\n`);
-        const unsubscribe = store.subscribe(eventTournamentId, res, (event, nextState) => ({
+        const unsubscribe = await store.subscribe(eventTournamentId, res, (event, nextState) => ({
           ...projectEvent(event, view),
           tournament: nextState ? createReadOnlyProjection(nextState, view, projectionOptions) : null,
         }));
@@ -356,13 +362,13 @@ function createServer(options = {}) {
 
       const commandTournamentId = req.method === 'POST' ? matchTournamentRoute(pathname, '/commands') : null;
       if (commandTournamentId) {
-        const state = store.getTournament(commandTournamentId);
+        const state = await store.getTournament(commandTournamentId);
         if (!state) {
           sendJson(res, 404, { ok: false, error: '赛事不存在' });
           return;
         }
         const body = await readJson(req);
-        const binding = store.getSessionBinding(body.sessionToken, commandTournamentId);
+        const binding = await store.getSessionBinding(body.sessionToken, commandTournamentId);
         if (!binding) throw new Error('sessionToken 无效或已过期');
         const command = createCommand({
           ...body.command,
@@ -381,7 +387,7 @@ function createServer(options = {}) {
           eventType,
           createAuthoritativeCommandPayload(state, command, roleBinding)
         );
-        if (!result.duplicate) store.replaceTournament(commandTournamentId, result.state);
+        if (!result.duplicate) await store.replaceTournament(commandTournamentId, result.state);
         sendJson(res, 200, {
           ok: true,
           duplicate: result.duplicate,
@@ -396,9 +402,12 @@ function createServer(options = {}) {
       sendJson(res, statusFromError(error), { ok: false, error: error && error.message ? error.message : String(error) });
     }
   });
-  if (store && typeof store.close === 'function') {
-    server.on('close', () => store.close());
-  }
+  server.on('close', () => {
+    storePromise.then(store => {
+      if (store && typeof store.close === 'function') return store.close();
+      return null;
+    }).catch(() => {});
+  });
   return server;
 }
 
