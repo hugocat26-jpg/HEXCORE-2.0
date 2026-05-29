@@ -5990,6 +5990,32 @@ function testMultiplayerClientSubmitsAuthoritativeCommands() {
     && refereeConsole.includes('服务端权威'),
     '多人端 UI 应展示服务端同步的海浪摘要，刷新或 SSE 重连后仍能解释最近海浪结算',
   );
+  const postgresSchema = fs.readFileSync(path.join(root, 'apps/server/postgres/schema.sql'), 'utf8');
+  const postgresBackup = fs.readFileSync(path.join(root, 'scripts/postgres-backup.ps1'), 'utf8');
+  const postgresRestore = fs.readFileSync(path.join(root, 'scripts/postgres-restore.ps1'), 'utf8');
+  const multiplayerOpsDoc = fs.readFileSync(path.join(root, 'docs/17_多人端部署运维说明.md'), 'utf8');
+  assert(
+    postgresSchema.includes('CREATE TABLE IF NOT EXISTS hexcore_tournaments')
+    && postgresSchema.includes('CREATE TABLE IF NOT EXISTS hexcore_room_access')
+    && postgresSchema.includes('CREATE TABLE IF NOT EXISTS hexcore_sessions')
+    && postgresSchema.includes('CREATE TABLE IF NOT EXISTS hexcore_events')
+    && postgresSchema.includes('CREATE TABLE IF NOT EXISTS hexcore_audit_log')
+    && postgresSchema.includes('CREATE TABLE IF NOT EXISTS hexcore_checkpoints')
+    && postgresSchema.includes('session_json::TEXT NOT LIKE')
+    && postgresSchema.includes('access_json::TEXT NOT LIKE')
+    && postgresSchema.includes('access_json::TEXT NOT LIKE \'%"code":%\'')
+    && postgresBackup.includes('$env:HEXCORE_POSTGRES_URL')
+    && postgresBackup.includes('$env:PGDATABASE = $env:HEXCORE_POSTGRES_URL')
+    && postgresBackup.includes('pg_dump')
+    && !postgresBackup.includes('--dbname="$env:HEXCORE_POSTGRES_URL"')
+    && postgresRestore.includes('$env:HEXCORE_POSTGRES_URL')
+    && postgresRestore.includes('$env:PGDATABASE = $env:HEXCORE_POSTGRES_URL')
+    && postgresRestore.includes('pg_restore')
+    && !postgresRestore.includes('--dbname=$env:HEXCORE_POSTGRES_URL')
+    && multiplayerOpsDoc.includes('HEXCORE_POSTGRES_URL')
+    && multiplayerOpsDoc.includes('不能用请求内阻塞式 `psql` 命令临时代替'),
+    'PostgreSQL 正式持久化第一阶段应提供 schema、备份/恢复脚本和安全部署说明，且不保存房间码或 sessionToken 明文',
+  );
 }
 
 async function run() {
