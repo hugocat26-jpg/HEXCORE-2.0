@@ -6023,7 +6023,16 @@ function testMultiplayerClientSubmitsAuthoritativeCommands() {
     && postgresStore.includes('await this.pool.query(schema)')
     && postgresStore.includes('const previous = this.tournaments.get(id)')
     && postgresStore.includes('this.tournaments.set(id, previous)')
-    && postgresStore.includes('if (event) this.publish(id, event, nextState)')
+    && postgresStore.includes('this.eventWatermarks.set(id, Math.max')
+    && postgresStore.includes('this.publish(id, event, nextState)')
+    && postgresStore.includes('crossInstanceEventPolling: true')
+    && postgresStore.includes('HEXCORE_POSTGRES_EVENT_POLL_MS')
+    && postgresStore.includes('this.eventWatermarks = new Map()')
+    && postgresStore.includes('ensureEventPoller()')
+    && postgresStore.includes('pollExternalEvents()')
+    && postgresStore.includes('pollTournamentEvents(id)')
+    && postgresStore.includes('WHERE e.tournament_id = $1 AND e.event_seq > $2')
+    && postgresStore.includes('this.publish(id, event, state)')
     && postgresStore.includes('storageLabel()')
     && postgresStore.includes("return 'postgres'")
     && postgresStore.includes('session_token_hash')
@@ -6036,6 +6045,8 @@ function testMultiplayerClientSubmitsAuthoritativeCommands() {
     && server.includes('await store.getSessionBinding')
     && server.includes('await store.replaceTournament')
     && multiplayerOpsDoc.includes('HEXCORE_POSTGRES_URL')
+    && multiplayerOpsDoc.includes('HEXCORE_POSTGRES_EVENT_POLL_MS')
+    && multiplayerOpsDoc.includes('crossInstanceEventPolling')
     && multiplayerOpsDoc.includes('请求链路不能用阻塞式外部 `psql` 命令临时代替'),
     'PostgreSQL 正式持久化应提供异步 store 适配器、schema、备份/恢复脚本和安全部署说明，且不保存房间码或 sessionToken 明文',
   );

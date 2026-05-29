@@ -33,6 +33,10 @@ class PostgresTournamentStore extends MemoryTournamentStore {
       max: Number(options.maxConnections || process.env.HEXCORE_POSTGRES_POOL_SIZE || 4),
       application_name: 'hexcore-multiplayer',
     });
+    this.eventPollMs = Math.max(250, Number(options.eventPollMs || process.env.HEXCORE_POSTGRES_EVENT_POLL_MS || 1000));
+    this.eventWatermarks = new Map();
+    this.eventPollTimer = null;
+    this.eventPollRunning = false;
   }
 
   static async create(options = {}) {
@@ -54,6 +58,8 @@ class PostgresTournamentStore extends MemoryTournamentStore {
       roomCount: this.roomAccess.size,
       sessionTtlSeconds: Math.max(1, Math.ceil(this.sessionTtlMs / 1000)),
       subscriberCount,
+      crossInstanceEventPolling: true,
+      eventPollMs: this.eventPollMs,
     };
   }
 
@@ -74,6 +80,19 @@ class PostgresTournamentStore extends MemoryTournamentStore {
     this.sessions = new Map(sessions.rows.map(row => [String(row.session_token_hash), clone(row.session_json)]));
     this.initialRoomAccess = new Map();
     this.subscribers = new Map(Array.from(this.tournaments.keys()).map(id => [id, new Set()]));
+    for (const [id, state] of this.tournaments.entries()) {
+      this.eventWatermarks.set(id, latestEventSeq(state));
+    }
+  }
+
+  async refreshTournamentFromPostgres(id) {
+    const result = await this.pool.query('SELECT state_json FROM hexcore_tournaments WHERE tournament_id = $1', [id]);
+    const row = result.rows[0];
+    if (!row || !row.state_json) return null;
+    const state = clone(row.state_json);
+    this.tournaments.set(id, state);
+    if (!this.eventWatermarks.has(id)) this.eventWatermarks.set(id, latestEventSeq(state));
+    return clone(state);
   }
 
   persistToDisk() {
@@ -219,7 +238,10 @@ class PostgresTournamentStore extends MemoryTournamentStore {
       throw error;
     }
     const event = nextState.events[nextState.events.length - 1] || null;
-    if (event) this.publish(id, event, nextState);
+    if (event) {
+      this.eventWatermarks.set(id, Math.max(Number(this.eventWatermarks.get(id)) || 0, Number(event.eventSeq) || 0));
+      this.publish(id, event, nextState);
+    }
     return state;
   }
 
@@ -228,7 +250,7 @@ class PostgresTournamentStore extends MemoryTournamentStore {
   }
 
   async getTournament(id) {
-    return super.getTournament(id);
+    return this.refreshTournamentFromPostgres(id);
   }
 
   async getRoomAccess(id, sessionToken) {
@@ -308,11 +330,72 @@ class PostgresTournamentStore extends MemoryTournamentStore {
   }
 
   async subscribe(id, res, projectEvent = event => event) {
-    return super.subscribe(id, res, projectEvent);
+    const state = await this.refreshTournamentFromPostgres(id);
+    if (state && !this.eventWatermarks.has(id)) this.eventWatermarks.set(id, latestEventSeq(state));
+    const unsubscribe = super.subscribe(id, res, projectEvent);
+    this.ensureEventPoller();
+    return () => {
+      unsubscribe();
+      this.stopEventPollerIfIdle();
+    };
   }
 
   async close() {
+    if (this.eventPollTimer) clearInterval(this.eventPollTimer);
+    this.eventPollTimer = null;
     if (this.pool) await this.pool.end();
+  }
+
+  ensureEventPoller() {
+    if (this.eventPollTimer) return;
+    this.eventPollTimer = setInterval(() => {
+      this.pollExternalEvents().catch(() => {});
+    }, this.eventPollMs);
+    if (this.eventPollTimer.unref) this.eventPollTimer.unref();
+  }
+
+  stopEventPollerIfIdle() {
+    const subscriberCount = Array.from(this.subscribers.values()).reduce((sum, bucket) => sum + bucket.size, 0);
+    if (subscriberCount > 0 || !this.eventPollTimer) return;
+    clearInterval(this.eventPollTimer);
+    this.eventPollTimer = null;
+  }
+
+  async pollExternalEvents() {
+    if (this.eventPollRunning) return;
+    this.eventPollRunning = true;
+    try {
+      for (const [id, bucket] of this.subscribers.entries()) {
+        if (!bucket || !bucket.size) continue;
+        await this.pollTournamentEvents(id);
+      }
+    } finally {
+      this.eventPollRunning = false;
+    }
+  }
+
+  async pollTournamentEvents(id) {
+    const afterSeq = Number(this.eventWatermarks.get(id)) || 0;
+    const result = await this.pool.query(
+      `SELECT e.event_seq, e.private_event_json, t.state_json
+       FROM hexcore_events e
+       JOIN hexcore_tournaments t ON t.tournament_id = e.tournament_id
+       WHERE e.tournament_id = $1 AND e.event_seq > $2
+       ORDER BY e.event_seq ASC
+       LIMIT 50`,
+      [id, afterSeq]
+    );
+    if (!result.rows.length) return;
+    let watermark = afterSeq;
+    for (const row of result.rows) {
+      const event = row.private_event_json;
+      const state = row.state_json;
+      if (!event || !state) continue;
+      this.tournaments.set(id, clone(state));
+      watermark = Math.max(watermark, Number(row.event_seq) || Number(event.eventSeq) || 0);
+      this.publish(id, event, state);
+    }
+    this.eventWatermarks.set(id, watermark);
   }
 }
 
@@ -324,6 +407,11 @@ function publicEventSummary(event = {}) {
     createdAt: String(event.createdAt || ''),
     payload: event.payload && typeof event.payload === 'object' ? event.payload : {},
   };
+}
+
+function latestEventSeq(state = {}) {
+  const events = Array.isArray(state.events) ? state.events : [];
+  return events.reduce((max, event) => Math.max(max, Number(event && event.eventSeq) || 0), 0);
 }
 
 module.exports = {
