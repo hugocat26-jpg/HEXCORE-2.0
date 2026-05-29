@@ -1,4 +1,5 @@
 const http = require('http');
+const crypto = require('crypto');
 const { URL } = require('url');
 const { MemoryTournamentStore } = require('./memory-store');
 const {
@@ -18,6 +19,7 @@ const { createAuthoritativeCommandPayload } = require('./shop-service');
 
 const host = process.env.HOST || '0.0.0.0';
 const port = Number(process.env.MULTIPLAYER_API_PORT || process.env.PORT || 4196);
+const STREAM_TOKEN_TTL_MS = Math.max(30, Number(process.env.HEXCORE_STREAM_TOKEN_TTL_SECONDS || 120)) * 1000;
 
 const commandEventMap = {
   [COMMAND_TYPES.IMPORT_STATE]: EVENT_TYPES.STATE_IMPORTED,
@@ -96,6 +98,44 @@ function statusFromError(error) {
   return Number.isInteger(error && error.statusCode) ? error.statusCode : 400;
 }
 
+function hashStreamToken(token) {
+  return crypto.createHash('sha256').update(String(token || '')).digest('hex');
+}
+
+function createStreamTokenStore(ttlMs = STREAM_TOKEN_TTL_MS) {
+  const tokens = new Map();
+  function cleanup(now = Date.now()) {
+    for (const [hash, record] of tokens.entries()) {
+      if (!record || Number(record.expiresAtMs) <= now) tokens.delete(hash);
+    }
+  }
+  return {
+    issue(tournamentId, binding) {
+      cleanup();
+      const streamToken = `stream_${crypto.randomBytes(24).toString('base64url')}`;
+      const expiresAtMs = Date.now() + ttlMs;
+      tokens.set(hashStreamToken(streamToken), {
+        tournamentId: String(tournamentId || ''),
+        actorId: binding.actorId,
+        role: binding.role,
+        teamId: binding.teamId || '',
+        expiresAtMs,
+      });
+      return {
+        streamToken,
+        expiresAt: new Date(expiresAtMs).toISOString(),
+        ttlSeconds: Math.max(1, Math.ceil(ttlMs / 1000)),
+      };
+    },
+    resolve(tournamentId, streamToken) {
+      cleanup();
+      const record = tokens.get(hashStreamToken(streamToken));
+      if (!record || record.tournamentId !== tournamentId) return null;
+      return { actorId: record.actorId, role: record.role, teamId: record.teamId || '' };
+    },
+  };
+}
+
 function sessionTokenFromRequest(req, parsed, body = {}) {
   const auth = String(req.headers.authorization || '').trim();
   if (auth.toLowerCase().startsWith('bearer ')) return auth.slice(7).trim();
@@ -124,12 +164,21 @@ function createTournamentStore(options = {}) {
   });
 }
 
-function projectionOptionsFromRequest(req, parsed, store, tournamentId, view) {
+function projectionOptionsFromRequest(req, parsed, store, tournamentId, view, options = {}) {
   if (view !== 'captain') return {};
-  const sessionToken = sessionTokenFromRequest(req, parsed);
-  const binding = store.getSessionBinding(sessionToken, tournamentId);
+  const streamToken = String(parsed.searchParams.get('streamToken') || '').trim();
+  let binding = null;
+  if (options.requireStreamToken) {
+    binding = streamToken && options.streamTokens
+      ? options.streamTokens.resolve(tournamentId, streamToken)
+      : null;
+  } else {
+    binding = streamToken && options.streamTokens
+      ? options.streamTokens.resolve(tournamentId, streamToken)
+      : store.getSessionBinding(sessionTokenFromRequest(req, parsed), tournamentId);
+  }
   if (!binding) {
-    const error = new Error('需要有效队长 sessionToken 才能读取队长投影');
+    const error = new Error(options.requireStreamToken || streamToken ? 'streamToken 无效或已过期，请重新加入房间' : '需要有效队长 sessionToken 才能读取队长投影');
     error.statusCode = 401;
     throw error;
   }
@@ -143,6 +192,7 @@ function projectionOptionsFromRequest(req, parsed, store, tournamentId, view) {
 
 function createServer(options = {}) {
   const store = createTournamentStore(options);
+  const streamTokens = createStreamTokenStore(options.streamTokenTtlMs || STREAM_TOKEN_TTL_MS);
   const startedAtMs = Date.now();
   const startedAt = new Date(startedAtMs).toISOString();
   const server = http.createServer(async (req, res) => {
@@ -257,6 +307,20 @@ function createServer(options = {}) {
         return;
       }
 
+      const streamTokenTournamentId = req.method === 'POST' ? matchTournamentRoute(pathname, '/stream-token') : null;
+      if (streamTokenTournamentId) {
+        const body = await readJson(req);
+        const sessionToken = bearerSessionTokenFromRequest(req) || String(body.sessionToken || '').trim();
+        const binding = store.getSessionBinding(sessionToken, streamTokenTournamentId);
+        if (!binding) {
+          const error = new Error('sessionToken 无效或已过期，无法创建实时订阅凭据');
+          error.statusCode = 401;
+          throw error;
+        }
+        sendJson(res, 200, { ok: true, ...streamTokens.issue(streamTokenTournamentId, binding) });
+        return;
+      }
+
       const eventTournamentId = req.method === 'GET' ? matchTournamentRoute(pathname, '/events') : null;
       if (eventTournamentId) {
         const state = store.getTournament(eventTournamentId);
@@ -265,7 +329,7 @@ function createServer(options = {}) {
           return;
         }
         const view = normalizeProjectionView(parsed.searchParams.get('view') || 'public');
-        const projectionOptions = projectionOptionsFromRequest(req, parsed, store, eventTournamentId, view);
+        const projectionOptions = projectionOptionsFromRequest(req, parsed, store, eventTournamentId, view, { streamTokens, requireStreamToken: true });
         res.writeHead(200, {
           'Content-Type': 'text/event-stream; charset=utf-8',
           'Cache-Control': 'no-store',

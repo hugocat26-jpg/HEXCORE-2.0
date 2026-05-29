@@ -1127,7 +1127,7 @@ function testSystemIntegrityCheck() {
   H.actions.setActiveView('settings');
   H.actions.runSystemCheck();
 
-  assert(H.meta.version === '2.0.17' && app.innerHTML.includes('HEXCORE 2.0 v2.0.17 裁判端'), '系统设置页应展示统一项目版本号');
+  assert(H.meta.version === '2.0.18' && app.innerHTML.includes('HEXCORE 2.0 v2.0.18 裁判端'), '系统设置页应展示统一项目版本号');
   assert(H.state.ui.systemCheckResult && !H.state.ui.systemCheckResult.ok, '状态检查应保存可视化结果');
   assert(H.state.ui.systemCheckResult.issues.some(issue => issue.type === '重复归属'), '状态检查应识别重复归属');
   assert(H.state.ui.systemCheckResult.issues.some(issue => issue.type === '跨阵营'), '状态检查应识别跨阵营');
@@ -3567,8 +3567,26 @@ async function testMultiplayerApiServer() {
 
     sse = await subscribeSse(port, '/api/tournaments/t-api/events');
     assert(sse.initial.includes('event: snapshot') && sse.initial.includes('"tournamentId":"t-api"'), 'SSE 应先推送当前快照');
-    captainSse = await subscribeSse(port, `/api/tournaments/t-api/events?view=captain&sessionToken=${encodeURIComponent(captainJoin.body.session.sessionToken)}`);
-    assert(captainSse.initial.includes('r1m1') && !captainSse.initial.includes('r1m2'), '队长 SSE 初始快照应使用本队赛程投影');
+    const rejectedQueryStreamSession = await requestJson(port, 'POST', `/api/tournaments/t-api/stream-token?sessionToken=${encodeURIComponent(captainJoin.body.session.sessionToken)}`, {});
+    assert(rejectedQueryStreamSession.status === 401 && /sessionToken/.test(rejectedQueryStreamSession.body.error), '短期实时订阅凭据接口不应接受 URL 查询参数中的长期 sessionToken');
+    const rejectedLongTokenSse = await requestJson(port, 'GET', `/api/tournaments/t-api/events?view=captain&sessionToken=${encodeURIComponent(captainJoin.body.session.sessionToken)}`);
+    assert(rejectedLongTokenSse.status === 401 && /streamToken/.test(rejectedLongTokenSse.body.error), '队长 SSE 不应回退接受 URL 查询参数中的长期 sessionToken');
+    const invalidStreamToken = await requestJson(port, 'POST', '/api/tournaments/t-api/stream-token', {
+      sessionToken: 'session-bad',
+    });
+    assert(invalidStreamToken.status === 401 && /sessionToken/.test(invalidStreamToken.body.error), '短期实时订阅凭据必须由有效 sessionToken 换取');
+    const streamToken = await requestJson(port, 'POST', '/api/tournaments/t-api/stream-token', {
+      sessionToken: captainJoin.body.session.sessionToken,
+    });
+    assert(
+      streamToken.status === 200
+      && /^stream_/.test(streamToken.body.streamToken)
+      && streamToken.body.expiresAt
+      && streamToken.body.streamToken !== captainJoin.body.session.sessionToken,
+      '队长 SSE 应先用长期 sessionToken 换取短期 streamToken，不能把长期 sessionToken 放进事件订阅 URL'
+    );
+    captainSse = await subscribeSse(port, `/api/tournaments/t-api/events?view=captain&streamToken=${encodeURIComponent(streamToken.body.streamToken)}`);
+    assert(captainSse.initial.includes('r1m1') && !captainSse.initial.includes('r1m2') && !captainSse.initial.includes(captainJoin.body.session.sessionToken), '队长 SSE 初始快照应使用本队赛程投影，且不泄漏长期 sessionToken');
     captainSse.req.destroy();
     captainSse = null;
 
@@ -5644,6 +5662,7 @@ function testMultiplayerJoinGateAndCors() {
   const main = fs.readFileSync(path.join(root, 'apps/multiplayer/src/main.js'), 'utf8');
   const server = fs.readFileSync(path.join(root, 'apps/server/server.js'), 'utf8');
   const css = fs.readFileSync(path.join(root, 'apps/multiplayer/src/styles/main.css'), 'utf8');
+  const appState = fs.readFileSync(path.join(root, 'apps/multiplayer/src/core/app-state.js'), 'utf8');
   const packageJson = fs.readFileSync(path.join(root, 'package.json'), 'utf8');
   const stackScript = fs.readFileSync(path.join(root, 'scripts/start-multiplayer-stack.js'), 'utf8');
   const multiplayerServe = fs.readFileSync(path.join(root, 'scripts/serve-multiplayer.js'), 'utf8');
@@ -5671,6 +5690,14 @@ function testMultiplayerJoinGateAndCors() {
     && ui.includes('当前权限')
     && ui.includes('返回多人房间')
     && ui.includes('window.hexcoreUI.leaveMultiplayerRoom()')
+    && ui.includes('Hexcore2.volatileCreatedRoom')
+    && ui.includes('房间码明文已清空')
+    && ui.includes('创建前会先校验服务端是否已有同名赛事')
+    && ui.includes('roomSyncInfo()')
+    && ui.includes('最近同步')
+    && ui.includes('会话：')
+    && ui.includes('roomCommandSubmitting')
+    && ui.includes('购买提交中')
     && ui.includes('房间码明文只显示一次'),
     '多人端无角色会话时应显示房间加入页，而不是直接暴露裁判控制台',
   );
@@ -5681,6 +5708,20 @@ function testMultiplayerJoinGateAndCors() {
     && main.includes('recentMultiplayerApiBase()')
     && main.includes('rememberMultiplayerApiBase(apiBase)')
     && main.includes('defaultMultiplayerApiBase()')
+    && main.includes('shouldUseSameOriginApiBase')
+    && main.includes("port === '4186'")
+    && main.includes('location.origin')
+    && main.includes('localMultiplayerApiBase(location)')
+    && main.includes('Hexcore2.volatileCreatedRoom')
+    && main.includes('verifyTournamentAvailableForCreate')
+    && main.includes('/api/tournaments/${encodeURIComponent(tournamentId)}/snapshot')
+    && main.includes('赛事 ID 已存在')
+    && main.includes('currentCreatedRoom()')
+    && main.includes('setRoomCommandSubmitting(type)')
+    && main.includes('clearRoomCommandSubmitting(finalStatus)')
+    && main.includes("roomSyncStatus = 'submitting'")
+    && main.includes("roomSyncStatus = 'reconnecting'")
+    && main.includes('roomSyncStatusFromError')
     && main.includes('location.hostname')
     && main.includes('shouldPreferCurrentHostApiBase')
     && main.includes('服务地址无法连接')
@@ -5703,6 +5744,14 @@ function testMultiplayerJoinGateAndCors() {
     && main.includes('persistJoinedSession(apiBase, tournamentId, payload)')
     && main.includes('房间码明文只显示一次'),
     '加入房间应调用服务端 join 接口，保存 sessionToken，按返回角色进入对应端，并能清理会话返回多人房间',
+  );
+  assert(
+    appState.includes('delete state.ui.createdRoom')
+    && appState.includes('createdRoomNotice')
+    && appState.includes('sanitizeText(state.ui.createdRoomNotice.tournamentId')
+    && appState.includes('delete state.ui.roomCommandSubmitting')
+    && appState.includes("['online', 'submitting', 'reconnecting', 'offline', 'expired']"),
+    '房间码明文不得随裁判端完整状态长期持久化，旧 saved state 应清理 createdRoom，只保留安全提示摘要',
   );
   assert(
     stackScript.includes("process.env.HOST || '0.0.0.0'")
@@ -5735,6 +5784,11 @@ function testMultiplayerJoinGateAndCors() {
     && css.includes('.role-status-strip')
     && css.includes('.join-gate-grid')
     && css.includes('.created-room-panel')
+    && css.includes('.created-room-panel-stale')
+    && css.includes('.form-hint')
+    && css.includes('.sync-state.online')
+    && css.includes('.sync-state.expired')
+    && css.includes('.is-submitting')
     && css.includes('.room-code-row')
     && css.includes('.multiplayer-return-btn')
     && css.includes('max-width: 100%')
@@ -5798,10 +5852,13 @@ function testMultiplayerClientSubmitsAuthoritativeCommands() {
     && main.includes('applyTournamentProjection(snapshot.tournament)')
     && main.includes('connectRoomEventStream()')
     && main.includes('new global.EventSource')
-    && main.includes("params.set('sessionToken', session.sessionToken)")
+    && main.includes('requestRoomStreamToken(session)')
+    && main.includes('/stream-token')
+    && main.includes("params.set('streamToken', streamToken)")
+    && !main.includes("params.set('sessionToken', session.sessionToken)")
     && main.includes('eventSource.addEventListener')
     && main.includes('applyRoomProjection(responsePayload.tournament)'),
-    '多人端应在 command 成功和 SSE 快照/事件到达时应用服务端公开投影，避免长期只依赖本地状态',
+    '多人端应在 command 成功和 SSE 快照/事件到达时应用服务端公开投影，队长 SSE 只能使用短期 streamToken，避免长期 sessionToken 进入订阅 URL',
   );
   const rules = fs.readFileSync(path.join(root, 'packages/rules/index.js'), 'utf8');
   const projections = fs.readFileSync(path.join(root, 'apps/server/projections.js'), 'utf8');
@@ -5813,7 +5870,9 @@ function testMultiplayerClientSubmitsAuthoritativeCommands() {
     && rules.includes('EVENT_TYPES.HEXCORE_PICKED')
     && projections.includes('publicHexcoreAssignments')
     && projections.includes('publicHexcoreDraft')
-    && server.includes('createReadOnlyProjection(nextState, view, projectionOptions)'),
+    && server.includes('createReadOnlyProjection(nextState, view, projectionOptions)')
+    && server.includes('requireStreamToken: true')
+    && server.includes('bearerSessionTokenFromRequest(req) || String(body.sessionToken'),
     '服务端应把海克斯候选、刷新和选择写入权威状态，并通过公开投影/SSE 同步给裁判、队长和观众',
   );
   const refereeConsole = fs.readFileSync(path.join(root, 'apps/multiplayer/src/ui/referee-console.js'), 'utf8');

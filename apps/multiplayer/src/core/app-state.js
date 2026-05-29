@@ -817,6 +817,21 @@
     state.ui.eventSearch = typeof state.ui.eventSearch === 'string' ? state.ui.eventSearch.slice(0, 80) : '';
     state.ui.theme = ['default', 'neon', 'apple'].includes(state.ui.theme) ? state.ui.theme : 'default';
     state.ui.tournamentCampVersus = state.ui.tournamentCampVersus !== false;
+    delete state.ui.createdRoom;
+    if (state.ui.createdRoomNotice && typeof state.ui.createdRoomNotice === 'object') {
+      state.ui.createdRoomNotice = {
+        apiBase: sanitizeText(state.ui.createdRoomNotice.apiBase, '', 160),
+        tournamentId: sanitizeText(state.ui.createdRoomNotice.tournamentId, '', 80),
+        createdAt: sanitizeText(state.ui.createdRoomNotice.createdAt, '', 40),
+      };
+      if (!state.ui.createdRoomNotice.tournamentId) delete state.ui.createdRoomNotice;
+    } else {
+      delete state.ui.createdRoomNotice;
+    }
+    state.ui.roomSyncStatus = ['online', 'submitting', 'reconnecting', 'offline', 'expired'].includes(state.ui.roomSyncStatus)
+      ? state.ui.roomSyncStatus
+      : '';
+    delete state.ui.roomCommandSubmitting;
     state.ui.playerFilter = typeof state.ui.playerFilter === 'string' ? state.ui.playerFilter.slice(0, 32) : 'all';
     const campFilters = state.ui.playerCampFilters && typeof state.ui.playerCampFilters === 'object' ? state.ui.playerCampFilters : {};
     state.ui.playerCampFilters = {

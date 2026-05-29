@@ -5,6 +5,8 @@
   const MULTIPLAYER_SESSION_KEY = 'hexcore2_multiplayer_session_v1';
   const MULTIPLAYER_API_BASE_KEY = 'hexcore2_multiplayer_api_base_v1';
   let hexDetailHideTimer = null;
+  let roomEventStreamConnecting = false;
+  Hexcore2.volatileCreatedRoom = null;
 
   if (global.location && global.location.protocol === 'file:') {
     document.getElementById('app').innerHTML = `
@@ -1069,12 +1071,32 @@
     global.localStorage.setItem(MULTIPLAYER_SESSION_KEY, JSON.stringify(session));
   }
 
-  function defaultMultiplayerApiBase() {
+  function localMultiplayerApiBase(location) {
     try {
-      const location = global.location || {};
       const protocol = location.protocol && /^https?:$/.test(location.protocol) ? location.protocol : 'http:';
       const hostname = location.hostname || '127.0.0.1';
       return `${protocol}//${hostname}:4196`;
+    } catch (error) {
+      return 'http://127.0.0.1:4196';
+    }
+  }
+
+  function shouldUseSameOriginApiBase(location) {
+    const hostname = String((location && location.hostname) || '').trim();
+    const port = String((location && location.port) || '').trim();
+    if (!hostname || /^(localhost|127\.0\.0\.1)$/.test(hostname)) return false;
+    if (port === '4186') return false;
+    return true;
+  }
+
+  function defaultMultiplayerApiBase() {
+    try {
+      const location = global.location || {};
+      if (shouldUseSameOriginApiBase(location)) {
+        const origin = String(location.origin || '').replace(/\/+$/, '');
+        if (origin) return origin;
+      }
+      return localMultiplayerApiBase(location);
     } catch (error) {
       return 'http://127.0.0.1:4196';
     }
@@ -1138,7 +1160,10 @@
     try {
       if (global.localStorage) global.localStorage.removeItem(MULTIPLAYER_SESSION_KEY);
     } catch (error) {}
-    if (Hexcore2.state && Hexcore2.state.ui) delete Hexcore2.state.ui.roomSyncStatus;
+    if (Hexcore2.state && Hexcore2.state.ui) {
+      delete Hexcore2.state.ui.roomSyncStatus;
+      delete Hexcore2.state.ui.roomCommandSubmitting;
+    }
     if (Hexcore2.state && Hexcore2.state.multiplayer) delete Hexcore2.state.multiplayer.stateVersion;
   }
 
@@ -1170,7 +1195,7 @@
       throw new Error('服务返回格式异常，请确认填写的是多人端 API 地址');
     }
     if (!response.ok || !payload.ok || !payload.session || !payload.session.sessionToken) {
-      if (response.status === 404) throw new Error('赛事 ID 不存在，请确认裁判提供的赛事 ID');
+      if (response.status === 404 || /赛事不存在/.test(payload.error || '')) throw new Error('赛事 ID 不存在，请确认裁判提供的赛事 ID');
       if (response.status === 401 || response.status === 403) throw new Error('当前会话无权限或已过期，请重新输入加入码');
       if (response.status === 400 && payload && /房间码无效/.test(payload.error || '')) throw new Error('加入码无效，请确认复制的是对应身份的房间码');
       throw new Error(payload && payload.error ? payload.error : '加入失败');
@@ -1178,8 +1203,35 @@
     return payload;
   }
 
+  async function verifyTournamentAvailableForCreate(apiBase, tournamentId) {
+    let response;
+    try {
+      response = await fetch(`${apiBase}/api/tournaments/${encodeURIComponent(tournamentId)}/snapshot`, {
+        method: 'GET',
+      });
+    } catch (error) {
+      throw new Error('服务地址无法连接，请确认 API 地址可用后再创建赛事');
+    }
+    let payload = {};
+    try {
+      payload = await response.json();
+    } catch (error) {
+      throw new Error('服务返回格式异常，请确认填写的是多人端 API 地址');
+    }
+    if (response.status === 404) return true;
+    if (response.ok && payload && payload.ok) {
+      throw new Error('赛事 ID 已存在。请换一个赛事 ID，或使用已有房间码加入。');
+    }
+    throw new Error(payload && payload.error ? payload.error : '赛事 ID 校验失败');
+  }
+
+  function currentCreatedRoom() {
+    const created = Hexcore2.volatileCreatedRoom;
+    return created && created.room ? created : null;
+  }
+
   function createdRoomText(kind = 'all') {
-    const created = Hexcore2.state.ui && Hexcore2.state.ui.createdRoom;
+    const created = currentCreatedRoom();
     const room = created && created.room;
     if (!room) return '';
     const captainCodes = Array.isArray(room.captainCodes) ? room.captainCodes : [];
@@ -1566,37 +1618,102 @@
     session.stateVersion = Number(tournament.stateVersion || session.stateVersion || 0);
     session.syncedAt = new Date().toISOString();
     saveMultiplayerSession(session);
+    Hexcore2.state.ui = Hexcore2.state.ui || {};
+    Hexcore2.state.ui.roomSyncStatus = 'online';
+  }
+
+  function setRoomCommandSubmitting(type) {
+    Hexcore2.state.ui = Hexcore2.state.ui || {};
+    Hexcore2.state.ui.roomCommandSubmitting = {
+      type: String(type || 'Command').slice(0, 48),
+      startedAt: Date.now(),
+    };
+    Hexcore2.state.ui.roomSyncStatus = 'submitting';
+    if (Hexcore2.ui && Hexcore2.ui.render) Hexcore2.ui.render();
+  }
+
+  function clearRoomCommandSubmitting(status = 'online') {
+    Hexcore2.state.ui = Hexcore2.state.ui || {};
+    delete Hexcore2.state.ui.roomCommandSubmitting;
+    Hexcore2.state.ui.roomSyncStatus = status;
+    if (Hexcore2.ui && Hexcore2.ui.render) Hexcore2.ui.render();
+  }
+
+  function roomSyncStatusFromError(message) {
+    if (/sessionToken|过期|无权限/.test(String(message || ''))) return 'expired';
+    if (/Failed to fetch|NetworkError|服务地址无法连接|fetch/.test(String(message || ''))) return 'offline';
+    return 'online';
+  }
+
+  async function requestRoomStreamToken(session) {
+    let response;
+    try {
+      response = await fetch(`${session.apiBase}/api/tournaments/${encodeURIComponent(session.tournamentId)}/stream-token`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionToken: session.sessionToken }),
+      });
+    } catch (error) {
+      const networkError = new Error('实时订阅暂时无法连接，正在等待重连');
+      networkError.recoverable = true;
+      throw networkError;
+    }
+    let payload = {};
+    try {
+      payload = await response.json();
+    } catch (error) {
+      throw new Error('实时订阅凭据返回格式异常，请重新加入房间');
+    }
+    if (!response.ok || !payload.ok || !payload.streamToken) {
+      const error = new Error(payload && payload.error ? payload.error : '实时订阅凭据创建失败，请重新加入房间');
+      error.requiresRejoin = response.status === 401 || response.status === 403 || /sessionToken|过期|无权限/.test(error.message);
+      throw error;
+    }
+    return payload.streamToken;
   }
 
   async function submitRoomCommand(type, payload = {}, options = {}) {
     const session = multiplayerSession();
     if (!session || options.skipRoomCommand) return { ok: true, skipped: true };
-    const response = await fetch(`${session.apiBase}/api/tournaments/${encodeURIComponent(session.tournamentId)}/commands`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        sessionToken: session.sessionToken,
-        command: {
-          commandId: `${type}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-          tournamentId: session.tournamentId,
-          type,
-          teamId: payload.teamId || session.teamId || '',
-          baseVersion: Number(session.stateVersion || 0),
-          payload,
-        },
-      }),
-    });
-    const responsePayload = await response.json();
-    if (!response.ok || !responsePayload.ok) {
-      const message = responsePayload && responsePayload.error ? responsePayload.error : '服务端拒绝操作';
-      if (global.sessionStorage && /状态版本过期/.test(message)) {
-        global.sessionStorage.setItem('hexcore2_last_command_error', message);
+    setRoomCommandSubmitting(type);
+    let finalStatus = 'online';
+    try {
+      let response;
+      try {
+        response = await fetch(`${session.apiBase}/api/tournaments/${encodeURIComponent(session.tournamentId)}/commands`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sessionToken: session.sessionToken,
+            command: {
+              commandId: `${type}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+              tournamentId: session.tournamentId,
+              type,
+              teamId: payload.teamId || session.teamId || '',
+              baseVersion: Number(session.stateVersion || 0),
+              payload,
+            },
+          }),
+        });
+      } catch (error) {
+        finalStatus = 'offline';
+        throw new Error('服务地址无法连接，请检查网络或稍后重试');
       }
-      throw new Error(message);
+      const responsePayload = await response.json();
+      if (!response.ok || !responsePayload.ok) {
+        const message = responsePayload && responsePayload.error ? responsePayload.error : '服务端拒绝操作';
+        finalStatus = roomSyncStatusFromError(message);
+        if (global.sessionStorage && /状态版本过期/.test(message)) {
+          global.sessionStorage.setItem('hexcore2_last_command_error', message);
+        }
+        throw new Error(message);
+      }
+      syncSessionFromTournament(responsePayload.tournament);
+      applyRoomProjection(responsePayload.tournament);
+      return responsePayload;
+    } finally {
+      clearRoomCommandSubmitting(finalStatus);
     }
-    syncSessionFromTournament(responsePayload.tournament);
-    applyRoomProjection(responsePayload.tournament);
-    return responsePayload;
   }
 
   function applyRoomEvent(event) {
@@ -1635,16 +1752,44 @@
     return false;
   }
 
-  function connectRoomEventStream() {
+  async function connectRoomEventStream() {
     const session = multiplayerSession();
     if (!session || !session.apiBase || !session.tournamentId || !global.EventSource) return;
     if (Hexcore2.roomEventSource && Hexcore2.roomEventSource.readyState !== 2) return;
+    if (roomEventStreamConnecting) return;
+    roomEventStreamConnecting = true;
     const view = session.role === 'captain' ? 'captain' : 'viewer';
     const params = new URLSearchParams({ view });
-    if (session.role === 'captain' && session.sessionToken) params.set('sessionToken', session.sessionToken);
+    try {
+      if (session.role === 'captain') {
+        const streamToken = await requestRoomStreamToken(session);
+        params.set('streamToken', streamToken);
+      }
+    } catch (error) {
+      roomEventStreamConnecting = false;
+      Hexcore2.state.ui = Hexcore2.state.ui || {};
+      if (error && error.requiresRejoin) {
+        const message = error.message || '实时订阅凭据失效，请重新加入房间';
+        clearMultiplayerSession();
+        Hexcore2.state.ui.joinGateMessage = { level: 'warn', text: message };
+        Hexcore2.eventStore.append('实时同步失效', message, 'warn');
+        returnToMultiplayerGate();
+        return;
+      }
+      Hexcore2.state.ui.roomSyncStatus = 'reconnecting';
+      Hexcore2.ui.render();
+      global.setTimeout(() => connectRoomEventStream(), 2000);
+      return;
+    }
     const url = `${session.apiBase}/api/tournaments/${encodeURIComponent(session.tournamentId)}/events?${params.toString()}`;
     const eventSource = new global.EventSource(url);
     Hexcore2.roomEventSource = eventSource;
+    roomEventStreamConnecting = false;
+    eventSource.onopen = () => {
+      Hexcore2.state.ui = Hexcore2.state.ui || {};
+      Hexcore2.state.ui.roomSyncStatus = 'online';
+      Hexcore2.ui.render();
+    };
     eventSource.addEventListener('snapshot', event => {
       try {
         const tournament = JSON.parse(event.data);
@@ -1674,6 +1819,12 @@
     eventSource.onerror = () => {
       Hexcore2.state.ui = Hexcore2.state.ui || {};
       Hexcore2.state.ui.roomSyncStatus = 'reconnecting';
+      try {
+        eventSource.close();
+      } catch (error) {}
+      if (Hexcore2.roomEventSource === eventSource) Hexcore2.roomEventSource = null;
+      Hexcore2.ui.render();
+      global.setTimeout(() => connectRoomEventStream(), 2000);
     };
   }
 
@@ -1705,7 +1856,7 @@
         Hexcore2.ui.render();
         return;
       }
-      const created = Hexcore2.state.ui && Hexcore2.state.ui.createdRoom;
+      const created = currentCreatedRoom();
       const tournamentId = created && created.tournamentId ? created.tournamentId : `hexcore-${Date.now()}`;
       const ok = Hexcore2.exportService.downloadText(`HEXCORE2_房间码_${tournamentId}.txt`, text, 'text/plain;charset=utf-8');
       Hexcore2.eventStore.append(ok ? '房间码已下载' : '房间码下载失败', ok ? '已生成房间码 TXT' : '当前环境不支持下载文件', ok ? 'success' : 'warn');
@@ -1716,7 +1867,7 @@
       const apiBaseInput = document.getElementById('join-api-base');
       const tournamentInput = document.getElementById('join-tournament-id');
       const codeInput = document.getElementById('join-room-code');
-      const apiBase = String(apiBaseInput && apiBaseInput.value ? apiBaseInput.value : 'http://127.0.0.1:4196').replace(/\/+$/, '');
+      const apiBase = String(apiBaseInput && apiBaseInput.value ? apiBaseInput.value : defaultMultiplayerApiBase()).replace(/\/+$/, '');
       const tournamentId = String(tournamentInput && tournamentInput.value ? tournamentInput.value : '').trim();
       const code = String(codeInput && codeInput.value ? codeInput.value : '').trim();
       if (!tournamentId || !code) {
@@ -1744,7 +1895,7 @@
       const apiBaseInput = document.getElementById('join-api-base');
       const tournamentInput = document.getElementById('create-tournament-id');
       const nameInput = document.getElementById('create-tournament-name');
-      const apiBase = String(apiBaseInput && apiBaseInput.value ? apiBaseInput.value : 'http://127.0.0.1:4196').replace(/\/+$/, '');
+      const apiBase = String(apiBaseInput && apiBaseInput.value ? apiBaseInput.value : defaultMultiplayerApiBase()).replace(/\/+$/, '');
       const providedId = String(tournamentInput && tournamentInput.value ? tournamentInput.value : '').trim();
       const tournamentId = providedId || `hexcore-${Date.now()}`;
       const name = String(nameInput && nameInput.value ? nameInput.value : 'HEXCORE 多人赛事').trim();
@@ -1755,6 +1906,7 @@
       }
       try {
         rememberMultiplayerApiBase(apiBase);
+        await verifyTournamentAvailableForCreate(apiBase, tournamentId);
         const response = await fetch(`${apiBase}/api/tournaments`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1765,11 +1917,16 @@
           throw new Error(payload && payload.error ? payload.error : '创建失败');
         }
         Hexcore2.state.ui = Hexcore2.state.ui || {};
-        Hexcore2.state.ui.createdRoom = {
+        Hexcore2.volatileCreatedRoom = {
           apiBase,
           tournamentId: payload.tournament.tournamentId || tournamentId,
           room: payload.room,
           createdAt: new Date().toISOString(),
+        };
+        Hexcore2.state.ui.createdRoomNotice = {
+          apiBase,
+          tournamentId: Hexcore2.volatileCreatedRoom.tournamentId,
+          createdAt: Hexcore2.volatileCreatedRoom.createdAt,
         };
         Hexcore2.state.ui.joinGateMessage = { level: 'success', text: '赛事已创建，请复制或下载房间码并分发给对应身份。' };
         Hexcore2.eventStore.append('创建赛事成功', '房间码明文只显示一次，请立即分发给对应身份', 'success');
@@ -1783,10 +1940,10 @@
     },
 
     async enterCreatedRefereeRoom() {
-      const created = Hexcore2.state.ui && Hexcore2.state.ui.createdRoom;
+      const created = currentCreatedRoom();
       const room = created && created.room;
       if (!created || !room || !room.refereeCode) {
-        Hexcore2.eventStore.append('进入裁判端失败', '当前页面没有可用的裁判房间码', 'warn');
+        Hexcore2.eventStore.append('进入裁判端失败', '房间码明文已清空，请重新创建赛事或手动输入裁判码加入', 'warn');
         Hexcore2.ui.render();
         return;
       }

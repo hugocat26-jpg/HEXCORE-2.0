@@ -530,6 +530,7 @@ body:has(.join-gate-page) {
 .role-status-strip {
   min-width: 0;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   color: var(--muted);
@@ -538,7 +539,7 @@ body:has(.join-gate-page) {
 
 .role-status-strip span {
   min-width: 0;
-  max-width: 180px;
+  max-width: 168px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -546,6 +547,30 @@ body:has(.join-gate-page) {
 
 .role-status-strip strong {
   color: var(--cyan);
+}
+
+.sync-state.online {
+  color: var(--green);
+}
+
+.sync-state.submitting,
+.sync-state.reconnecting {
+  color: var(--amber);
+}
+
+.sync-state.offline,
+.sync-state.expired {
+  color: var(--danger);
+}
+
+.is-submitting {
+  cursor: wait !important;
+  opacity: 0.76;
+}
+
+.player-card.is-submitting .shop-card-action-hint {
+  border-color: rgba(245, 158, 11, 0.44);
+  color: var(--amber);
 }
 
 .live-status,
@@ -708,6 +733,11 @@ body:has(.join-gate-page) {
   background: linear-gradient(180deg, rgba(25, 212, 240, 0.12), rgba(9, 21, 29, 0.76));
 }
 
+.created-room-panel-stale {
+  border-color: rgba(245, 158, 11, 0.38);
+  background: rgba(245, 158, 11, 0.08);
+}
+
 .created-room-head {
   display: flex;
   align-items: center;
@@ -768,6 +798,12 @@ body:has(.join-gate-page) {
   border-color: rgba(34, 197, 94, 0.42);
   background: rgba(34, 197, 94, 0.1);
   color: var(--green);
+}
+
+.form-hint {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
 }
 
 .room-code-grid,

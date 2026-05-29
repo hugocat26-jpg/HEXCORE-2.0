@@ -46,6 +46,50 @@
     }
   }
 
+  function roomCommandSubmitting(type = '') {
+    const submitting = Hexcore2.state.ui && Hexcore2.state.ui.roomCommandSubmitting;
+    if (!submitting || !submitting.type) return false;
+    return !type || submitting.type === type;
+  }
+
+  function shortSyncTime(value) {
+    const date = value ? new Date(value) : null;
+    if (!date || Number.isNaN(date.getTime())) return '未同步';
+    return date.toLocaleTimeString('zh-CN', { hour12: false });
+  }
+
+  function sessionRemainingLabel(session) {
+    const expiresAt = session && Date.parse(session.expiresAt || '');
+    if (!Number.isFinite(expiresAt)) return '未知';
+    const remainingSeconds = Math.ceil((expiresAt - Date.now()) / 1000);
+    if (remainingSeconds <= 0) return '已过期';
+    const hours = Math.floor(remainingSeconds / 3600);
+    const minutes = Math.ceil((remainingSeconds % 3600) / 60);
+    return hours > 0 ? `${hours}小时${minutes}分` : `${Math.max(1, minutes)}分`;
+  }
+
+  function roomSyncInfo() {
+    const session = storedMultiplayerSession();
+    const rawStatus = (Hexcore2.state.ui && Hexcore2.state.ui.roomSyncStatus) || (session ? 'online' : '');
+    const expired = session && session.expiresAt && Date.parse(session.expiresAt) <= Date.now();
+    const status = expired ? 'expired' : rawStatus;
+    const labels = {
+      online: '在线',
+      submitting: '提交中',
+      reconnecting: '重连中',
+      offline: '离线',
+      expired: '已过期',
+    };
+    return {
+      session,
+      status,
+      label: labels[status] || '本地',
+      version: session && Number.isInteger(Number(session.stateVersion)) ? Number(session.stateVersion) : 0,
+      lastSynced: shortSyncTime(session && (session.syncedAt || session.savedAt)),
+      remaining: sessionRemainingLabel(session),
+    };
+  }
+
   function shouldShowJoinGate() {
     return !hasExplicitClientRole() && !storedMultiplayerSession();
   }
@@ -128,7 +172,7 @@
   }
 
   function createdRoomText(kind = 'all') {
-    const created = Hexcore2.state.ui && Hexcore2.state.ui.createdRoom;
+    const created = Hexcore2.volatileCreatedRoom;
     const room = created && created.room;
     if (!room) return '';
     const captainCodes = Array.isArray(room.captainCodes) ? room.captainCodes : [];
@@ -145,9 +189,23 @@
   }
 
   function createdRoomPanel() {
-    const created = Hexcore2.state.ui && Hexcore2.state.ui.createdRoom;
+    const created = Hexcore2.volatileCreatedRoom;
     const room = created && created.room;
-    if (!room) return '';
+    const notice = Hexcore2.state.ui && Hexcore2.state.ui.createdRoomNotice;
+    if (!room) {
+      if (!notice || !notice.tournamentId) return '';
+      return `
+        <section class="created-room-panel created-room-panel-stale" aria-live="polite">
+          <div class="created-room-head">
+            <div>
+              <strong>房间码明文已清空</strong>
+              <span>${escapeHtml(notice.tournamentId || '')}</span>
+            </div>
+          </div>
+          <div class="room-code-warning">为了避免旧房间码误导使用者，刷新页面后不再恢复房间码明文。请用已分发的房间码加入，或重新创建赛事并重新分发。</div>
+        </section>
+      `;
+    }
     const captainCodes = Array.isArray(room.captainCodes) ? room.captainCodes : [];
     return `
       <section class="created-room-panel" aria-live="polite">
@@ -189,6 +247,7 @@
   }
 
   function joinGatePage() {
+    const apiBase = (Hexcore2.actions && Hexcore2.actions.recentMultiplayerApiBase && Hexcore2.actions.recentMultiplayerApiBase()) || '';
     return `
       <main class="workspace join-gate-page">
         <section class="data-panel join-gate-panel">
@@ -202,7 +261,7 @@
               <div class="settings-form">
                 <label>
                   <span>服务地址</span>
-                  <input id="join-api-base" value="${escapeHtml((Hexcore2.actions && Hexcore2.actions.recentMultiplayerApiBase && Hexcore2.actions.recentMultiplayerApiBase()) || 'http://127.0.0.1:4196')}" aria-label="服务地址">
+                  <input id="join-api-base" value="${escapeHtml(apiBase)}" aria-label="服务地址">
                 </label>
                 <label>
                   <span>赛事 ID</span>
@@ -226,6 +285,7 @@
                   <span>赛事 ID</span>
                   <input id="create-tournament-id" placeholder="留空自动生成；可用字母数字 . _ : -" aria-label="创建赛事 ID">
                 </label>
+                <div class="form-hint">创建前会先校验服务端是否已有同名赛事，避免旧房间码把人带进错房间。</div>
                 <button class="primary-btn" onclick="window.hexcoreUI.createTournamentRoom()">创建赛事</button>
               </div>
             </div>
@@ -1721,6 +1781,7 @@
       : '选人进行中';
     const showRoomReturn = hasExplicitClientRole() || storedMultiplayerSession();
     const ownCaptain = clientCaptain();
+    const syncInfo = roomSyncInfo();
     const roleStatus = isCaptainClient()
       ? (captainCanOperateCurrentTurn()
         ? '可操作'
@@ -1733,11 +1794,15 @@
       <header class="topbar">
         <div class="mode">${isReadonlyClient() ? '观众端' : (isCaptainClient() ? '队长端' : '裁判代执行')}</div>
         ${showRoomReturn ? '<button class="ghost-btn multiplayer-return-btn" onclick="window.hexcoreUI.leaveMultiplayerRoom()">返回多人房间</button>' : ''}
-        ${isCaptainClient() || isViewerClient() ? `
+        ${showRoomReturn ? `
           <div class="role-status-strip">
-            ${isCaptainClient() ? `<span>我的队伍：<strong>${escapeHtml(ownCaptain ? ownCaptain.name : '未绑定')}</strong></span>` : '<span>观众端：<strong>只读</strong></span>'}
+            ${isCaptainClient() ? `<span>我的队伍：<strong>${escapeHtml(ownCaptain ? ownCaptain.name : '未绑定')}</strong></span>` : (isViewerClient() ? '<span>观众端：<strong>只读</strong></span>' : '<span>裁判端：<strong>主持中</strong></span>')}
             <span>当前回合：<strong>${captain ? escapeHtml(captain.name) : '无'}</strong></span>
             <span>当前权限：<strong>${escapeHtml(roleStatus)}</strong></span>
+            <span>同步：<strong class="sync-state ${escapeHtml(syncInfo.status || 'local')}">${escapeHtml(syncInfo.label)}</strong></span>
+            <span>版本：<strong>${syncInfo.version ? `v${syncInfo.version}` : '未同步'}</strong></span>
+            <span>最近同步：<strong>${escapeHtml(syncInfo.lastSynced)}</strong></span>
+            <span>会话：<strong>${escapeHtml(syncInfo.remaining)}</strong></span>
           </div>
         ` : ''}
         <div class="phase">当前阶段：<strong>第 ${Hexcore2.state.draft.round} 轮 / 金币商店</strong></div>
@@ -1930,6 +1995,8 @@
     const shopPanelButton = shopActionText(captain, roundState, nextRefreshCost, nextRefreshReason, inSetup);
     const shopPanelClick = shopPanelBlockReason ? '' : (inSetup ? 'window.hexcoreUI.startDraft()' : 'window.hexcoreUI.drawCards()');
     const showShopPanelButton = !isReadonlyClient() && (!isCaptainClient() || !shopPanelBlockReason);
+    const shopSubmitting = roomCommandSubmitting('OpenShop') || roomCommandSubmitting('RefreshShop');
+    const purchaseSubmitting = roomCommandSubmitting('PurchaseShopCard');
     if (shouldAnimateShop) draw.revealAnimationPlayed = true;
     const shopSlotCount = 6;
     const slotCount = isOpenPick ? cards.length : Math.max(shopSlotCount, cards.length);
@@ -1947,7 +2014,7 @@
       <section class="draw-panel">
         <div class="panel-title-row">
           <h2>${escapeHtml(currentDrawLabel())} <span>${draw && draw.reason ? escapeHtml(draw.reason) : '每次展示最多 5 张，按轮次概率生成'}</span></h2>
-          ${showShopPanelButton ? `<button class="subtle-btn ${shopPanelBlockReason ? 'disabled' : ''}" ${shopPanelBlockReason ? 'disabled' : ''} title="${escapeHtml(shopPanelBlockReason || shopPanelButton.hint)}" onclick="${shopPanelClick}">${Hexcore2.icon('cube')}${escapeHtml(shopPanelBlockReason ? '处理轮初海克斯' : shopPanelButton.title)}</button>` : ''}
+          ${showShopPanelButton ? `<button class="subtle-btn ${shopPanelBlockReason || shopSubmitting ? 'disabled is-submitting' : ''}" ${shopPanelBlockReason || shopSubmitting ? 'disabled' : ''} title="${escapeHtml(shopSubmitting ? '正在提交到服务端' : (shopPanelBlockReason || shopPanelButton.hint))}" onclick="${shopPanelBlockReason || shopSubmitting ? '' : shopPanelClick}">${Hexcore2.icon('cube')}${escapeHtml(shopSubmitting ? '提交中...' : (shopPanelBlockReason ? '处理轮初海克斯' : shopPanelButton.title))}</button>` : ''}
         </div>
         <div class="draw-timeout-bar">
           <strong>${captain ? `${escapeHtml(captain.name)} · ${economy ? economy.gold : 0} 金币` : '无当前队长'}</strong>
@@ -1984,7 +2051,7 @@
               Hexcore2.weatherFogRevealTimer = global.setTimeout(() => Hexcore2.ui.render(), Math.max(0, revealUntil - Date.now()) + 80);
             }
             const teamFull = captain ? Hexcore2.selectors.teamSize(captain.id) >= Hexcore2.selectors.teamMemberCapacity(captain.id) : false;
-            const canBuy = Boolean(captain && roundState && !isReadonlyClient() && captainCanOperateCurrentTurn() && !Hexcore2.state.draft.pickedThisTurn && !roundState.purchaseUsed && !roundState.skipped && !teamFull);
+            const canBuy = Boolean(captain && roundState && !isReadonlyClient() && !purchaseSubmitting && captainCanOperateCurrentTurn() && !Hexcore2.state.draft.pickedThisTurn && !roundState.purchaseUsed && !roundState.skipped && !teamFull);
             const snowCatRevealActive = purchasedRevealActive && purchaseRevealReason === 'snow_cat';
             const weatherFogRevealActive = purchasedRevealActive && purchaseRevealReason === 'weather_fog';
             const shouldMask = (blinded || weatherFog) && !purchasedRevealActive;
@@ -1995,6 +2062,8 @@
               : (readonlyShopReason()
                 || (isCaptainClient() && !captainCanOperateCurrentTurn()
                 ? '非你的回合，仅可查看'
+                : (purchaseSubmitting
+                ? '购买提交中...'
                 : (purchasedRevealActive
                 ? `真实信息已揭示，${revealRemaining}秒后翻为已购买`
                 : (teamFull
@@ -2005,9 +2074,9 @@
                     ? '本轮权限已结束'
                     : (Hexcore2.state.draft.pickedThisTurn
                         ? '已购买'
-                        : ((shouldMask || snowCat) ? '点击购买后揭示' : '点击购买'))))))));
+                        : ((shouldMask || snowCat) ? '点击购买后揭示' : '点击购买')))))))));
             return `
-            <button class="player-card tier-${tier} ${canBuy ? 'can-buy' : 'cannot-buy'} ${blinded && !purchasedRevealActive ? 'blind-card' : ''} ${weatherFog && !purchasedRevealActive ? 'weather-fog-card' : ''} ${purchasedRevealActive ? 'purchased-reveal-card' : ''} ${weatherFogRevealActive ? 'weather-fog-revealing' : ''} ${snowCatRevealActive ? 'snow-cat-revealing' : ''} ${snowCat && !purchasedRevealActive ? 'snow-cat-card' : ''} ${draw && draw.pickMode === 'mystery_swap' ? 'mystery-card' : ''}" style="--slot-index:${index}; --fog-reveal-ms:${purchasedRevealActive ? Math.max(120, revealUntil - Date.now()) : 5000}ms" ${canBuy ? `onclick="window.hexcoreUI.buyCard(${index})"` : 'aria-disabled="true" disabled'}>
+            <button class="player-card tier-${tier} ${canBuy ? 'can-buy' : 'cannot-buy'} ${purchaseSubmitting ? 'is-submitting' : ''} ${blinded && !purchasedRevealActive ? 'blind-card' : ''} ${weatherFog && !purchasedRevealActive ? 'weather-fog-card' : ''} ${purchasedRevealActive ? 'purchased-reveal-card' : ''} ${weatherFogRevealActive ? 'weather-fog-revealing' : ''} ${snowCatRevealActive ? 'snow-cat-revealing' : ''} ${snowCat && !purchasedRevealActive ? 'snow-cat-card' : ''} ${draw && draw.pickMode === 'mystery_swap' ? 'mystery-card' : ''}" style="--slot-index:${index}; --fog-reveal-ms:${purchasedRevealActive ? Math.max(120, revealUntil - Date.now()) : 5000}ms" ${canBuy ? `onclick="window.hexcoreUI.buyCard(${index})"` : 'aria-disabled="true" disabled'}>
               <b class="shop-price-badge">${escapeHtml(tier)}费${priceBonus ? `<i>+${priceBonus}</i>` : ''}</b>
               <strong>${shouldMask ? '云雾遮蔽' : escapeHtml(displayPlayer.name)}</strong>
               <small>${shouldMask ? '购买后揭示真实选手' : `ID: ${escapeHtml(displayPlayer.gameId)}${draw && draw.pickMode === 'blind_box' && realPlayer.status === 'drafted' ? ` / 已在 ${escapeHtml(teamOwnerName(realPlayer))}` : ''}`}</small>
@@ -2077,11 +2146,13 @@
     const shopBlockedReason = readonlyShopReason() || (isCaptainClient() && !captainCanOperateCurrentTurn()
       ? '非你的回合，仅可查看'
       : shopActionBlockReason(captain, roundState, inSetup));
-    const shopDisabled = Boolean(shopBlockedReason);
-    const skipEnabled = Boolean(!isReadonlyClient() && roundState && captainCanOperateCurrentTurn() && !roundState.purchaseUsed && !roundState.skipped);
+    const shopSubmitting = roomCommandSubmitting('OpenShop') || roomCommandSubmitting('RefreshShop');
+    const skipSubmitting = roomCommandSubmitting('SkipTurn');
+    const shopDisabled = Boolean(shopBlockedReason || shopSubmitting);
+    const skipEnabled = Boolean(!skipSubmitting && !isReadonlyClient() && roundState && captainCanOperateCurrentTurn() && !roundState.purchaseUsed && !roundState.skipped);
     if (isReadonlyClient() || (isCaptainClient() && shopDisabled && !skipEnabled)) return '';
-    const shopTitle = shopDisabled ? '已无购买权' : shopButton.title;
-    const shopHint = shopDisabled ? shopBlockedReason : shopButton.hint;
+    const shopTitle = shopSubmitting ? '提交中...' : (shopDisabled ? '已无购买权' : shopButton.title);
+    const shopHint = shopSubmitting ? '正在提交到服务端' : (shopDisabled ? shopBlockedReason : shopButton.hint);
     const shopClick = shopDisabled ? '' : (inSetup ? 'window.hexcoreUI.startDraft()' : 'window.hexcoreUI.drawCards()');
     return `
       <section class="control-panel">
@@ -2093,7 +2164,7 @@
           </div>
           <div class="control-group primary-actions">
             <span class="control-group-label">流程</span>
-            <button class="action-btn amber ${skipEnabled ? '' : 'disabled'}" ${skipEnabled ? '' : 'disabled'} onclick="window.hexcoreUI.skipTurn()"><span class="fast-icon">»</span><strong>跳过本轮</strong><span>${isReadonlyClient() ? '观众只读' : (captainCanOperateCurrentTurn() ? '购买权限作废' : '非你的回合')}</span></button>
+            <button class="action-btn amber ${skipEnabled ? '' : 'disabled'} ${skipSubmitting ? 'is-submitting' : ''}" ${skipEnabled ? '' : 'disabled'} onclick="${skipEnabled ? 'window.hexcoreUI.skipTurn()' : ''}"><span class="fast-icon">»</span><strong>${skipSubmitting ? '提交中...' : '跳过本轮'}</strong><span>${skipSubmitting ? '正在提交到服务端' : (isReadonlyClient() ? '观众只读' : (captainCanOperateCurrentTurn() ? '购买权限作废' : '非你的回合'))}</span></button>
             ${isCaptainClient() || isReadonlyClient() ? '' : `<button class="action-btn blue" onclick="window.hexcoreUI.nextCaptain()">${icon('team')}<strong>下一位</strong><span>交给下一队长</span></button>`}
           </div>
           ${isCaptainClient() || isReadonlyClient() ? '' : `<div class="control-group system-actions">
