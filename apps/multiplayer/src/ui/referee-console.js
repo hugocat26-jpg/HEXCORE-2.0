@@ -383,6 +383,8 @@
     const apiText = String(apiBase || '').trim() || 'http://裁判电脑IP:4196';
     const recommendedPage = isLocalHost ? 'http://裁判电脑IP:4186/' : pageUrl;
     const recommendedApi = isLocalHost ? 'http://裁判电脑IP:4196' : apiText;
+    const check = Hexcore2.state.ui && Hexcore2.state.ui.joinApiCheck;
+    const checkDetails = check && Array.isArray(check.details) ? check.details.filter(Boolean).slice(0, 4) : [];
     return `
       <div class="join-access-panel" aria-label="现场访问检查">
         <div class="join-access-head">
@@ -390,7 +392,10 @@
             <strong>现场访问检查</strong>
             <span>${isLocalHost ? '当前是本机地址，客户电脑和手机不能直接使用 127.0.0.1。' : '当前页面已使用可分发地址，请确认 API 地址同样可访问。'}</span>
           </div>
-          <button class="subtle-btn" onclick="window.hexcoreUI.copyJoinGateAccessText()">复制访问说明</button>
+          <div class="join-access-actions">
+            <button class="subtle-btn" onclick="window.hexcoreUI.checkJoinApiHealth()">检测 API</button>
+            <button class="subtle-btn" onclick="window.hexcoreUI.copyJoinGateAccessText()">复制访问说明</button>
+          </div>
         </div>
         <div class="join-access-grid">
           <div><span>当前页面</span><code>${escapeHtml(pageUrl)}</code></div>
@@ -398,6 +403,12 @@
           <div><span>推荐页面</span><code>${escapeHtml(recommendedPage)}</code></div>
           <div><span>推荐 API</span><code>${escapeHtml(recommendedApi)}</code></div>
         </div>
+        ${check ? `
+          <div class="join-api-check ${escapeHtml(check.level || 'info')}">
+            <strong>${escapeHtml(check.text || '')}</strong>
+            ${checkDetails.length ? `<ul>${checkDetails.map(item => `<li>${escapeHtml(item)}</li>`).join('')}</ul>` : ''}
+          </div>
+        ` : ''}
         <p>局域网演示时，先在裁判电脑启动页面 4186 和 API 4196；队长或观众设备需要连接同一个 Wi-Fi，并使用裁判电脑的局域网 IP。</p>
       </div>
     `;

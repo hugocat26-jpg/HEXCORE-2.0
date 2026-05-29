@@ -792,6 +792,14 @@ body:has(.join-gate-page) {
   font-size: 15px;
 }
 
+.join-access-actions {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
 .join-access-head span,
 .join-access-panel p {
   margin: 0;
@@ -828,6 +836,42 @@ body:has(.join-gate-page) {
   font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.join-api-check {
+  padding: 10px 12px;
+  border: 1px solid rgba(37, 199, 218, 0.28);
+  border-radius: 8px;
+  background: rgba(25, 212, 240, 0.08);
+  color: var(--cyan);
+}
+
+.join-api-check.success {
+  border-color: rgba(34, 197, 94, 0.42);
+  background: rgba(34, 197, 94, 0.1);
+  color: var(--green);
+}
+
+.join-api-check.warn {
+  border-color: rgba(245, 158, 11, 0.42);
+  background: rgba(245, 158, 11, 0.1);
+  color: var(--amber);
+}
+
+.join-api-check strong {
+  display: block;
+  color: currentColor;
+  font-size: 13px;
+}
+
+.join-api-check ul {
+  display: grid;
+  gap: 4px;
+  margin: 8px 0 0;
+  padding-left: 18px;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.55;
 }
 
 .created-room-panel {
@@ -1042,6 +1086,10 @@ body:has(.join-gate-page) {
   .join-access-head {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .join-access-actions {
+    justify-content: flex-start;
   }
 
   .created-room-head {

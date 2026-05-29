@@ -1364,6 +1364,33 @@
     ].join('\n');
   }
 
+  async function fetchApiHealth(apiBase) {
+    const base = String(apiBase || '').trim().replace(/\/+$/, '');
+    if (!base) throw new Error('请先填写服务地址');
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timer = controller && global.setTimeout
+      ? global.setTimeout(() => controller.abort(), 3500)
+      : null;
+    try {
+      const response = await fetch(`${base}/health`, {
+        method: 'GET',
+        signal: controller ? controller.signal : undefined,
+      });
+      let payload = {};
+      try {
+        payload = await response.json();
+      } catch (error) {
+        throw new Error('服务返回格式异常，请确认服务地址填写的是 API 地址');
+      }
+      if (!response.ok || !payload || !payload.ok) {
+        throw new Error('API 健康检查未通过');
+      }
+      return payload;
+    } finally {
+      if (timer && global.clearTimeout) global.clearTimeout(timer);
+    }
+  }
+
   function applyTeamProjection(teams) {
     if (!Array.isArray(teams) || !teams.length) return false;
     let changed = false;
@@ -2010,6 +2037,45 @@
     async copyJoinGateAccessText() {
       const ok = await copyTextToClipboard(joinGateAccessText());
       Hexcore2.eventStore.append(ok ? '访问说明已复制' : '访问说明复制失败', ok ? '已复制页面和 API 地址说明' : '当前浏览器不允许访问剪贴板，请手动复制页面上的地址', ok ? 'success' : 'warn');
+      Hexcore2.ui.render();
+    },
+
+    async checkJoinApiHealth() {
+      const input = document.getElementById('join-api-base');
+      const apiBase = input ? input.value.trim() : recentMultiplayerApiBase();
+      Hexcore2.state.ui = Hexcore2.state.ui || {};
+      Hexcore2.state.ui.joinApiCheck = {
+        level: 'info',
+        text: '正在检测 API 服务...',
+        details: ['检测不会提交赛事 ID、加入码或会话凭据。'],
+      };
+      Hexcore2.ui.render();
+      try {
+        const payload = await fetchApiHealth(apiBase);
+        const runtime = payload.runtime || {};
+        rememberMultiplayerApiBase(apiBase);
+        Hexcore2.state.ui.joinApiCheck = {
+          level: 'success',
+          text: 'API 已连通，可以使用当前服务地址加入或创建赛事。',
+          details: [
+            `规则版本：${payload.rulesVersion || '未知'}`,
+            `存储模式：${runtime.storage || '未知'}`,
+            `赛事数量：${Number.isFinite(Number(runtime.tournamentCount)) ? Number(runtime.tournamentCount) : 0}`,
+          ],
+        };
+        Hexcore2.eventStore.append('API 检测成功', '多人端 API 健康检查通过', 'success');
+      } catch (error) {
+        Hexcore2.state.ui.joinApiCheck = {
+          level: 'warn',
+          text: 'API 暂时无法连通，请检查服务地址、端口和防火墙。',
+          details: [
+            '局域网地址通常是 http://裁判电脑IP:4196。',
+            '确认多人端 API 已启动，并且 4196 端口已放行。',
+            '客户电脑或手机需要与裁判电脑在同一个局域网。',
+          ],
+        };
+        Hexcore2.eventStore.append('API 检测失败', error && error.message ? error.message : '服务地址不可用', 'warn');
+      }
       Hexcore2.ui.render();
     },
 

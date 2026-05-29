@@ -845,6 +845,18 @@
     } else {
       delete state.ui.joinGateMessage;
     }
+    if (state.ui.joinApiCheck && typeof state.ui.joinApiCheck === 'object') {
+      state.ui.joinApiCheck = {
+        level: ['success', 'warn', 'info'].includes(state.ui.joinApiCheck.level) ? state.ui.joinApiCheck.level : 'info',
+        text: sanitizeText(state.ui.joinApiCheck.text, '', 180),
+        details: Array.isArray(state.ui.joinApiCheck.details)
+          ? state.ui.joinApiCheck.details.map(item => sanitizeText(item, '', 180)).filter(Boolean).slice(0, 4)
+          : [],
+      };
+      if (!state.ui.joinApiCheck.text) delete state.ui.joinApiCheck;
+    } else {
+      delete state.ui.joinApiCheck;
+    }
     delete state.ui.roomCommandSubmitting;
     state.ui.playerFilter = typeof state.ui.playerFilter === 'string' ? state.ui.playerFilter.slice(0, 32) : 'all';
     const campFilters = state.ui.playerCampFilters && typeof state.ui.playerCampFilters === 'object' ? state.ui.playerCampFilters : {};
