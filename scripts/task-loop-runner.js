@@ -406,7 +406,7 @@ function runTaskLoop(options = {}) {
     throw new Error('status 只能是 complete 或 incomplete');
   }
 
-  const taskDoc = args.get('doc') || args.get('task') || options.defaultDoc || 'docs/06_开发计划.md';
+  const taskDoc = args.get('doc') || args.get('task') || options.defaultDoc || 'docs/planning/当前待开发计划.md';
   const title = args.get('title') || options.title || 'HEXCORE2.0 任务执行循环钩子';
   const skipGates = boolArg(args, 'skip-gates', false);
   const maxAttempts = positiveIntegerArg(args, ['max-attempts', 'max-incomplete-runs'], defaultMaxIncompleteAttempts);

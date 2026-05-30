@@ -3043,7 +3043,7 @@
 
     importPlayers(file) {
       if (rejectGoldLockedMutation('选手导入失败')) return;
-      Hexcore2.exportService.readPlayerImportPreview(file, Hexcore2.state.players, preview => {
+      Hexcore2.exportService.readPlayerImportPreview(file, Hexcore2.state.players, Hexcore2.state.playerProfiles, preview => {
         Hexcore2.state.ui = Hexcore2.state.ui || {};
         Hexcore2.state.ui.playerImportPreview = preview;
         Hexcore2.state.ui.playerImportPage = 1;
@@ -3411,6 +3411,101 @@
       snapshot(`切换选手状态前：${player.name}`);
       player.status = player.status === 'disabled' ? 'available' : 'disabled';
       Hexcore2.eventStore.append('选手库', `${player.name} 已${player.status === 'disabled' ? '禁用' : '恢复可选'}`, player.status === 'disabled' ? 'warn' : 'success');
+      renderAndPersist();
+    },
+
+    setPlayerAttendance(playerId, status) {
+      if (rejectGoldLockedMutation('出勤状态失败')) return;
+      const player = Hexcore2.state.players.find(item => item.id === playerId);
+      if (!player) return;
+      const normalize = Hexcore2.exportService && Hexcore2.exportService.normalizeAttendanceStatus
+        ? Hexcore2.exportService.normalizeAttendanceStatus
+        : value => String(value || 'confirmed');
+      const nextStatus = normalize(status);
+      const defaults = (Hexcore2.exportService && Hexcore2.exportService.ATTENDANCE_WEIGHT_DEFAULTS) || {
+        confirmed: 1,
+        pending: 0.7,
+        high_risk: 0.4,
+        substitute: 0,
+        unavailable: 0,
+      };
+      snapshot(`调整出勤状态前：${player.name}`);
+      player.attendanceStatus = nextStatus;
+      player.drawWeight = defaults[nextStatus] ?? 1;
+      if (Hexcore2.normalizeState) Hexcore2.normalizeState(Hexcore2.state);
+      Hexcore2.eventStore.append('出勤管理', `${player.name} 出勤状态调整为 ${Hexcore2.selectors.attendanceLabel(nextStatus)}，抽取权重 ${player.drawWeight}`, nextStatus === 'confirmed' ? 'success' : 'warn');
+      renderAndPersist();
+    },
+
+    createProfileFromPlayer(playerId) {
+      if (rejectGoldLockedMutation('创建档案失败')) return;
+      const player = Hexcore2.state.players.find(item => item.id === playerId);
+      if (!player) return;
+      const usedIds = new Set((Hexcore2.state.playerProfiles || []).map(profile => profile.id));
+      let index = usedIds.size + 1;
+      let profileId = `profile-${index}`;
+      while (usedIds.has(profileId)) {
+        index += 1;
+        profileId = `profile-${index}`;
+      }
+      snapshot(`创建选手档案前：${player.name}`);
+      Hexcore2.state.playerProfiles = Hexcore2.state.playerProfiles || [];
+      Hexcore2.state.playerProfiles.push({
+        id: profileId,
+        commonName: player.commonName || player.name,
+        aliases: Array.from(new Set([player.name, player.gameId].filter(Boolean))).slice(0, 12),
+        historicalIdentities: [{
+          tournamentName: player.tournamentName || '当前赛事',
+          region: player.region || '',
+          gameId: player.gameId || '',
+          name: player.name || '',
+        }],
+        attendanceReliability: player.attendanceStatus || 'confirmed',
+        refereeNotes: '',
+        updatedAt: new Date().toISOString(),
+      });
+      player.profileId = profileId;
+      if (Hexcore2.normalizeState) Hexcore2.normalizeState(Hexcore2.state);
+      Hexcore2.eventStore.append('选手档案', `已为 ${player.name} 创建并关联历史档案`, 'success');
+      renderAndPersist();
+    },
+
+    linkPlayerProfile(playerId, profileId) {
+      if (rejectGoldLockedMutation('关联档案失败')) return;
+      const player = Hexcore2.state.players.find(item => item.id === playerId);
+      if (!player) return;
+      const nextProfileId = String(profileId || '').trim();
+      if (nextProfileId && !Hexcore2.state.playerProfiles.some(profile => profile.id === nextProfileId)) return;
+      snapshot(`关联选手档案前：${player.name}`);
+      player.profileId = nextProfileId;
+      if (Hexcore2.normalizeState) Hexcore2.normalizeState(Hexcore2.state);
+      Hexcore2.eventStore.append('选手档案', `${player.name} ${nextProfileId ? '已关联历史档案' : '已取消档案关联'}`, nextProfileId ? 'success' : 'info');
+      renderAndPersist();
+    },
+
+    addPlayerAliasToProfile(playerId) {
+      if (rejectGoldLockedMutation('补充档案别名失败')) return;
+      const player = Hexcore2.state.players.find(item => item.id === playerId);
+      const profile = player && Hexcore2.state.playerProfiles.find(item => item.id === player.profileId);
+      if (!player || !profile) return;
+      snapshot(`补充档案别名前：${player.name}`);
+      const aliases = new Set(Array.isArray(profile.aliases) ? profile.aliases : []);
+      if (player.name) aliases.add(player.name);
+      if (player.gameId) aliases.add(player.gameId);
+      profile.aliases = Array.from(aliases).slice(0, 12);
+      profile.historicalIdentities = Array.isArray(profile.historicalIdentities) ? profile.historicalIdentities : [];
+      const exists = profile.historicalIdentities.some(identity => identity.gameId === player.gameId && identity.name === player.name);
+      if (!exists) {
+        profile.historicalIdentities.push({
+          tournamentName: player.tournamentName || '当前赛事',
+          region: player.region || '',
+          gameId: player.gameId || '',
+          name: player.name || '',
+        });
+      }
+      profile.updatedAt = new Date().toISOString();
+      if (Hexcore2.normalizeState) Hexcore2.normalizeState(Hexcore2.state);
+      Hexcore2.eventStore.append('选手档案', `已补充 ${profile.commonName} 的别名和本届身份`, 'success');
       renderAndPersist();
     },
 

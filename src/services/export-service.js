@@ -144,6 +144,87 @@
     return '';
   }
 
+  const ATTENDANCE_STATUS_LABELS = {
+    confirmed: '已确认',
+    pending: '待确认',
+    high_risk: '高风险',
+    substitute: '替补',
+    unavailable: '缺席',
+  };
+
+  const ATTENDANCE_WEIGHT_DEFAULTS = {
+    confirmed: 1,
+    pending: 0.7,
+    high_risk: 0.4,
+    substitute: 0,
+    unavailable: 0,
+  };
+
+  function normalizeAttendanceStatus(value) {
+    const text = String(value || '').trim().toLowerCase();
+    if (['confirmed', 'confirm', 'ok', '已确认', '确认', '正常'].includes(text)) return 'confirmed';
+    if (['pending', 'wait', '待确认', '未确认', '待定'].includes(text)) return 'pending';
+    if (['high_risk', 'high-risk', 'risk', '高风险', '风险', '可能缺席'].includes(text)) return 'high_risk';
+    if (['substitute', 'sub', '替补', '候补'].includes(text)) return 'substitute';
+    if (['unavailable', 'absent', 'missing', '缺席', '不可用', '禁用'].includes(text)) return 'unavailable';
+    return 'confirmed';
+  }
+
+  function clampDrawWeight(value, fallback) {
+    if (String(value ?? '').trim() === '') return fallback;
+    const number = Number(value);
+    if (!Number.isFinite(number)) return fallback;
+    return Math.max(0, Math.min(1, Math.round(number * 100) / 100));
+  }
+
+  function splitAliases(value) {
+    if (Array.isArray(value)) {
+      return value.map(item => String(item || '').trim()).filter(Boolean).slice(0, 12);
+    }
+    return String(value || '')
+      .split(/[，,、|/]/)
+      .map(item => item.trim())
+      .filter(Boolean)
+      .slice(0, 12);
+  }
+
+  function normalizeNameForMatch(value) {
+    return String(value || '').trim().toLowerCase().replace(/[\s._\-#@|｜【】[\]()（）]+/g, '');
+  }
+
+  function buildProfileCandidates(player, profiles) {
+    if (!Array.isArray(profiles) || !profiles.length) return [];
+    const playerName = normalizeNameForMatch(player.name);
+    const commonName = normalizeNameForMatch(player.commonName || player.name);
+    const gameId = normalizeNameForMatch(player.gameId);
+    const region = normalizeNameForMatch(player.region);
+    return profiles.map(profile => {
+      const aliases = splitAliases(profile.aliases || profile.别名);
+      const historical = Array.isArray(profile.historicalIdentities) ? profile.historicalIdentities : [];
+      const names = [
+        profile.commonName,
+        profile.name,
+        ...(aliases || []),
+        ...historical.map(item => item && (item.name || item.gameId || item.tournamentName)).filter(Boolean),
+      ].map(normalizeNameForMatch).filter(Boolean);
+      let score = 0;
+      if (profile.id && player.profileId && String(profile.id) === String(player.profileId)) score += 100;
+      if (playerName && names.includes(playerName)) score += 88;
+      if (commonName && names.includes(commonName)) score += 84;
+      if (playerName && names.some(name => name && (name.includes(playerName) || playerName.includes(name)))) score += 52;
+      if (gameId && historical.some(item => normalizeNameForMatch(item && item.gameId) === gameId)) score += 35;
+      if (region && historical.some(item => normalizeNameForMatch(item && item.region) === region)) score += 8;
+      return {
+        profileId: String(profile.id || '').trim(),
+        commonName: String(profile.commonName || profile.name || '').trim().slice(0, 32),
+        score,
+        reason: score >= 100 ? '档案ID匹配' : (score >= 80 ? '名称或别名高度相似' : (score >= 50 ? '名称存在相似' : '历史信息接近')),
+      };
+    }).filter(item => item.profileId && item.score >= 50)
+      .sort((a, b) => b.score - a.score || String(a.commonName).localeCompare(String(b.commonName), 'zh-CN'))
+      .slice(0, 3);
+  }
+
   function parsePlayerRows(filename, text) {
     const raw = String(text || '').trim();
     if (!raw) throw new Error('导入文件为空');
@@ -179,6 +260,9 @@
     const status = String(source.status || source.状态 || 'available') === 'disabled' || String(source.status || source.状态) === '禁用'
       ? 'disabled'
       : 'available';
+    const attendanceStatus = normalizeAttendanceStatus(readImportField(source, ['attendanceStatus', '出勤状态', '出勤', '可靠性']));
+    const weightFallback = ATTENDANCE_WEIGHT_DEFAULTS[attendanceStatus] ?? 1;
+    const drawWeight = clampDrawWeight(readImportField(source, ['drawWeight', '抽取权重', '权重']), weightFallback);
     const name = String(readImportField(source, ['name', '名称', 'playerName', '选手名称'])).trim();
     const lane = String(readImportField(source, ['lane', '位置', '偏好位置'])).trim();
     const gameId = String(readImportField(source, ['gameId', '游戏ID', 'ID', 'uid'])).trim();
@@ -233,6 +317,13 @@
       fmvpSeasons,
       isFmvp: Boolean(fmvpSeasons.length || Object.values(seasonResults).some(value => String(value).toUpperCase() === 'FMVP')),
       status,
+      profileId: String(readImportField(source, ['profileId', '档案ID', '档案Id'])).trim().slice(0, 48),
+      commonName: String(readImportField(source, ['commonName', '常用名称', '通用名称'])).trim().slice(0, 32),
+      aliases: splitAliases(readImportField(source, ['aliases', '别名', '历史名称'])),
+      tournamentName: String(readImportField(source, ['tournamentName', '赛事名称', '届次'])).trim().slice(0, 40),
+      region: String(readImportField(source, ['region', '大区', '服务器'])).trim().slice(0, 24),
+      attendanceStatus,
+      drawWeight,
     };
   }
 
@@ -240,8 +331,11 @@
     return parsePlayerRows(filename, text).map(normalizeImportedPlayer);
   }
 
-  function buildPlayerImportPreview(filename, text, existingPlayers) {
+  function buildPlayerImportPreview(filename, text, existingPlayers, existingProfiles) {
     const rows = parsePlayerRows(filename, text);
+    const profiles = Array.isArray(existingProfiles)
+      ? existingProfiles
+      : ((Hexcore2.state && Array.isArray(Hexcore2.state.playerProfiles)) ? Hexcore2.state.playerProfiles : []);
     const existingGameIds = new Set((existingPlayers || [])
       .map(player => String(player.gameId || '').trim().toLowerCase())
       .filter(Boolean));
@@ -266,6 +360,7 @@
           return;
         }
         seenGameIds.add(gameIdKey);
+        player.profileMatches = buildProfileCandidates(player, profiles);
         accepted.push(player);
       } catch (error) {
         const reason = error && error.message ? error.message : '数据格式错误';
@@ -381,6 +476,9 @@
 
     parsePlayerImport,
     buildPlayerImportPreview,
+    normalizeAttendanceStatus,
+    ATTENDANCE_STATUS_LABELS,
+    ATTENDANCE_WEIGHT_DEFAULTS,
 
     readPlayerFile(file, onSuccess, onError) {
       if (!file || typeof FileReader === 'undefined') {
@@ -409,7 +507,12 @@
       reader.readAsText(file, 'utf-8');
     },
 
-    readPlayerImportPreview(file, existingPlayers, onSuccess, onError) {
+    readPlayerImportPreview(file, existingPlayers, existingProfiles, onSuccess, onError) {
+      if (typeof existingProfiles === 'function') {
+        onError = onSuccess;
+        onSuccess = existingProfiles;
+        existingProfiles = undefined;
+      }
       if (!file || typeof FileReader === 'undefined') {
         if (onError) onError(new Error('当前环境不支持文件读取'));
         return;
@@ -425,7 +528,7 @@
       const reader = new FileReader();
       reader.onload = () => {
         try {
-          onSuccess(buildPlayerImportPreview(file.name || '', String(reader.result || ''), existingPlayers));
+          onSuccess(buildPlayerImportPreview(file.name || '', String(reader.result || ''), existingPlayers, existingProfiles));
         } catch (error) {
           if (onError) onError(error);
         }

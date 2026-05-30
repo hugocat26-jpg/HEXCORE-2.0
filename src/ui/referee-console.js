@@ -754,6 +754,7 @@
         <span class="import-preview-row-text">
           <strong>${escapeHtml(player.name)}</strong>
           <em>${escapeHtml(player.gameId)} · ${escapeHtml(Hexcore2.selectors.campLabel(player.camp))} · ${escapeHtml(player.lane)} · 评分 ${escapeHtml(player.score)}</em>
+          ${Array.isArray(player.profileMatches) && player.profileMatches.length ? `<small>疑似档案：${player.profileMatches.map(match => `${escapeHtml(match.commonName)}（${escapeHtml(match.reason)}）`).join('、')}；确认导入不会自动合并</small>` : '<small>暂无疑似历史档案，导入后可在选手库手动创建或关联</small>'}
         </span>
       </label>
     `;
@@ -2214,6 +2215,23 @@
       if (Hexcore2.selectors.isCaptainPlayer(player.id)) return 'captain';
       return player.status === 'available' ? 'available' : (player.status === 'disabled' ? 'disabled' : 'drafted');
     }
+    function attendanceOptions(player) {
+      const options = [
+        ['confirmed', '已确认'],
+        ['pending', '待确认'],
+        ['high_risk', '高风险'],
+        ['substitute', '替补'],
+        ['unavailable', '缺席'],
+      ];
+      return options.map(([value, label]) => `<option value="${value}" ${player.attendanceStatus === value ? 'selected' : ''}>${label}</option>`).join('');
+    }
+    function profileOptions(player) {
+      const profiles = Array.isArray(Hexcore2.state.playerProfiles) ? Hexcore2.state.playerProfiles : [];
+      return [
+        `<option value="">未关联档案</option>`,
+        ...profiles.map(profile => `<option value="${escapeHtml(profile.id)}" ${player.profileId === profile.id ? 'selected' : ''}>${escapeHtml(profile.commonName)}</option>`),
+      ].join('');
+    }
     function campRankedPlayers(camp) {
       return Hexcore2.state.players
         .filter(item => item.camp === camp)
@@ -2259,6 +2277,8 @@
       const editingGameId = Hexcore2.state.ui && Hexcore2.state.ui.editingGameIdPlayerId === player.id;
       const editingName = Hexcore2.state.ui && Hexcore2.state.ui.editingNamePlayerId === player.id;
       const explanation = poolExplanation(player);
+      const profile = player.profileId && Hexcore2.selectors.playerProfile ? Hexcore2.selectors.playerProfile(player.profileId) : null;
+      const drawWeight = Hexcore2.selectors.effectiveDrawWeight ? Hexcore2.selectors.effectiveDrawWeight(player) : 1;
       return `
         <article class="player-row ${player.status === 'disabled' ? 'disabled-player' : ''} ${isCaptain ? 'captain-player-row' : ''} ${Hexcore2.state.ui.highlightPlayerId === player.id ? 'located-card' : ''}">
           <div class="player-card-head">
@@ -2284,8 +2304,15 @@
             <label><small>偏好位置</small><input id="player-lane-${escapeHtml(player.id)}" value="${escapeHtml(player.lane || '未知')}" onblur='window.hexcoreUI.autoSavePlayerIfChanged(${safeJsonString(player.id)})' onkeydown='if(event.key==="Enter") window.hexcoreUI.savePlayer(${safeJsonString(player.id)})'></label>
             <label><small>绝活英雄</small><input id="player-heroes-${escapeHtml(player.id)}" value="${escapeHtml((player.heroes || []).join('、'))}" placeholder="用顿号分隔" onblur='window.hexcoreUI.autoSavePlayerIfChanged(${safeJsonString(player.id)})' onkeydown='if(event.key==="Enter") window.hexcoreUI.savePlayer(${safeJsonString(player.id)})'></label>
             <label class="manifesto-field"><small>参赛宣言</small><textarea id="player-manifesto-${escapeHtml(player.id)}" rows="2" placeholder="填写这名选手的参赛宣言" onblur='window.hexcoreUI.autoSavePlayerIfChanged(${safeJsonString(player.id)})'>${escapeHtml(player.manifesto || '')}</textarea></label>
+            <label><small>出勤状态</small><select onchange='window.hexcoreUI.setPlayerAttendance(${safeJsonString(player.id)}, this.value)'>${attendanceOptions(player)}</select></label>
+            <label><small>关联档案</small><select onchange='window.hexcoreUI.linkPlayerProfile(${safeJsonString(player.id)}, this.value)'>${profileOptions(player)}</select></label>
             <div class="readonly-score"><span>评分</span><strong>${escapeHtml(player.score || 0)}</strong></div>
             <div class="readonly-score"><span>阵营</span><strong>${escapeHtml(Hexcore2.selectors.campLabel(player.camp))}</strong></div>
+            <div class="readonly-score"><span>抽取权重</span><strong>${escapeHtml(drawWeight)}</strong></div>
+            <div class="pool-reason">
+              <strong>${profile ? `档案：${escapeHtml(profile.commonName)}` : '未关联历史档案'}</strong>
+              <span>${escapeHtml(profile ? `可靠性：${Hexcore2.selectors.attendanceLabel(profile.attendanceReliability)}；别名 ${profile.aliases.length} 个；历史身份 ${profile.historicalIdentities.length} 条` : '可为跨届常用名称建立档案，游戏ID只作为本届身份信息。')}</span>
+            </div>
             <div class="pool-reason">
               <strong>${escapeHtml(explanation.summary)}</strong>
               <span>${escapeHtml(explanation.detail)}</span>
@@ -2296,6 +2323,7 @@
               ? `<button class="promote-inline" onclick='window.hexcoreUI.releaseCaptain(${safeJsonString(player.id)})'>解除队长</button>`
               : (canPromote ? `<button class="promote-inline" onclick='window.hexcoreUI.promotePlayerToCaptain(${safeJsonString(player.id)})'>设为队长</button>` : '<button disabled>不可设为队长</button>')}
             ${isCaptain ? '' : `<button class="${player.status === 'disabled' ? '' : 'danger-inline'}" onclick='window.hexcoreUI.togglePlayerDisabled(${safeJsonString(player.id)})'>${player.status === 'disabled' ? '恢复' : '禁用'}</button>`}
+            ${profile ? `<button onclick='window.hexcoreUI.addPlayerAliasToProfile(${safeJsonString(player.id)})'>补充别名</button>` : `<button onclick='window.hexcoreUI.createProfileFromPlayer(${safeJsonString(player.id)})'>创建档案</button>`}
             <button class="danger-inline" onclick='window.hexcoreUI.deletePlayer(${safeJsonString(player.id)})'>删除</button>
           </div>
         </article>
@@ -2462,9 +2490,9 @@
                     <p>${escapeHtml(hex.desc)}</p>
                     <div class="hex-execution-note">▲ ${hex.mode === 'passive' ? '被动自动生效' : '需要裁判执行'}</div>
                     <div class="hex-draw-actions">
-                      <button class="hex-detail-trigger" type="button" onclick='window.hexcoreUI.showHexDetail(${safeJsonString(hex.id)})'>详情</button>
-                      <button class="hex-refresh-btn" ${session.refreshUsed ? 'disabled' : ''} onclick="window.hexcoreUI.refreshHexcoreSlot(${index})">刷新此张</button>
-                      <button class="primary-btn hex-select-btn" onclick='window.hexcoreUI.selectHexcoreFromDraw(${safeJsonString(selectedCaptain.id)}, ${safeJsonString(hex.id)})'>选择此海克斯</button>
+                      <button class="hex-detail-trigger" type="button" title="查看海克斯详情" aria-label="查看${escapeHtml(hex.name)}详情" onclick='window.hexcoreUI.showHexDetail(${safeJsonString(hex.id)})'>详情</button>
+                      <button class="hex-refresh-btn" title="刷新此张候选" aria-label="刷新${escapeHtml(hex.name)}候选" ${session.refreshUsed ? 'disabled' : ''} onclick="window.hexcoreUI.refreshHexcoreSlot(${index})">刷新</button>
+                      <button class="primary-btn hex-select-btn" title="选择此海克斯" aria-label="选择${escapeHtml(hex.name)}海克斯" onclick='window.hexcoreUI.selectHexcoreFromDraw(${safeJsonString(selectedCaptain.id)}, ${safeJsonString(hex.id)})'>选择</button>
                     </div>
                   </article>
                 `;

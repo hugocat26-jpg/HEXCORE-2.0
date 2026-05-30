@@ -1,0 +1,38 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${HEXCORE_POSTGRES_DB:-hexcore}
+      POSTGRES_USER: ${HEXCORE_POSTGRES_USER:-hexcore}
+      POSTGRES_PASSWORD: ${HEXCORE_POSTGRES_PASSWORD:?请先在 .env 设置 HEXCORE_POSTGRES_PASSWORD}
+    volumes:
+      - hexcore-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${HEXCORE_POSTGRES_USER:-hexcore} -d ${HEXCORE_POSTGRES_DB:-hexcore}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  hexcore:
+    build:
+      context: .
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      HOST: 0.0.0.0
+      MULTIPLAYER_APP_PORT: 4186
+      MULTIPLAYER_API_PORT: 4196
+      HEXCORE_SESSION_TTL_HOURS: ${HEXCORE_SESSION_TTL_HOURS:-48}
+      HEXCORE_STREAM_TOKEN_TTL_SECONDS: ${HEXCORE_STREAM_TOKEN_TTL_SECONDS:-120}
+      HEXCORE_MAX_ROOMS: ${HEXCORE_MAX_ROOMS:-20}
+      HEXCORE_ROOM_CODE_SECRET: ${HEXCORE_ROOM_CODE_SECRET:-}
+      HEXCORE_POSTGRES_URL: postgres://${HEXCORE_POSTGRES_USER:-hexcore}:${HEXCORE_POSTGRES_PASSWORD}@postgres:5432/${HEXCORE_POSTGRES_DB:-hexcore}
+    ports:
+      - "${HEXCORE_APP_PORT:-4186}:4186"
+      - "${HEXCORE_API_PORT:-4196}:4196"
+
+volumes:
+  hexcore-postgres-data:
