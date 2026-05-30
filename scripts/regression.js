@@ -1171,7 +1171,7 @@ function testSystemIntegrityCheck() {
   H.actions.setActiveView('settings');
   H.actions.runSystemCheck();
 
-  assert(H.meta.version === '2.0.25' && app.innerHTML.includes('HEXCORE 2.0 v2.0.25 裁判端'), '系统设置页应展示统一项目版本号');
+  assert(H.meta.version === '2.0.26' && app.innerHTML.includes('HEXCORE 2.0 v2.0.26 裁判端'), '系统设置页应展示统一项目版本号');
   assert(H.state.ui.systemCheckResult && !H.state.ui.systemCheckResult.ok, '状态检查应保存可视化结果');
   assert(H.state.ui.systemCheckResult.issues.some(issue => issue.type === '重复归属'), '状态检查应识别重复归属');
   assert(H.state.ui.systemCheckResult.issues.some(issue => issue.type === '跨阵营'), '状态检查应识别跨阵营');
@@ -7231,7 +7231,7 @@ function testM13DeploymentDeliveryArtifacts() {
 
   assert(
     installer.includes('AppVersion={#AppVersion}')
-    && installer.includes('#define AppVersion "2.0.25"')
+    && installer.includes('#define AppVersion "2.0.26"')
     && installer.includes('OutputBaseFilename=HEXCORE2_Setup_v{#AppVersion}')
     && installer.includes('DefaultDirName={localappdata}\\HEXCORE2')
     && installer.includes('PrivilegesRequired=lowest')
@@ -7296,7 +7296,7 @@ function testM13DeploymentDeliveryArtifacts() {
   );
 
   assert(
-    winGuide.includes('HEXCORE2_Setup_v2.0.25.exe')
+    winGuide.includes('HEXCORE2_Setup_v2.0.26.exe')
     && winGuide.includes('winget install Docker.DockerDesktop')
     && winGuide.includes('runtime.storage')
     && winGuide.includes('postgres')

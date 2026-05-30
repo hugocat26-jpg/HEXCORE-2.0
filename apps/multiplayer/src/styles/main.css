@@ -733,12 +733,14 @@ body:has(.join-gate-page) {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 16px;
-  align-items: start;
+  align-items: stretch;
 }
 
 .join-gate-card {
   display: grid;
+  grid-template-rows: auto 1fr;
   gap: 14px;
+  height: 100%;
   min-width: 0;
   padding: 16px;
   border: 1px solid var(--line);

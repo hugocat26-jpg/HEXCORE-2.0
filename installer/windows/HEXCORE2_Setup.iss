@@ -1,4 +1,4 @@
-#define AppVersion "2.0.25"
+#define AppVersion "2.0.26"
 #define SourceRoot "..\.."
 
 [Setup]
