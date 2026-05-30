@@ -801,7 +801,9 @@ function normalizeSettings(settings = {}) {
     roundIncome: safePositiveNumber(source.roundIncome, 3, 99),
     refreshCosts,
     turnTimers: {
+      hexcorePrepareSeconds: safePositiveNumber(source.turnTimers && source.turnTimers.hexcorePrepareSeconds, 10, 300),
       hexcoreSeconds: safePositiveNumber(source.turnTimers && source.turnTimers.hexcoreSeconds, 0, 3600),
+      shopPrepareSeconds: safePositiveNumber(source.turnTimers && source.turnTimers.shopPrepareSeconds, 10, 300),
       shopSeconds: safePositiveNumber(source.turnTimers && source.turnTimers.shopSeconds, 0, 3600),
     },
   };

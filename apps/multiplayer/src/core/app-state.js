@@ -774,7 +774,9 @@
       roundIncome: 3,
       refreshCosts: [1, 2, 3, 4],
       turnTimers: {
+        hexcorePrepareSeconds: 10,
         hexcoreSeconds: 0,
+        shopPrepareSeconds: 10,
         shopSeconds: 0,
       },
       roundTiers: [1, 2, 3, 4],
@@ -857,7 +859,9 @@
       : [...defaultState.settings.refreshCosts];
     const timers = state.settings.turnTimers && typeof state.settings.turnTimers === 'object' ? state.settings.turnTimers : {};
     state.settings.turnTimers = {
+      hexcorePrepareSeconds: clampNumber(timers.hexcorePrepareSeconds, 0, 300, 10),
       hexcoreSeconds: clampNumber(timers.hexcoreSeconds, 0, 3600, 0),
+      shopPrepareSeconds: clampNumber(timers.shopPrepareSeconds, 0, 300, 10),
       shopSeconds: clampNumber(timers.shopSeconds, 0, 3600, 0),
     };
     state.settings.roundTiers = Array.isArray(state.settings.roundTiers) && state.settings.roundTiers.length

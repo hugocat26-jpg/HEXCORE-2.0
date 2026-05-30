@@ -1,6 +1,7 @@
 (function initRefereeConsole(global) {
   const Hexcore2 = global.Hexcore2 || (global.Hexcore2 = {});
   const MULTIPLAYER_SESSION_KEY = 'hexcore2_multiplayer_session_v1';
+  const MULTIPLAYER_TAB_SESSION_KEY = 'hexcore2_multiplayer_session_tab_v1';
   const SYSTEM_ADMIN_SESSION_KEY = 'hexcore2_system_admin_session_v1';
   const MANAGEMENT_ROLES = ['referee', 'tournament_admin', 'super_admin'];
 
@@ -39,13 +40,42 @@
     return Boolean(queryParam('role') || queryParam('view') || queryParam('mode'));
   }
 
-  function storedMultiplayerSession() {
+  function isAdminStandaloneRoute() {
+    const pathname = String(global.location && global.location.pathname ? global.location.pathname : '/').replace(/\/+$/, '');
+    return pathname === '/admin';
+  }
+
+  function readStoredJson(storage, key) {
     try {
-      const raw = global.localStorage && global.localStorage.getItem(MULTIPLAYER_SESSION_KEY);
+      const raw = storage && storage.getItem(key);
       return raw ? JSON.parse(raw) : null;
     } catch (error) {
       return null;
     }
+  }
+
+  function sessionMatchesCurrentRoute(session) {
+    if (!session) return false;
+    const requestedRole = (queryParam('role') || queryParam('view') || queryParam('mode') || '').toLowerCase();
+    if (!requestedRole) return true;
+    const sessionRole = String(session.role || '').toLowerCase();
+    if (requestedRole === 'viewer') return sessionRole === 'viewer';
+    if (requestedRole === 'captain') {
+      const requestedTeamId = queryParam('teamId') || queryParam('captainId');
+      return sessionRole === 'captain' && (!requestedTeamId || String(session.teamId || '') === requestedTeamId);
+    }
+    if (requestedRole === 'referee') return sessionRole === 'referee';
+    if (requestedRole === 'admin' || requestedRole === 'super_admin' || requestedRole === 'tournament_admin') {
+      return isManagementRole(sessionRole) && sessionRole !== 'referee';
+    }
+    return true;
+  }
+
+  function storedMultiplayerSession() {
+    const tabSession = readStoredJson(global.sessionStorage, MULTIPLAYER_TAB_SESSION_KEY);
+    if (tabSession) return tabSession;
+    const fallbackSession = readStoredJson(global.localStorage, MULTIPLAYER_SESSION_KEY);
+    return sessionMatchesCurrentRoute(fallbackSession) ? fallbackSession : null;
   }
 
   function storedSystemAdminSession() {
@@ -170,6 +200,7 @@
   }
 
   function shouldShowJoinGate() {
+    if (isAdminStandaloneRoute()) return false;
     const session = storedMultiplayerSession();
     if (!session) return true;
     if (hasExplicitClientRole()) return !validRoleSession(session);
@@ -177,7 +208,8 @@
   }
 
   function pageTitleText() {
-    if (shouldShowJoinGate()) return storedSystemAdminSession() ? 'HEXCORE 2.0 管理员后台' : 'HEXCORE 2.0 多人登录页';
+    if (isAdminStandaloneRoute()) return 'HEXCORE 2.0 管理员后台';
+    if (shouldShowJoinGate()) return 'HEXCORE 2.0 多人登录页';
     if (isViewerClient()) return 'HEXCORE 2.0 观众端';
     if (isCaptainClient()) return 'HEXCORE 2.0 队长端';
     if (isAdminClient()) return 'HEXCORE 2.0 管理员端';
@@ -216,6 +248,9 @@
 
   function captainCanOperateCurrentTurn() {
     if (!isCaptainClient()) return true;
+    const timer = Hexcore2.state && Hexcore2.state.activeTurnTimer;
+    const phase = String((timer && timer.phase) || '').trim();
+    if (phase === 'hexcore_prepare' || phase === 'gold_shop_prepare') return false;
     const current = Hexcore2.selectors.currentCaptain && Hexcore2.selectors.currentCaptain();
     return Boolean(current && current.id === clientTeamId());
   }
@@ -630,18 +665,32 @@
           <label><span>SSE 凭据秒数</span><input id="admin-config-stream-ttl" type="number" min="30" max="3600" value="${escapeHtml(config.streamTokenTtlSeconds || 120)}"></label>
           <button class="primary-btn" onclick="window.hexcoreUI.saveAdminConfig()">保存系统配置</button>
         </div>
-        <div class="room-list-table admin-room-table" aria-label="管理员赛事列表">
+        <div class="admin-room-table" aria-label="管理员赛事列表">
           ${rooms.length ? rooms.map(room => `
-            <div class="room-list-row admin-room-row">
-              <div>
-                <strong>${escapeHtml(room.name || room.tournamentId)}</strong>
-                <span>${escapeHtml(room.tournamentId)} · ${escapeHtml(room.campMode === 'no_camp' ? '无阵营' : '双阵营')} · ${escapeHtml(room.pairingMode || '-')}</span>
+            <article class="admin-room-card ${room.status === 'archived' ? 'archived' : 'active'}">
+              <div class="admin-room-main">
+                <div class="admin-room-title">
+                  <span>赛事房间</span>
+                  <strong>${escapeHtml(room.name || room.tournamentId)}</strong>
+                  <small>${escapeHtml(room.tournamentId)} · ${escapeHtml(room.campMode === 'no_camp' ? '无阵营' : '双阵营')} · ${escapeHtml(room.pairingMode || '-')}</small>
+                </div>
+                <div class="admin-room-metrics" aria-label="房间运行状态">
+                  <div class="admin-room-metric status">
+                    <span>状态</span>
+                    <strong>${escapeHtml(room.status === 'archived' ? '已归档' : '活跃')}</strong>
+                  </div>
+                  <div class="admin-room-metric">
+                    <span>队伍</span>
+                    <strong>${escapeHtml(room.teamCount || 0)}</strong>
+                  </div>
+                  <div class="admin-room-metric">
+                    <span>订阅</span>
+                    <strong>${escapeHtml(room.subscriberCount || 0)}</strong>
+                  </div>
+                </div>
               </div>
-              <div><span>状态</span><strong>${escapeHtml(room.status === 'archived' ? '已归档' : '活跃')}</strong></div>
-              <div><span>队伍</span><strong>${escapeHtml(room.teamCount || 0)}</strong></div>
-              <div><span>订阅</span><strong>${escapeHtml(room.subscriberCount || 0)}</strong></div>
               <div class="admin-room-actions">
-                <button class="subtle-btn" ${room.status === 'archived' ? 'disabled' : ''} onclick='window.hexcoreUI.adminEnterTournament(${safeJsonString(room.tournamentId)})'>进入管理</button>
+                <button class="primary-btn" ${room.status === 'archived' ? 'disabled' : ''} onclick='window.hexcoreUI.adminEnterTournament(${safeJsonString(room.tournamentId)})'>进入管理</button>
                 <button class="subtle-btn" onclick='window.hexcoreUI.adminCopyRoomCodes(${safeJsonString(room.tournamentId)})'>复制房间码</button>
                 <button class="subtle-btn" onclick='window.hexcoreUI.adminExportRoom(${safeJsonString(room.tournamentId)})'>导出</button>
                 <button class="subtle-btn" ${room.status === 'archived' ? 'disabled' : ''} onclick='window.hexcoreUI.adminArchiveRoom(${safeJsonString(room.tournamentId)})'>归档</button>
@@ -657,7 +706,7 @@
                   `).join('')}
                 </details>
               ` : '<div class="admin-code-vault unavailable">该房间创建于旧版本，服务端无法恢复房间码明文。</div>'}
-            </div>
+            </article>
           `).join('') : '<div class="empty-log">暂无赛事。可在下方创建赛事表单中创建新房间。</div>'}
         </div>
         <div class="admin-events-panel">
@@ -740,18 +789,44 @@
                     <input id="create-players-per-team" type="number" min="2" max="8" value="5" aria-label="每队人数">
                   </label>
                 </div>
-                <div class="form-hint">任何人都可创建赛事，创建成功后会显示该赛事裁判码、队长码和观众码。创建前会校验同名赛事，避免旧房间码把人带进错房间。</div>
                 <button class="primary-btn" onclick="window.hexcoreUI.createTournamentRoom()">创建赛事</button>
               </div>
             </div>
           </div>
-          ${adminPanel(apiBase)}
           ${joinGateAccessPanel(apiBase)}
           ${roomListPanel()}
           ${roomActionDialog()}
           ${createdRoomPanel()}
           <div class="empty-log">已加入的会话会保存在本机；需要切换身份时可清理浏览器本地数据后重新加入。</div>
           ${joinGateMessagePanel()}
+        </section>
+      </main>
+    `;
+  }
+
+  function adminStandalonePage() {
+    const apiBase = (Hexcore2.actions && Hexcore2.actions.recentMultiplayerApiBase && Hexcore2.actions.recentMultiplayerApiBase()) || '';
+    return `
+      <main class="workspace join-gate-page admin-standalone-page">
+        <section class="data-panel join-gate-panel">
+          <div class="section-title-row">
+            <h1>系统管理员后台</h1>
+            <span>全局管理房间、运行限制、安全事件和系统状态。普通赛事创建与加入请返回多人房间入口。</span>
+          </div>
+          <div class="join-gate-card admin-route-service-card">
+            <h2>服务连接</h2>
+            <div class="settings-form">
+              <label>
+                <span>服务地址</span>
+                <input id="join-api-base" value="${escapeHtml(apiBase)}" aria-label="服务地址">
+              </label>
+              <div class="join-access-actions admin-route-actions">
+                <button class="primary-btn admin-route-action" onclick="window.hexcoreUI.loadAdminStatus()">检测管理员状态</button>
+                <button class="subtle-btn admin-route-action" onclick="window.location.href='/'">返回多人房间</button>
+              </div>
+            </div>
+          </div>
+          ${adminPanel(apiBase)}
         </section>
       </main>
     `;
@@ -768,18 +843,23 @@
     const isOwnWindow = activeCaptain.id === own.id;
     const ownedHexcores = Hexcore2.state.hexcoreAssignments[own.id] || [];
     const activeSession = isOwnWindow && session.captainId === own.id && Array.isArray(session.slots) && session.slots.length > 0;
-    const canDraw = isOwnWindow && ownedHexcores.length < 1 && !activeSession;
+    const turnBlockedReason = !isOwnWindow
+      ? '正在查看其它队长海克斯窗口'
+      : (captainCanOperateCurrentTurn() ? '' : '未轮到本队操作');
+    const canOperateDraft = isOwnWindow && !turnBlockedReason;
+    const disabledActionAttr = canOperateDraft ? '' : `disabled title="${escapeHtml(turnBlockedReason)}"`;
+    const canDraw = isOwnWindow && canOperateDraft && ownedHexcores.length < 1 && !activeSession;
     return `
       <section class="data-panel captain-hex-draft-panel">
         <div class="section-title-row">
           <h2>队长海克斯选择</h2>
-          <span>${isOwnWindow ? '当前轮到本队选择海克斯，可抽取最多 5 个候选并刷新 1 张。' : `当前由 ${escapeHtml(activeCaptain.name)} 选择海克斯，你仅可查看。`}</span>
+          <span>${canOperateDraft ? '当前轮到本队选择海克斯，可抽取最多 5 个候选并刷新 1 张。' : `${escapeHtml(turnBlockedReason)}，仅可查看当前候选。`}</span>
         </div>
         <div class="hex-session-head captain-hex-session-head">
           <strong>${escapeHtml(own.name)} 已选择 ${ownedHexcores.length}/1</strong>
           ${ownedHexcores.length >= 1 ? '<span class="done">已完成海克斯选择</span>' : (canDraw ? `
             <button class="primary-btn" onclick='window.hexcoreUI.drawHexcoreForCaptain(${safeJsonString(own.id)})'>${Hexcore2.icon('hex')}抽取最多 5 个候选</button>
-          ` : `<span class="pending">${isOwnWindow ? '等待候选选择' : '等待当前队长完成'}</span>`)}
+          ` : `<span class="pending">${escapeHtml(turnBlockedReason || '等待候选选择')}</span>`)}
         </div>
         ${activeSession ? `
           <div class="hex-draw-slots captain-hex-draw-slots">
@@ -797,8 +877,8 @@
                   <div class="hex-execution-note">▲ ${escapeHtml(hexcoreTimingLabel(hex))}</div>
                   <div class="hex-draw-actions">
                     <button class="hex-detail-trigger" type="button" title="查看海克斯详情" aria-label="查看${escapeHtml(hex.name)}详情" onclick='window.hexcoreUI.showHexDetail(${safeJsonString(hex.id)})'>详情</button>
-                    <button class="hex-refresh-btn" title="刷新此张候选" aria-label="刷新${escapeHtml(hex.name)}候选" ${session.refreshUsed ? 'disabled' : ''} onclick="window.hexcoreUI.refreshHexcoreSlot(${index})">刷新</button>
-                    <button class="primary-btn hex-select-btn" title="选择此海克斯" aria-label="选择${escapeHtml(hex.name)}海克斯" onclick='window.hexcoreUI.selectHexcoreFromDraw(${safeJsonString(own.id)}, ${safeJsonString(hex.id)})'>选择</button>
+                    <button class="hex-refresh-btn" title="${escapeHtml(turnBlockedReason || '刷新此张候选')}" aria-label="刷新${escapeHtml(hex.name)}候选" ${session.refreshUsed ? 'disabled' : disabledActionAttr} onclick="window.hexcoreUI.refreshHexcoreSlot(${index})">刷新</button>
+                    <button class="primary-btn hex-select-btn" title="${escapeHtml(turnBlockedReason || '选择此海克斯')}" aria-label="选择${escapeHtml(hex.name)}海克斯" ${disabledActionAttr} onclick='window.hexcoreUI.selectHexcoreFromDraw(${safeJsonString(own.id)}, ${safeJsonString(hex.id)})'>选择</button>
                   </div>
                 </article>
               `;
@@ -863,6 +943,8 @@
 
   function shopActionBlockReason(captain, roundState, inSetup = false) {
     if (inSetup) return '';
+    const timerPhase = String((Hexcore2.state.activeTurnTimer && Hexcore2.state.activeTurnTimer.phase) || '').trim();
+    if (timerPhase === 'gold_shop_prepare') return '准备倒计时未结束';
     if (Hexcore2.state.ui && Hexcore2.state.ui.originSageNotice) return '请先关闭神秘贤者·启元提示';
     if (Hexcore2.state.ui && Hexcore2.state.ui.chargedCannonDecision) return '请先处理轮初大炮已充能';
     if (!captain) return '当前没有可操作队长';
@@ -2266,6 +2348,7 @@
         <div class="live-status ${Hexcore2.state.draft.phase === 'completed' ? 'done' : ''}"><span></span>${statusText}</div>
         <div class="clock">${time}</div>
         ${isCaptainClient() || isReadonlyClient() ? '' : `<button class="ghost-btn ${refreshDisabledReason ? 'disabled' : ''}" ${refreshDisabledReason ? 'disabled' : ''} title="${escapeHtml(refreshDisabledReason || '刷新当前商店')}" onclick="${refreshDisabledReason ? '' : 'window.hexcoreUI.refreshShop()'}">${Hexcore2.icon('refresh')}刷新商店</button>`}
+        ${topbarTurnTimerStrip()}
       </header>
     `;
   }
@@ -2273,19 +2356,39 @@
   function activeTurnTimerInfo() {
     const timer = Hexcore2.state.activeTurnTimer;
     if (!timer || !timer.deadlineAt || !timer.durationMs) return null;
+    const phase = String(timer.phase || '').trim();
+    const prepare = phase === 'hexcore_prepare' || phase === 'gold_shop_prepare';
+    if (!['hexcore_prepare', 'hexcore_draw', 'gold_shop_prepare', 'gold_shop'].includes(phase)) return null;
+    const teamId = String(timer.teamId || '').trim();
+    if (!teamId || !Hexcore2.state.captains.some(item => item.id === teamId)) return null;
     const deadlineMs = Date.parse(timer.deadlineAt);
     const graceMs = Date.parse(timer.graceDeadlineAt || timer.deadlineAt);
     if (!deadlineMs || !graceMs) return null;
     const now = Date.now();
     const remainingMs = Math.max(0, deadlineMs - now);
     const graceRemainingMs = Math.max(0, graceMs - now);
+    if (graceRemainingMs <= 0) return null;
+    const workflow = Hexcore2.selectors.workflowStatus();
+    if ((phase === 'gold_shop' || phase === 'gold_shop_prepare') && !workflow.playersDraftReady) return null;
+    if (phase === 'hexcore_draw') {
+      const draft = Hexcore2.state.hexcoreDraft || {};
+      const draftTeamId = String(draft.teamId || draft.captainId || '').trim();
+      const slots = Array.isArray(draft.slots) ? draft.slots.filter(Boolean) : [];
+      if (draftTeamId !== teamId || !slots.length) return null;
+    }
     const percent = timer.durationMs > 0 ? Math.max(0, Math.min(100, (remainingMs / timer.durationMs) * 100)) : 0;
-    const captain = Hexcore2.state.captains.find(item => item.id === timer.teamId);
-    const phaseLabel = timer.phase === 'hexcore_draw' ? '海克斯选择' : '金币商店';
+    const captain = Hexcore2.state.captains.find(item => item.id === teamId);
+    const phaseLabelMap = {
+      hexcore_prepare: '海克斯准备',
+      hexcore_draw: '海克斯选择',
+      gold_shop_prepare: '选手卡准备',
+      gold_shop: '金币商店',
+    };
     return {
-      timer,
+      timer: { ...timer, phase, teamId },
       captain,
-      phaseLabel,
+      phaseLabel: phaseLabelMap[phase] || '回合',
+      prepare,
       remainingMs,
       graceRemainingMs,
       percent,
@@ -2307,7 +2410,9 @@
     const title = `${info.phaseLabel}倒计时`;
     const captainName = info.captain ? info.captain.name : '当前队长';
     const status = info.ended
-      ? `回合已结束，${Math.max(0, Math.ceil(info.graceRemainingMs / 1000))} 秒后自动进入下一队长`
+      ? (info.prepare
+        ? '准备结束，即将开放操作'
+        : `回合已结束，${Math.max(0, Math.ceil(info.graceRemainingMs / 1000))} 秒后自动进入下一队长`)
       : `${formatTimerSeconds(info.remainingMs)} 后结束`;
     return `
       <section class="turn-timer-panel ${info.ended ? 'ended' : ''} ${info.urgent ? 'urgent' : ''}" aria-live="polite">
@@ -2323,9 +2428,46 @@
     `;
   }
 
+  function topbarTurnTimerStrip() {
+    const info = activeTurnTimerInfo();
+    if (!info) return '';
+    const captainName = info.captain ? info.captain.name : '当前队长';
+    const phaseTextMap = {
+      hexcore_prepare: '抽海克斯准备倒计时',
+      hexcore_draw: '抽海克斯倒计时',
+      gold_shop_prepare: '抽选手卡准备倒计时',
+      gold_shop: '抽选手卡倒计时',
+    };
+    const phaseText = phaseTextMap[info.timer.phase] || '回合倒计时';
+    const scopeText = isCaptainClient()
+      ? (clientTeamId() === info.timer.teamId
+        ? (info.prepare ? '准备中，等待开始' : '本人回合')
+        : '跟随当前队长视角')
+      : (isViewerClient() ? '观众只读实时观看' : '裁判全局监控');
+    const status = info.ended
+      ? (info.prepare
+        ? '准备结束，即将开放操作'
+        : `回合已结束，${Math.max(0, Math.ceil(info.graceRemainingMs / 1000))} 秒后自动进入下一队长`)
+      : `${formatTimerSeconds(info.remainingMs)} 后结束`;
+    return `
+      <div class="topbar-turn-timer ${info.ended ? 'ended' : ''} ${info.urgent ? 'urgent' : ''}" aria-live="polite">
+        <div class="topbar-turn-timer-main">
+          <span>${escapeHtml(phaseText)}</span>
+          <strong>${escapeHtml(captainName)}</strong>
+          <em>${escapeHtml(scopeText)}</em>
+          <b>${escapeHtml(status)}</b>
+        </div>
+        <div class="topbar-turn-timer-track" aria-hidden="true">
+          <i style="width:${info.percent.toFixed(2)}%"></i>
+        </div>
+      </div>
+    `;
+  }
+
   function turnTimeoutModal() {
     const info = activeTurnTimerInfo();
     if (!info || !info.ended || info.graceRemainingMs <= 0) return '';
+    if (info.prepare) return '';
     const isOwn = isCaptainClient() && clientTeamId() === info.timer.teamId;
     const title = isOwn ? '您的回合已经结束' : `${info.phaseLabel}回合已经结束`;
     return `
@@ -4256,7 +4398,7 @@
           <div class="rule-block"><strong>金币经济</strong><span>开局 ${Hexcore2.state.settings.initialGold} 金币，第2-4轮各 +${Hexcore2.state.settings.roundIncome} 金币，无利息。</span></div>
           <div class="rule-block"><strong>刷新费用</strong><span>每轮首次商店免费；之后刷新 1、2、3、4 金币，4金币封顶。</span></div>
           <div class="rule-block"><strong>购买规则</strong><span>每名队长每轮最多购买1名队员，队员价格等于费用。</span></div>
-          <div class="rule-block"><strong>回合计时</strong><span>海克斯 ${Number(timers.hexcoreSeconds) || '关闭'} 秒，商店 ${Number(timers.shopSeconds) || '关闭'} 秒。</span></div>
+          <div class="rule-block"><strong>回合计时</strong><span>准备：海克斯 ${Number(timers.hexcorePrepareSeconds) || '关闭'} 秒，选手卡 ${Number(timers.shopPrepareSeconds) || '关闭'} 秒；操作：海克斯 ${Number(timers.hexcoreSeconds) || '关闭'} 秒，选手卡 ${Number(timers.shopSeconds) || '关闭'} 秒。</span></div>
           <div class="rule-block"><strong>补位规则</strong><span>四轮结束后阵容不足时，从剩余1-5费队员中随机补位，不消耗金币。</span></div>
           ${probabilityRuleRows()}
         </div>
@@ -4319,14 +4461,22 @@
         <div class="turn-timer-settings">
           <div>
             <h2>回合计时</h2>
-            <p>0 表示关闭。海克斯候选生成后启动海克斯计时；金币商店打开或回合流转后启动商店计时，超时后服务端自动处理。</p>
+            <p>0 表示关闭。准备倒计时用于裁判开始阶段后的缓冲；操作倒计时用于队长实际抽取或开店后的回合限制。</p>
           </div>
           <label>
-            <span>抽海克斯秒数</span>
+            <span>海克斯准备秒数</span>
+            <input id="rules-hexcore-prepare-timer" type="number" min="0" max="300" value="${Number(timers.hexcorePrepareSeconds) || 0}">
+          </label>
+          <label>
+            <span>海克斯操作秒数</span>
             <input id="rules-hexcore-timer" type="number" min="0" max="3600" value="${Number(timers.hexcoreSeconds) || 0}">
           </label>
           <label>
-            <span>抽选手卡秒数</span>
+            <span>选手卡准备秒数</span>
+            <input id="rules-shop-prepare-timer" type="number" min="0" max="300" value="${Number(timers.shopPrepareSeconds) || 0}">
+          </label>
+          <label>
+            <span>选手卡操作秒数</span>
             <input id="rules-shop-timer" type="number" min="0" max="3600" value="${Number(timers.shopSeconds) || 0}">
           </label>
           <button class="primary-btn" onclick="window.hexcoreUI.updateTurnTimers()">保存计时</button>
@@ -4341,7 +4491,7 @@
           <div class="rule-block"><strong>金币经济</strong><span>开局 ${Hexcore2.state.settings.initialGold} 金币，第2-4轮各 +${Hexcore2.state.settings.roundIncome} 金币，无利息。</span></div>
           <div class="rule-block"><strong>刷新费用</strong><span>每轮首次商店免费；之后刷新 1、2、3、4 金币，4金币封顶。</span></div>
           <div class="rule-block"><strong>购买规则</strong><span>每名队长每轮最多购买1名队员，队员价格等于费用。</span></div>
-          <div class="rule-block"><strong>回合计时</strong><span>海克斯 ${Number(timers.hexcoreSeconds) || '关闭'} 秒，商店 ${Number(timers.shopSeconds) || '关闭'} 秒。</span></div>
+          <div class="rule-block"><strong>回合计时</strong><span>准备：海克斯 ${Number(timers.hexcorePrepareSeconds) || '关闭'} 秒，选手卡 ${Number(timers.shopPrepareSeconds) || '关闭'} 秒；操作：海克斯 ${Number(timers.hexcoreSeconds) || '关闭'} 秒，选手卡 ${Number(timers.shopSeconds) || '关闭'} 秒。</span></div>
           <div class="rule-block"><strong>补位规则</strong><span>四轮结束后阵容不足时，从剩余1-5费队员中随机补位，不消耗金币。</span></div>
           ${probabilityRows}
         </div>
@@ -4496,7 +4646,6 @@
           ${roomArchivedNotice()}
           ${captainClientReadonlyNotice()}
           ${viewerReadonlyNotice()}
-          ${turnTimerPanel()}
           ${captainHexcoreDraftPanel()}
           ${isReadonlyClient() ? '' : (isCaptainClient() ? '' : workflowGatePanel())}
           ${hungryWaveBanner()}
@@ -4521,6 +4670,7 @@
   }
 
   function app() {
+    if (isAdminStandaloneRoute()) return adminStandalonePage();
     if (shouldShowJoinGate()) return joinGatePage();
     return `
       ${sidebar()}
@@ -4569,7 +4719,11 @@
       applyTheme();
       updateDocumentTitle();
       const appRoot = document.getElementById('app');
-      if (appRoot && appRoot.classList) appRoot.classList.toggle('join-gate-root', shouldShowJoinGate());
+      const fullPageRoot = shouldShowJoinGate() || isAdminStandaloneRoute();
+      if (appRoot && appRoot.classList) {
+        appRoot.classList.toggle('join-gate-root', fullPageRoot);
+        appRoot.classList.toggle('admin-gate-root', isAdminStandaloneRoute());
+      }
       appRoot.innerHTML = app();
       this.renderFeedback();
       const restoreScroll = () => {

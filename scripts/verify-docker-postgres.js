@@ -97,9 +97,53 @@ function run(command, commandArgs, options = {}) {
   });
 }
 
+function resolveDockerCommand() {
+  const candidates = [];
+  if (process.env.HEXCORE_DOCKER_COMMAND) candidates.push(process.env.HEXCORE_DOCKER_COMMAND);
+  if (process.platform === 'win32') {
+    for (const base of [
+      process.env.ProgramFiles,
+      process.env.ProgramW6432,
+      process.env['ProgramFiles(x86)'],
+    ]) {
+      if (!base) continue;
+      candidates.push(path.join(base, 'Docker', 'Docker', 'resources', 'bin', 'docker.exe'));
+    }
+  }
+  candidates.push('docker');
+  for (const candidate of candidates) {
+    if (candidate === 'docker' || fs.existsSync(candidate)) return candidate;
+  }
+  return 'docker';
+}
+
+const dockerCommand = resolveDockerCommand();
+
 async function docker(commandArgs, options = {}) {
   log(`docker ${commandArgs.join(' ')}`);
-  return run('docker', commandArgs, options);
+  return run(dockerCommand, commandArgs, options);
+}
+
+async function hasDockerImage(image) {
+  try {
+    await docker(['image', 'inspect', image]);
+    return true;
+  } catch (error) {
+    return false;
+  }
+}
+
+async function ensureDockerImage(image, fallbackImage) {
+  if (await hasDockerImage(image)) return;
+  try {
+    await docker(['pull', image]);
+    return;
+  } catch (error) {
+    if (!fallbackImage) throw error;
+    log(`${image} 主镜像拉取失败，尝试备用官方镜像源。`);
+  }
+  await docker(['pull', fallbackImage]);
+  await docker(['tag', fallbackImage, image]);
 }
 
 function apiBase(env) {
@@ -391,6 +435,8 @@ async function main() {
   await docker(['--version']);
   await docker(['compose', 'version']);
   await docker(['compose', 'config']);
+  await ensureDockerImage('postgres:16-alpine', 'public.ecr.aws/docker/library/postgres:16-alpine');
+  await ensureDockerImage('node:24-slim', 'public.ecr.aws/docker/library/node:24-slim');
   await docker(['compose', 'up', '-d', ...(noBuild ? [] : ['--build'])]);
   await docker(['compose', 'ps']);
   const health = await waitHealth(env);

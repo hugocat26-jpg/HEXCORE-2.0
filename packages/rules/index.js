@@ -30,7 +30,9 @@ function safeBoolean(value) {
 
 function normalizeTurnTimerSettings(input = {}) {
   return {
+    hexcorePrepareSeconds: safePositiveNumber(input.hexcorePrepareSeconds, 10, 300),
     hexcoreSeconds: safePositiveNumber(input.hexcoreSeconds, 0, 3600),
+    shopPrepareSeconds: safePositiveNumber(input.shopPrepareSeconds, 10, 300),
     shopSeconds: safePositiveNumber(input.shopSeconds, 0, 3600),
   };
 }
@@ -45,12 +47,25 @@ function clearActiveTurnTimer(snapshot) {
   return snapshot;
 }
 
+function isPrepareTimerPhase(phase) {
+  return ['hexcore_prepare', 'gold_shop_prepare'].includes(safeText(phase, '', 40));
+}
+
+function timerSecondsForPhase(settings, phase) {
+  const cleanPhase = safeText(phase, '', 40);
+  if (cleanPhase === 'hexcore_prepare') return settings.hexcorePrepareSeconds;
+  if (cleanPhase === 'hexcore_draw') return settings.hexcoreSeconds;
+  if (cleanPhase === 'gold_shop_prepare') return settings.shopPrepareSeconds;
+  if (cleanPhase === 'gold_shop') return settings.shopSeconds;
+  return 0;
+}
+
 function startActiveTurnTimer(snapshot, phase, teamId, createdAt) {
   const cleanPhase = safeText(phase, '', 40);
   const cleanTeamId = safeText(teamId, '', 80);
   if (!cleanPhase || !cleanTeamId) return clearActiveTurnTimer(snapshot);
   const settings = turnTimerSettings(snapshot);
-  const seconds = cleanPhase === 'hexcore_draw' ? settings.hexcoreSeconds : settings.shopSeconds;
+  const seconds = timerSecondsForPhase(settings, cleanPhase);
   if (!seconds) return clearActiveTurnTimer(snapshot);
   const startedMs = Date.parse(createdAt || '') || Date.now();
   const durationMs = seconds * 1000;
@@ -68,9 +83,28 @@ function startActiveTurnTimer(snapshot, phase, teamId, createdAt) {
   return snapshot;
 }
 
+function startPrepareTimerOrOpenPhase(snapshot, preparePhase, readyPhase, teamId, createdAt) {
+  const cleanTeamId = safeText(teamId, '', 80);
+  if (!cleanTeamId) {
+    snapshot.currentTeamId = '';
+    snapshot.currentPhase = readyPhase;
+    return clearActiveTurnTimer(snapshot);
+  }
+  snapshot.currentTeamId = cleanTeamId;
+  const settings = turnTimerSettings(snapshot);
+  if (timerSecondsForPhase(settings, preparePhase) > 0) {
+    snapshot.currentPhase = preparePhase;
+    return startActiveTurnTimer(snapshot, preparePhase, cleanTeamId, createdAt);
+  }
+  snapshot.currentPhase = readyPhase;
+  return clearActiveTurnTimer(snapshot);
+}
+
 function normalizeTurnTimerPayload(payload = {}) {
   return normalizeTurnTimerSettings({
+    hexcorePrepareSeconds: payload.hexcorePrepareSeconds,
     hexcoreSeconds: payload.hexcoreSeconds,
+    shopPrepareSeconds: payload.shopPrepareSeconds,
     shopSeconds: payload.shopSeconds,
   });
 }
@@ -141,20 +175,26 @@ function isCaptainTurnCommandAllowed(state, command, binding) {
   if (command.type === COMMAND_TYPES.RENAME_TEAM) return true;
   const teamId = commandTeamId(command);
   if (!teamId) return true;
+  const snapshot = state.snapshot || {};
+  const phase = safeText(snapshot.currentPhase, '', 40);
   const currentTeamId = String((state.snapshot && state.snapshot.currentTeamId) || '').trim();
-  if (currentTeamId && currentTeamId === teamId) return true;
   if (command.type === COMMAND_TYPES.USE_HEXCORE) {
     const hexcoreId = String((command.payload && command.payload.hexcoreId) || '').trim();
-    const windows = Array.isArray(state.snapshot && state.snapshot.hexcoreActionWindows)
-      ? state.snapshot.hexcoreActionWindows
+    const windows = Array.isArray(snapshot.hexcoreActionWindows)
+      ? snapshot.hexcoreActionWindows
       : [];
-    return windows.some(window => {
+    const hasActiveWindow = windows.some(window => {
       return window
         && window.active !== false
         && String(window.teamId || '').trim() === teamId
         && String(window.hexcoreId || '').trim() === hexcoreId;
     });
+    if (hasActiveWindow) return true;
   }
+  if (isPrepareTimerPhase(phase)) {
+    throw new Error('准备倒计时未结束，队长暂不可进行普通操作');
+  }
+  if (currentTeamId && currentTeamId === teamId) return true;
   return false;
 }
 
@@ -1347,6 +1387,183 @@ function canApplyClientProjection(payload = {}) {
   return [ROLES.SUPER_ADMIN, ROLES.TOURNAMENT_ADMIN, ROLES.REFEREE].includes(payload.commandRole);
 }
 
+function normalizeImportedSettings(input = {}, fallback = {}) {
+  const source = input && typeof input === 'object' ? input : {};
+  const previous = fallback && typeof fallback === 'object' ? fallback : {};
+  const teamCount = Math.max(6, safePositiveNumber(source.teamCount || source.totalTeams, previous.teamCount || previous.totalTeams || 10, 20));
+  const campMode = ['dual_camp', 'no_camp'].includes(safeText(source.campMode, '', 40))
+    ? safeText(source.campMode, 'dual_camp', 40)
+    : safeText(previous.campMode, 'dual_camp', 40);
+  const pairingMode = ['camp_versus', 'random', 'manual'].includes(safeText(source.pairingMode, '', 40))
+    ? safeText(source.pairingMode, '', 40)
+    : (campMode === 'no_camp' ? 'random' : safeText(previous.pairingMode, 'camp_versus', 40));
+  const refreshCosts = Array.isArray(source.refreshCosts)
+    ? source.refreshCosts.slice(0, 4).map(cost => safePositiveNumber(cost, 1, 9))
+    : (Array.isArray(previous.refreshCosts) ? previous.refreshCosts.slice(0, 4).map(cost => safePositiveNumber(cost, 1, 9)) : [1, 2, 3, 4]);
+  return {
+    ...previous,
+    minTeams: 6,
+    maxTeams: 20,
+    teamCount,
+    totalTeams: teamCount,
+    playersPerTeam: Math.max(2, safePositiveNumber(source.playersPerTeam, previous.playersPerTeam || 5, 8)),
+    teamSizeIncludesCaptain: true,
+    campMode,
+    pairingMode,
+    allowSubstitutes: Object.prototype.hasOwnProperty.call(source, 'allowSubstitutes')
+      ? source.allowSubstitutes !== false
+      : previous.allowSubstitutes !== false,
+    initialGold: safePositiveNumber(source.initialGold, previous.initialGold || 6, 99),
+    roundIncome: safePositiveNumber(source.roundIncome, previous.roundIncome || 3, 99),
+    refreshCosts,
+    turnTimers: normalizeTurnTimerSettings(source.turnTimers || previous.turnTimers || {}),
+  };
+}
+
+function normalizeImportedRoundStates(input = {}) {
+  if (!input || typeof input !== 'object') return {};
+  return Object.fromEntries(Object.entries(input).map(([round, value]) => [
+    String(safePositiveNumber(round, 1, 8)),
+    normalizeRoundState(value || {}),
+  ]));
+}
+
+function normalizeImportedTeam(input = {}, index = 0, snapshot = {}) {
+  const settings = snapshot.settings && typeof snapshot.settings === 'object' ? snapshot.settings : {};
+  const teamId = safeText(input.teamId || input.id, `team-${index + 1}`, 80);
+  const sourceEconomy = input.economy && typeof input.economy === 'object' ? input.economy : {};
+  return {
+    teamId,
+    name: safeText(input.name, `队伍${index + 1}`, 40),
+    camp: safeText(input.camp, '', 40),
+    playerId: safeText(input.playerId || input.captainPlayerId, '', 80),
+    playerGameId: safeText(input.playerGameId, '', 80),
+    team: Array.isArray(input.team)
+      ? input.team.map(playerId => safeText(playerId, '', 80)).filter(Boolean).slice(0, 8)
+      : [],
+    economy: {
+      gold: safePositiveNumber(sourceEconomy.gold, settings.initialGold || 6, 999),
+      roundState: normalizeImportedRoundStates(sourceEconomy.roundState || {}),
+    },
+    renameUsed: safeBoolean(input.renameUsed),
+  };
+}
+
+function normalizeImportedPlayer(input = {}, index = 0) {
+  const status = safeText(input.status, 'available', 40);
+  return {
+    id: safeText(input.id || input.playerId, `player-${index + 1}`, 80),
+    name: safeText(input.name, `选手${index + 1}`, 40),
+    gameId: safeText(input.gameId || input.id || input.playerId, '', 80),
+    camp: safeText(input.camp, '', 40),
+    lane: safeText(input.lane, '', 40),
+    tier: safePositiveNumber(input.tier || input.price || input.score, 1, 5),
+    score: safePositiveNumber(input.score || input.tier, 0, 999),
+    heroes: Array.isArray(input.heroes) ? input.heroes.map(hero => safeText(hero, '', 24)).filter(Boolean).slice(0, 5) : [],
+    status,
+    profileId: safeText(input.profileId, '', 80),
+    tournamentName: safeText(input.tournamentName, '', 80),
+    region: safeText(input.region, '', 40),
+    attendanceStatus: normalizeAttendanceStatus(input.attendanceStatus),
+    drawWeight: Math.max(0, Math.min(1, Number(input.drawWeight) || (normalizeAttendanceStatus(input.attendanceStatus) === 'confirmed' ? 1 : 0))),
+    teamId: safeText(input.teamId, '', 80),
+    isCaptain: safeBoolean(input.isCaptain || status === 'captain'),
+  };
+}
+
+function normalizeImportedPlayerProfiles(input = []) {
+  if (!Array.isArray(input)) return [];
+  return input.map((profile, index) => ({
+    id: safeText(profile && profile.id, `profile-${index + 1}`, 80),
+    commonName: safeText(profile && profile.commonName, '', 40),
+    aliases: Array.isArray(profile && profile.aliases)
+      ? profile.aliases.map(alias => safeText(alias, '', 40)).filter(Boolean).slice(0, 12)
+      : [],
+    riskScore: safePositiveNumber(profile && profile.riskScore, 0, 100),
+    notes: safeText(profile && profile.notes, '', 200),
+  })).filter(profile => profile.id).slice(0, 500);
+}
+
+function normalizeImportedTournament(input = {}) {
+  const source = input && typeof input === 'object' ? input : {};
+  return {
+    status: safeText(source.status, 'empty', 40),
+    championId: safeText(source.championId, '', 80),
+    type: safeText(source.type, '', 40),
+    pairingMode: safeText(source.pairingMode, '', 40),
+    rounds: Array.isArray(source.rounds)
+      ? source.rounds.map((round, roundIndex) => ({
+        id: safeText(round && round.id, `r${roundIndex + 1}`, 80),
+        name: safeText(round && round.name, `第 ${roundIndex + 1} 轮`, 40),
+        index: safePositiveNumber(round && round.index, roundIndex + 1, 99),
+        pairingMode: safeText(round && round.pairingMode, '', 40),
+        matches: Array.isArray(round && round.matches)
+          ? round.matches.map((match, matchIndex) => ({
+            id: safeText(match && match.id, `r${roundIndex + 1}m${matchIndex + 1}`, 80),
+            teamAId: safeText(match && match.teamAId, '', 80),
+            teamBId: safeText(match && match.teamBId, '', 80),
+            scoreA: match && Number.isFinite(Number(match.scoreA)) ? Number(match.scoreA) : '',
+            scoreB: match && Number.isFinite(Number(match.scoreB)) ? Number(match.scoreB) : '',
+            winnerId: safeText(match && match.winnerId, '', 80),
+            status: safeText(match && match.status, 'pending', 40),
+            pairingMode: safeText(match && match.pairingMode, '', 40),
+            expectedCampA: safeText(match && match.expectedCampA, '', 40),
+            expectedCampB: safeText(match && match.expectedCampB, '', 40),
+          })).slice(0, 40)
+          : [],
+      })).slice(0, 12)
+      : [],
+  };
+}
+
+function applyImportedStateSnapshot(snapshot, payload = {}) {
+  if (!canApplyClientProjection(payload)) throw new Error('只有裁判或管理员可以导入赛事状态');
+  const imported = payload.snapshot && typeof payload.snapshot === 'object' ? payload.snapshot : {};
+  snapshot.name = safeText(imported.name || snapshot.name, snapshot.name || '', 80);
+  if (imported.settings && typeof imported.settings === 'object') {
+    snapshot.settings = normalizeImportedSettings(imported.settings, snapshot.settings || {});
+  }
+  if (Array.isArray(imported.players)) {
+    snapshot.players = imported.players.map(normalizeImportedPlayer).filter(player => player.id).slice(0, 500);
+  }
+  if (Array.isArray(imported.playerProfiles)) {
+    snapshot.playerProfiles = normalizeImportedPlayerProfiles(imported.playerProfiles);
+  }
+  if (Array.isArray(imported.teams)) {
+    snapshot.teams = imported.teams.map((team, index) => normalizeImportedTeam(team, index, snapshot)).filter(team => team.teamId).slice(0, 20);
+  }
+  const validTeamIds = new Set(teamIdsFrom(snapshot));
+  if (imported.roundStates && typeof imported.roundStates === 'object') {
+    snapshot.roundStates = Object.fromEntries(Object.entries(imported.roundStates).map(([teamId, rounds]) => {
+      const cleanTeamId = safeText(teamId, '', 80);
+      if (!cleanTeamId || (validTeamIds.size && !validTeamIds.has(cleanTeamId))) return null;
+      return [cleanTeamId, normalizeImportedRoundStates(rounds || {})];
+    }).filter(Boolean));
+  }
+  if (imported.hexcoreAssignments && typeof imported.hexcoreAssignments === 'object') {
+    snapshot.hexcoreAssignments = normalizeHexcoreAssignmentsProjection(imported.hexcoreAssignments, validTeamIds);
+  }
+  if (imported.hexcoreDraft && typeof imported.hexcoreDraft === 'object') {
+    snapshot.hexcoreDraft = normalizeHexcoreDraft(imported.hexcoreDraft);
+  }
+  if (imported.tournament && typeof imported.tournament === 'object') {
+    snapshot.tournament = normalizeImportedTournament(imported.tournament);
+  }
+  if (Object.prototype.hasOwnProperty.call(imported, 'currentRound')) {
+    snapshot.currentRound = safePositiveNumber(imported.currentRound, snapshot.currentRound || 1, 8);
+  }
+  if (Object.prototype.hasOwnProperty.call(imported, 'currentTeamId')) {
+    const currentTeamId = safeText(imported.currentTeamId, '', 80);
+    if (!currentTeamId || validTeamIds.has(currentTeamId)) snapshot.currentTeamId = currentTeamId;
+  }
+  snapshot.lastImport = {
+    checksum: safeText(payload.checksum, '', 120),
+    sourceVersion: safeText(payload.sourceVersion, '', 80),
+    reason: safeText(payload.reason, '', 120),
+  };
+  return snapshot;
+}
+
 function preflightCommand(state, command, roleBinding) {
   assertAuthorityState(state);
   validateCommand(command);
@@ -1379,6 +1596,9 @@ function preflightCommand(state, command, roleBinding) {
 function applyEventToSnapshot(snapshot, event) {
   const next = clone(snapshot || {});
   const payload = event.payload || {};
+  if (event.type === EVENT_TYPES.STATE_IMPORTED) {
+    return applyImportedStateSnapshot(next, payload);
+  }
   if (event.type === EVENT_TYPES.TEAM_RENAMED) {
     const teamId = String((payload && payload.teamId) || '').trim();
     const name = String((payload && payload.name) || '').trim().slice(0, 12);
@@ -1421,9 +1641,40 @@ function applyEventToSnapshot(snapshot, event) {
       refreshUsed: false,
       drawOrder,
     };
-    next.currentTeamId = drawOrder[0] || next.currentTeamId || '';
-    next.currentPhase = drawOrder.length ? 'hexcore_draw' : next.currentPhase;
-    clearActiveTurnTimer(next);
+    if (drawOrder.length) {
+      startPrepareTimerOrOpenPhase(next, 'hexcore_prepare', 'hexcore_draw', drawOrder[0], event.createdAt);
+    } else {
+      next.currentTeamId = '';
+      next.currentPhase = next.currentPhase || '';
+      clearActiveTurnTimer(next);
+    }
+  }
+  if (event.type === EVENT_TYPES.TURN_PREPARE_COMPLETED) {
+    const timerPhase = safeText(payload.timerPhase || payload.phase, '', 40);
+    const teamId = safeText(payload.teamId, '', 80);
+    if (timerPhase === 'hexcore_prepare') {
+      next.currentTeamId = teamId;
+      next.currentPhase = 'hexcore_draw';
+      clearActiveTurnTimer(next);
+    }
+    if (timerPhase === 'gold_shop_prepare') {
+      next.currentTeamId = teamId;
+      next.currentRound = safePositiveNumber(payload.round || next.currentRound, 1, 8);
+      next.currentPhase = 'gold_shop';
+      clearActiveTurnTimer(next);
+    }
+    next.lastTurnPrepare = {
+      timerPhase,
+      teamId,
+      round: safePositiveNumber(payload.round || next.currentRound, 1, 8),
+      completedAt: event.createdAt,
+    };
+  }
+  if (event.type === EVENT_TYPES.SHOP_DRAFT_STARTED) {
+    const teamId = safeText(payload.teamId, '', 80);
+    if (!teamId || !teamExists(next, teamId)) throw new Error('开始抽选手卡需要有效队长');
+    next.currentRound = safePositiveNumber(payload.round || next.currentRound || 1, 1, 8);
+    startPrepareTimerOrOpenPhase(next, 'gold_shop_prepare', 'gold_shop', teamId, event.createdAt);
   }
   if (event.type === EVENT_TYPES.HEXCORE_CANDIDATES_CREATED) {
     const draft = normalizeHexcoreDraft(payload);
@@ -1477,8 +1728,8 @@ function applyEventToSnapshot(snapshot, event) {
       const list = Array.isArray(next.hexcoreAssignments && next.hexcoreAssignments[cleanId]) ? next.hexcoreAssignments[cleanId] : [];
       return cleanId && cleanId !== teamId && list.length < 1;
     });
-    next.currentTeamId = nextTeamId || teamId;
-    next.currentPhase = nextTeamId ? 'hexcore_draw' : 'gold_shop';
+    next.currentTeamId = nextTeamId || '';
+    next.currentPhase = nextTeamId ? 'hexcore_draw' : 'gold_shop_pending';
     clearActiveTurnTimer(next);
   }
   if (event.type === EVENT_TYPES.SHOP_OPENED || event.type === EVENT_TYPES.SHOP_REFRESHED) {
@@ -1869,6 +2120,23 @@ function resolveExpiredTurnTimer(state, nowInput = new Date().toISOString()) {
     payload: { reason: '回合计时异常', patchSummary: '计时器缺少队伍，未执行自动流转' },
     createdAt: new Date(nowMs).toISOString(),
   });
+  if (timer.phase === 'hexcore_prepare' || timer.phase === 'gold_shop_prepare') {
+    return appendEvent(state, {
+      type: EVENT_TYPES.TURN_PREPARE_COMPLETED,
+      actorId: 'system-timeout',
+      payload: {
+        timerPhase: timer.phase,
+        phase: timer.phase,
+        teamId,
+        round: safePositiveNumber(timer.round || state.snapshot.currentRound, 1, 8),
+        timeout: true,
+        summary: timer.phase === 'hexcore_prepare'
+          ? '海克斯准备倒计时结束，开放队长抽取候选'
+          : '选手卡准备倒计时结束，开放队长开店',
+      },
+      createdAt: new Date(nowMs).toISOString(),
+    });
+  }
   if (timer.phase === 'hexcore_draw') {
     const draft = normalizeHexcoreDraft(state.snapshot.hexcoreDraft || {});
     const hexcoreId = draft.teamId === teamId ? draft.slots.find(id => id && !(draft.chosen || []).includes(id)) : '';

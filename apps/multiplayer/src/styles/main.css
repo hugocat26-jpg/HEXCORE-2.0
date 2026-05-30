@@ -604,6 +604,91 @@ body:has(.join-gate-page) {
   color: var(--danger);
 }
 
+.topbar-turn-timer {
+  order: 30;
+  flex: 1 0 100%;
+  min-width: 0;
+  padding: 8px 12px 10px;
+  border: 1px solid rgba(25, 212, 240, 0.38);
+  border-radius: 8px;
+  background: linear-gradient(135deg, rgba(25, 212, 240, 0.16), rgba(8, 22, 30, 0.92));
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.035);
+}
+
+.topbar-turn-timer.urgent {
+  border-color: rgba(244, 182, 42, 0.72);
+  background: linear-gradient(135deg, rgba(244, 182, 42, 0.16), rgba(8, 22, 30, 0.94));
+}
+
+.topbar-turn-timer.ended {
+  border-color: rgba(239, 93, 93, 0.72);
+  background: linear-gradient(135deg, rgba(239, 93, 93, 0.18), rgba(8, 22, 30, 0.95));
+}
+
+.topbar-turn-timer-main {
+  display: grid;
+  grid-template-columns: minmax(136px, auto) minmax(180px, 1fr) minmax(150px, auto) minmax(190px, auto);
+  gap: 10px;
+  align-items: center;
+  min-width: 0;
+}
+
+.topbar-turn-timer-main span,
+.topbar-turn-timer-main strong,
+.topbar-turn-timer-main em,
+.topbar-turn-timer-main b {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.topbar-turn-timer-main span {
+  color: var(--cyan);
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.topbar-turn-timer-main strong {
+  color: var(--text);
+  font-size: 18px;
+  font-weight: 900;
+}
+
+.topbar-turn-timer-main em {
+  color: var(--muted);
+  font-size: 12px;
+  font-style: normal;
+}
+
+.topbar-turn-timer-main b {
+  justify-self: end;
+  color: var(--amber);
+  font-size: 20px;
+  font-weight: 950;
+}
+
+.topbar-turn-timer-track {
+  height: 10px;
+  margin-top: 7px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.09);
+}
+
+.topbar-turn-timer-track i {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--cyan), var(--amber));
+  transition: width 0.35s linear;
+}
+
+.topbar-turn-timer.ended .topbar-turn-timer-track i {
+  background: linear-gradient(90deg, var(--red), var(--amber));
+}
+
 .is-submitting {
   cursor: wait !important;
   opacity: 0.76;
@@ -709,6 +794,41 @@ body:has(.join-gate-page) {
   box-shadow: var(--shadow);
 }
 
+.admin-standalone-page {
+  place-items: start center;
+  height: auto;
+  min-height: 100vh;
+}
+
+.admin-standalone-page .join-gate-panel {
+  width: min(1160px, calc(100vw - 64px));
+}
+
+.admin-route-service-card {
+  margin-bottom: 16px;
+}
+
+.admin-route-actions {
+  align-items: center;
+}
+
+.admin-route-actions .admin-route-action {
+  min-width: 132px;
+  white-space: nowrap;
+}
+
+.join-gate-panel .admin-route-actions .primary-btn {
+  width: auto;
+  justify-self: auto;
+  box-shadow: inset 0 0 18px rgba(25, 212, 240, 0.08);
+}
+
+.admin-route-actions .subtle-btn {
+  border-color: rgba(37, 199, 218, 0.28);
+  background: rgba(9, 21, 29, 0.78);
+  color: #cfe8f0;
+}
+
 .join-gate-panel .section-title-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -749,17 +869,22 @@ body:has(.join-gate-page) {
 }
 
 .join-gate-card h2 {
+  margin: 0;
   color: var(--text);
+  line-height: 1.25;
 }
 
 .join-gate-panel .settings-form {
   grid-template-columns: minmax(0, 1fr);
+  align-content: start;
+  align-items: stretch;
   gap: 14px;
 }
 
 .create-room-options {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: end;
   gap: 10px;
 }
 
@@ -1069,34 +1194,166 @@ body:has(.join-gate-page) {
 }
 
 .admin-room-table {
+  display: grid;
+  gap: 12px;
   max-height: 460px;
   overflow: auto;
 }
 
-.admin-room-row {
-  grid-template-columns: minmax(220px, 1.4fr) repeat(3, minmax(64px, 0.4fr)) minmax(360px, 1fr);
+.admin-room-card {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: start;
+  min-width: 0;
+  padding: 14px;
+  overflow: hidden;
+  border: 1px solid rgba(37, 199, 218, 0.26);
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, rgba(25, 212, 240, 0.1), rgba(25, 212, 240, 0) 36%),
+    rgba(5, 12, 17, 0.7);
+  box-shadow: inset 3px 0 0 rgba(25, 212, 240, 0.48);
+  transition: border-color 0.16s ease, background 0.16s ease, box-shadow 0.16s ease;
 }
 
-.admin-room-row:hover {
-  border-color: rgba(245, 158, 11, 0.42);
-  background: rgba(245, 158, 11, 0.08);
+.admin-room-card::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 1px;
+  background: linear-gradient(90deg, rgba(25, 212, 240, 0.62), transparent 72%);
+  opacity: 0.75;
 }
 
+.admin-room-card:hover {
+  border-color: rgba(25, 212, 240, 0.48);
+  background:
+    linear-gradient(135deg, rgba(25, 212, 240, 0.14), rgba(25, 212, 240, 0.02) 42%),
+    rgba(6, 18, 25, 0.82);
+  box-shadow: inset 3px 0 0 rgba(25, 212, 240, 0.72), 0 12px 28px rgba(0, 0, 0, 0.18);
+}
+
+.admin-room-card.archived {
+  border-color: rgba(148, 180, 200, 0.18);
+  background:
+    linear-gradient(135deg, rgba(148, 180, 200, 0.08), rgba(148, 180, 200, 0) 42%),
+    rgba(5, 12, 17, 0.6);
+  box-shadow: inset 3px 0 0 rgba(148, 180, 200, 0.28);
+}
+
+.admin-room-main {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(260px, 0.9fr);
+  gap: 14px;
+  min-width: 0;
+}
+
+.admin-room-title,
+.admin-room-metric {
+  display: grid;
+  min-width: 0;
+}
+
+.admin-room-title {
+  gap: 4px;
+}
+
+.admin-room-title span,
+.admin-room-metric span {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-room-title strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 16px;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-room-title small {
+  overflow: hidden;
+  color: #a9c6d4;
+  font-size: 12px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-room-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(78px, 1fr));
+  gap: 8px;
+  min-width: 0;
+}
+
+.admin-room-metric {
+  gap: 4px;
+  min-height: 54px;
+  padding: 9px 10px;
+  border: 1px solid rgba(37, 199, 218, 0.18);
+  border-radius: 7px;
+  background: rgba(8, 22, 30, 0.72);
+}
+
+.admin-room-metric strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 15px;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-room-card.active .admin-room-metric.status strong {
+  color: var(--green);
+}
+
+.admin-room-card.archived .admin-room-metric.status strong {
+  color: var(--muted);
+}
+
+.admin-room-card .admin-room-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(96px, 1fr));
+  gap: 8px;
+  min-width: 216px;
+  justify-content: end;
+}
+
+.admin-room-actions .primary-btn,
 .admin-room-actions .subtle-btn,
 .admin-room-actions .danger-btn {
   min-height: 32px;
-  padding: 0 9px;
+  width: 100%;
+  padding: 0 10px;
+  font-size: 13px;
   white-space: nowrap;
+}
+
+.admin-room-actions .primary-btn:disabled,
+.admin-room-actions .subtle-btn:disabled,
+.admin-room-actions .danger-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .admin-code-vault {
   grid-column: 1 / -1;
   display: grid;
   gap: 6px;
-  padding: 8px;
+  padding: 10px;
   border: 1px solid rgba(37, 199, 218, 0.18);
   border-radius: 6px;
-  background: rgba(5, 12, 17, 0.58);
+  background: rgba(2, 10, 15, 0.68);
 }
 
 .admin-code-vault summary {
@@ -1104,6 +1361,7 @@ body:has(.join-gate-page) {
   color: var(--cyan);
   font-size: 12px;
   font-weight: 900;
+  list-style-position: inside;
 }
 
 .admin-code-vault div {
@@ -1429,7 +1687,9 @@ body:has(.join-gate-page) {
   .admin-config-grid,
   .admin-load-grid,
   .room-list-row,
-  .admin-room-row,
+  .admin-room-card,
+  .admin-room-main,
+  .admin-room-metrics,
   .create-room-options,
   .room-code-grid,
   .captain-code-list {
@@ -1459,9 +1719,29 @@ body:has(.join-gate-page) {
     justify-content: flex-start;
   }
 
+  .admin-route-actions .admin-route-action {
+    width: 100%;
+  }
+
   .admin-room-actions,
   .admin-auth-actions {
     justify-content: flex-start;
+  }
+
+  .admin-room-card .admin-room-actions {
+    grid-template-columns: minmax(0, 1fr);
+    min-width: 0;
+    width: 100%;
+  }
+
+  .admin-room-card {
+    padding: 12px;
+  }
+
+  .admin-room-title strong,
+  .admin-room-title small {
+    white-space: normal;
+    overflow-wrap: anywhere;
   }
 
   .created-room-head {
@@ -5052,7 +5332,7 @@ h2 span {
 
 .turn-timer-settings {
   display: grid;
-  grid-template-columns: 1fr 180px 180px auto;
+  grid-template-columns: minmax(220px, 1.2fr) repeat(4, minmax(120px, 160px)) auto;
   gap: 12px;
   align-items: end;
   margin-top: 14px;

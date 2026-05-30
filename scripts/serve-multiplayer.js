@@ -36,7 +36,12 @@ function resolveRequestPath(url) {
   try {
     const parsed = new URL(url, `http://${host}:${port}`);
     const pathname = decodeURIComponent(parsed.pathname);
-    const relativePath = pathname === '/' ? 'index.html' : pathname.slice(1);
+    const requestedPath = pathname === '/' ? 'index.html' : pathname.slice(1);
+    const relativePath = requestedPath === 'admin' || requestedPath === 'admin/'
+      ? 'index.html'
+      : (requestedPath.startsWith('admin/src/') || requestedPath.startsWith('admin/assets/')
+        ? requestedPath.slice('admin/'.length)
+        : requestedPath);
     const normalizedRelativePath = relativePath.replace(/\\/g, '/');
     const filePath = path.resolve(appRoot, normalizedRelativePath);
     const relativeToApp = path.relative(appRoot, filePath);

@@ -21,6 +21,27 @@ function Write-Step {
   Write-Host "[HEXCORE2] $Message"
 }
 
+function Resolve-DockerCommand {
+  $command = Get-Command docker -ErrorAction SilentlyContinue
+  if ($command) {
+    return $command.Source
+  }
+
+  $candidates = @()
+  foreach ($base in @(${env:ProgramFiles}, ${env:ProgramW6432}, ${env:ProgramFiles(x86)})) {
+    if ($base) {
+      $candidates += Join-Path $base "Docker\Docker\resources\bin\docker.exe"
+    }
+  }
+  foreach ($candidate in $candidates) {
+    if ($candidate -and (Test-Path $candidate)) {
+      return $candidate
+    }
+  }
+
+  return $null
+}
+
 function New-HexcoreSecret {
   $bytes = New-Object byte[] 32
   $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
@@ -99,8 +120,8 @@ function Ensure-HexcoreEnvFile {
 }
 
 function Assert-DockerCommand {
-  $docker = Get-Command docker -ErrorAction SilentlyContinue
-  if (-not $docker) {
+  $script:DockerCommand = Resolve-DockerCommand
+  if (-not $script:DockerCommand) {
     throw @"
 Docker command was not found.
 Please install and start Docker Desktop, then run this shortcut again.
@@ -111,7 +132,7 @@ If Docker was just installed, restart Windows or reopen this terminal.
 }
 
 function Assert-DockerDaemon {
-  & docker info *> $null
+  & $script:DockerCommand info *> $null
   if ($LASTEXITCODE -eq 0) {
     return
   }
@@ -122,7 +143,7 @@ function Assert-DockerDaemon {
     Start-Process -FilePath $dockerDesktop -WindowStyle Hidden | Out-Null
     for ($index = 0; $index -lt 60; $index += 1) {
       Start-Sleep -Seconds 2
-      & docker info *> $null
+      & $script:DockerCommand info *> $null
       if ($LASTEXITCODE -eq 0) {
         return
       }
@@ -134,15 +155,51 @@ function Assert-DockerDaemon {
 
 function Invoke-DockerCompose {
   param([string[]]$Arguments)
-  & docker @Arguments
+  & $script:DockerCommand @Arguments
   if ($LASTEXITCODE -ne 0) {
     $argumentText = $Arguments -join " "
     throw "docker $argumentText failed. Exit code: $LASTEXITCODE"
   }
 }
 
+function Test-DockerImage {
+  param([string]$Image)
+  & $script:DockerCommand image inspect $Image *> $null
+  return ($LASTEXITCODE -eq 0)
+}
+
+function Ensure-DockerImage {
+  param(
+    [string]$Image,
+    [string]$FallbackImage
+  )
+  if (Test-DockerImage -Image $Image) {
+    return
+  }
+
+  Write-Step "Preparing Docker image: $Image"
+  & $script:DockerCommand pull $Image
+  if ($LASTEXITCODE -eq 0) {
+    return
+  }
+
+  if (-not $FallbackImage) {
+    throw "Docker image pull failed: $Image"
+  }
+
+  Write-Step "Primary image pull failed. Trying fallback image source."
+  & $script:DockerCommand pull $FallbackImage
+  if ($LASTEXITCODE -ne 0) {
+    throw "Docker image fallback pull failed: $FallbackImage"
+  }
+  & $script:DockerCommand tag $FallbackImage $Image
+  if ($LASTEXITCODE -ne 0) {
+    throw "Docker image fallback tag failed: $FallbackImage -> $Image"
+  }
+}
+
 function Test-HexcoreComposeRunning {
-  $services = @(& docker compose ps --services --status running 2>$null)
+  $services = @(& $script:DockerCommand compose ps --services --status running 2>$null)
   return ($services -contains "hexcore")
 }
 
@@ -193,6 +250,8 @@ Ensure-HexcoreEnvFile
 Assert-DockerCommand
 Assert-DockerDaemon
 Assert-HexcorePortsAvailable
+Ensure-DockerImage -Image "postgres:16-alpine" -FallbackImage "public.ecr.aws/docker/library/postgres:16-alpine"
+Ensure-DockerImage -Image "node:24-slim" -FallbackImage "public.ecr.aws/docker/library/node:24-slim"
 
 $composeArgs = @("compose", "up", "-d")
 if (-not $SkipBuild) {

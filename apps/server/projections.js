@@ -18,6 +18,7 @@ const EVENT_PUBLIC_PAYLOAD_FIELDS = [
   'commandType',
   'teamId',
   'teamName',
+  'timerPhase',
   'hexcoreId',
   'hexcoreName',
   'slotId',
@@ -37,7 +38,9 @@ const EVENT_PUBLIC_PAYLOAD_FIELDS = [
   'replacementReason',
   'candidateSlot',
   'replacementId',
+  'hexcorePrepareSeconds',
   'hexcoreSeconds',
+  'shopPrepareSeconds',
   'shopSeconds',
   'timeout',
 ];
@@ -334,7 +337,9 @@ function publicSettings(settings = {}) {
       ? source.refreshCosts.slice(0, 4).map(cost => Math.max(0, Number(cost) || 0))
       : [],
     turnTimers: {
+      hexcorePrepareSeconds: Math.max(0, Number(timers.hexcorePrepareSeconds) || 0),
       hexcoreSeconds: Math.max(0, Number(timers.hexcoreSeconds) || 0),
+      shopPrepareSeconds: Math.max(0, Number(timers.shopPrepareSeconds) || 0),
       shopSeconds: Math.max(0, Number(timers.shopSeconds) || 0),
     },
   };

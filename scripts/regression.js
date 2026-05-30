@@ -10,6 +10,7 @@ const multiplayerServer = require('./serve-multiplayer.js');
 const multiplayerApiServer = require('../apps/server/server.js');
 const multiplayerShared = require('../packages/shared');
 const multiplayerRules = require('../packages/rules');
+const { createReadOnlyProjection } = require('../apps/server/projections.js');
 const { MemoryTournamentStore } = require('../apps/server/memory-store.js');
 const { analyzeTaskDoc, runTaskLoop } = require('./task-loop-runner.js');
 
@@ -59,6 +60,13 @@ function createHarness(options = {}) {
   const localStorageItems = options.localStorageItems && typeof options.localStorageItems === 'object'
     ? { ...options.localStorageItems }
     : null;
+  const sessionStorageItems = options.sessionStorageItems && typeof options.sessionStorageItems === 'object'
+    ? { ...options.sessionStorageItems }
+    : {};
+  const locationPathname = options.locationPathname || '/';
+  const locationSearch = options.locationSearch || '';
+  const locationOrigin = options.locationOrigin || 'http://127.0.0.1:4186';
+  const locationHref = options.locationHref || `${locationOrigin}${locationPathname}${locationSearch}`;
   const context = {
     console,
     Math,
@@ -120,7 +128,28 @@ function createHarness(options = {}) {
         storedState = '';
       },
     },
-    location: { protocol: 'http:', search: options.locationSearch || '', reload() {} },
+    sessionStorage: {
+      getItem(key) {
+        return Object.prototype.hasOwnProperty.call(sessionStorageItems, key) ? sessionStorageItems[key] : null;
+      },
+      setItem(key, value) {
+        sessionStorageItems[key] = String(value);
+      },
+      removeItem(key) {
+        delete sessionStorageItems[key];
+      },
+    },
+    location: {
+      protocol: 'http:',
+      hostname: options.locationHostname || '127.0.0.1',
+      host: options.locationHost || '127.0.0.1:4186',
+      port: options.locationPort || '4186',
+      origin: locationOrigin,
+      pathname: locationPathname,
+      search: locationSearch,
+      href: locationHref,
+      reload() {},
+    },
     fetch: options.fetch,
     EventSource: options.EventSource,
     confirm() { return true; },
@@ -327,6 +356,22 @@ function subscribeSse(port, pathname) {
     req.on('error', reject);
     req.end();
   });
+}
+
+function parseSseEventData(buffer, eventName = 'snapshot') {
+  const frames = String(buffer || '').split(/\n\n/);
+  for (const frame of frames) {
+    const lines = frame.split(/\r?\n/);
+    const eventLine = lines.find(line => line.startsWith('event: '));
+    if (!eventLine || eventLine.slice(7).trim() !== eventName) continue;
+    const data = lines
+      .filter(line => line.startsWith('data: '))
+      .map(line => line.slice(6))
+      .join('\n');
+    if (!data) throw new Error(`SSE ${eventName} 事件缺少 data`);
+    return JSON.parse(data);
+  }
+  throw new Error(`未找到 SSE ${eventName} 事件`);
 }
 
 function pngCornerAlphas(filePath) {
@@ -3382,7 +3427,7 @@ function testMultiplayerTurnTimers() {
   const baseSnapshot = {
     currentTeamId: 'team-1',
     currentRound: 1,
-    settings: { initialGold: 6, roundIncome: 3, refreshCosts: [1, 2, 3, 4], turnTimers: { hexcoreSeconds: 0, shopSeconds: 0 } },
+    settings: { initialGold: 6, roundIncome: 3, refreshCosts: [1, 2, 3, 4], turnTimers: { hexcorePrepareSeconds: 0, hexcoreSeconds: 0, shopPrepareSeconds: 0, shopSeconds: 0 } },
     teams: [
       { teamId: 'team-1', name: '计时1队', economy: { gold: 6 } },
       { teamId: 'team-2', name: '计时2队', economy: { gold: 6 } },
@@ -3400,7 +3445,7 @@ function testMultiplayerTurnTimers() {
     actorId: 'referee-timer',
     role: multiplayerShared.ROLES.REFEREE,
     baseVersion: 0,
-    payload: { hexcoreSeconds: 1, shopSeconds: 2 },
+    payload: { hexcorePrepareSeconds: 1, hexcoreSeconds: 1, shopPrepareSeconds: 2, shopSeconds: 2 },
   });
   const updated = multiplayerRules.acceptCommandAsEvent(
     state,
@@ -3409,7 +3454,73 @@ function testMultiplayerTurnTimers() {
     multiplayerShared.EVENT_TYPES.TURN_TIMERS_UPDATED,
     updateCommand.payload
   );
-  assert(updated.state.snapshot.settings.turnTimers.hexcoreSeconds === 1 && updated.state.snapshot.settings.turnTimers.shopSeconds === 2, '裁判应能写入独立的海克斯和商店计时秒数');
+  assert(
+    updated.state.snapshot.settings.turnTimers.hexcorePrepareSeconds === 1
+    && updated.state.snapshot.settings.turnTimers.hexcoreSeconds === 1
+    && updated.state.snapshot.settings.turnTimers.shopPrepareSeconds === 2
+    && updated.state.snapshot.settings.turnTimers.shopSeconds === 2,
+    '裁判应能写入独立的准备倒计时和正式操作计时秒数'
+  );
+
+  const orderCommand = multiplayerShared.createCommand({
+    commandId: 'cmd-timer-hex-order',
+    tournamentId: 'tournament-timer',
+    type: multiplayerShared.COMMAND_TYPES.SET_HEXCORE_DRAW_ORDER,
+    actorId: 'referee-timer',
+    role: multiplayerShared.ROLES.REFEREE,
+    baseVersion: 1,
+    payload: { teamIds: ['team-1', 'team-2'] },
+  });
+  const orderSet = multiplayerRules.acceptCommandAsEvent(
+    updated.state,
+    orderCommand,
+    { actorId: 'referee-timer', role: multiplayerShared.ROLES.REFEREE, teamId: '' },
+    multiplayerShared.EVENT_TYPES.HEXCORE_DRAW_ORDER_SET,
+    orderCommand.payload
+  );
+  const hexPrepareTimer = orderSet.state.snapshot.activeTurnTimer;
+  assert(
+    hexPrepareTimer
+    && hexPrepareTimer.phase === 'hexcore_prepare'
+    && hexPrepareTimer.teamId === 'team-1'
+    && hexPrepareTimer.durationMs === 1000
+    && orderSet.state.snapshot.currentPhase === 'hexcore_prepare',
+    '裁判制定海克斯抽取顺序后应先启动海克斯准备倒计时'
+  );
+
+  let earlyHexDrawRejected = false;
+  try {
+    multiplayerRules.preflightCommand(
+      orderSet.state,
+      multiplayerShared.createCommand({
+        commandId: 'cmd-timer-hex-early',
+        tournamentId: 'tournament-timer',
+        type: multiplayerShared.COMMAND_TYPES.START_HEXCORE_DRAW,
+        actorId: 'captain-timer-1',
+        role: multiplayerShared.ROLES.CAPTAIN,
+        teamId: 'team-1',
+        baseVersion: 2,
+        payload: { teamId: 'team-1' },
+      }),
+      { actorId: 'captain-timer-1', role: multiplayerShared.ROLES.CAPTAIN, teamId: 'team-1' }
+    );
+  } catch (error) {
+    earlyHexDrawRejected = /准备倒计时/.test(error.message);
+  }
+  assert(earlyHexDrawRejected, '海克斯准备倒计时未结束时，第一顺位队长也不能提前抽取候选');
+
+  const hexPrepareExpired = multiplayerRules.resolveExpiredTurnTimer(
+    orderSet.state,
+    new Date(Date.parse(hexPrepareTimer.graceDeadlineAt) + 5).toISOString()
+  );
+  assert(
+    hexPrepareExpired.stateVersion === orderSet.state.stateVersion + 1
+    && hexPrepareExpired.events[hexPrepareExpired.events.length - 1].type === multiplayerShared.EVENT_TYPES.TURN_PREPARE_COMPLETED
+    && hexPrepareExpired.snapshot.currentPhase === 'hexcore_draw'
+    && hexPrepareExpired.snapshot.currentTeamId === 'team-1'
+    && !hexPrepareExpired.snapshot.activeTurnTimer,
+    '海克斯准备倒计时结束后应开放第一顺位队长抽取候选，但不提前启动正式海克斯操作计时'
+  );
 
   const drawCommand = multiplayerShared.createCommand({
     commandId: 'cmd-timer-hex-draw',
@@ -3418,7 +3529,7 @@ function testMultiplayerTurnTimers() {
     actorId: 'captain-timer-1',
     role: multiplayerShared.ROLES.CAPTAIN,
     teamId: 'team-1',
-    baseVersion: 1,
+    baseVersion: hexPrepareExpired.stateVersion,
     payload: {
       teamId: 'team-1',
       slots: ['camp-scout', 'discount-coupon'],
@@ -3427,7 +3538,7 @@ function testMultiplayerTurnTimers() {
     },
   });
   const hexDraw = multiplayerRules.acceptCommandAsEvent(
-    updated.state,
+    hexPrepareExpired,
     drawCommand,
     { actorId: 'captain-timer-1', role: multiplayerShared.ROLES.CAPTAIN, teamId: 'team-1' },
     multiplayerShared.EVENT_TYPES.HEXCORE_CANDIDATES_CREATED,
@@ -3435,7 +3546,8 @@ function testMultiplayerTurnTimers() {
   );
   const hexTimer = hexDraw.state.snapshot.activeTurnTimer;
   assert(hexTimer && hexTimer.phase === 'hexcore_draw' && hexTimer.teamId === 'team-1' && hexTimer.durationMs === 1000, '生成海克斯候选后应启动海克斯选择倒计时');
-  const hexExpired = multiplayerRules.resolveExpiredTurnTimer(hexDraw.state, new Date(Date.parse(hexTimer.graceDeadlineAt) + 5).toISOString());
+  const hexTimeoutAt = new Date(Date.parse(hexTimer.graceDeadlineAt) + 5).toISOString();
+  const hexExpired = multiplayerRules.resolveExpiredTurnTimer(hexDraw.state, hexTimeoutAt);
   assert(
     hexExpired.stateVersion === hexDraw.state.stateVersion + 1
     && hexExpired.snapshot.hexcoreAssignments['team-1'][0].id === 'camp-scout'
@@ -3443,16 +3555,83 @@ function testMultiplayerTurnTimers() {
     && !hexExpired.snapshot.activeTurnTimer,
     '海克斯倒计时超时后服务端应自动选择第一个候选并进入下一位队长'
   );
+  const hexExpiredAgain = multiplayerRules.resolveExpiredTurnTimer(hexExpired, hexTimeoutAt);
+  assert(
+    hexExpiredAgain.stateVersion === hexExpired.stateVersion
+    && hexExpiredAgain.snapshot.hexcoreAssignments['team-1'].length === 1,
+    '同一个海克斯超时结算重复触发时应保持幂等'
+  );
 
   const shopState = multiplayerRules.createAuthorityState({
     tournamentId: 'tournament-shop-timer',
     snapshot: {
       ...baseSnapshot,
-      settings: { ...baseSnapshot.settings, turnTimers: { hexcoreSeconds: 0, shopSeconds: 1 } },
+      settings: { ...baseSnapshot.settings, turnTimers: { hexcorePrepareSeconds: 0, hexcoreSeconds: 0, shopPrepareSeconds: 1, shopSeconds: 1 } },
       currentPhase: 'gold_shop',
       players: [{ id: 'player-1', name: '选手1', status: 'available', camp: 'local', tier: 1 }],
     },
   });
+  const shopStartCommand = multiplayerShared.createCommand({
+    commandId: 'cmd-timer-shop-start',
+    tournamentId: 'tournament-shop-timer',
+    type: multiplayerShared.COMMAND_TYPES.START_SHOP_DRAFT,
+    actorId: 'referee-timer',
+    role: multiplayerShared.ROLES.REFEREE,
+    teamId: 'team-1',
+    baseVersion: 0,
+    payload: { teamId: 'team-1', round: 1 },
+  });
+  const shopStarted = multiplayerRules.acceptCommandAsEvent(
+    shopState,
+    shopStartCommand,
+    { actorId: 'referee-timer', role: multiplayerShared.ROLES.REFEREE, teamId: '' },
+    multiplayerShared.EVENT_TYPES.SHOP_DRAFT_STARTED,
+    shopStartCommand.payload
+  );
+  const shopPrepareTimer = shopStarted.state.snapshot.activeTurnTimer;
+  assert(
+    shopPrepareTimer
+    && shopPrepareTimer.phase === 'gold_shop_prepare'
+    && shopPrepareTimer.teamId === 'team-1'
+    && shopPrepareTimer.durationMs === 1000
+    && shopStarted.state.snapshot.currentPhase === 'gold_shop_prepare',
+    '裁判点击开始抽选手卡后应先启动选手卡准备倒计时'
+  );
+
+  let earlyOpenShopRejected = false;
+  try {
+    multiplayerRules.preflightCommand(
+      shopStarted.state,
+      multiplayerShared.createCommand({
+        commandId: 'cmd-timer-shop-early',
+        tournamentId: 'tournament-shop-timer',
+        type: multiplayerShared.COMMAND_TYPES.OPEN_SHOP,
+        actorId: 'captain-timer-1',
+        role: multiplayerShared.ROLES.CAPTAIN,
+        teamId: 'team-1',
+        baseVersion: shopStarted.state.stateVersion,
+        payload: { teamId: 'team-1' },
+      }),
+      { actorId: 'captain-timer-1', role: multiplayerShared.ROLES.CAPTAIN, teamId: 'team-1' }
+    );
+  } catch (error) {
+    earlyOpenShopRejected = /准备倒计时/.test(error.message);
+  }
+  assert(earlyOpenShopRejected, '选手卡准备倒计时未结束时，当前队长不能提前开店');
+
+  const shopPrepareExpired = multiplayerRules.resolveExpiredTurnTimer(
+    shopStarted.state,
+    new Date(Date.parse(shopPrepareTimer.graceDeadlineAt) + 5).toISOString()
+  );
+  assert(
+    shopPrepareExpired.stateVersion === shopStarted.state.stateVersion + 1
+    && shopPrepareExpired.events[shopPrepareExpired.events.length - 1].type === multiplayerShared.EVENT_TYPES.TURN_PREPARE_COMPLETED
+    && shopPrepareExpired.snapshot.currentPhase === 'gold_shop'
+    && shopPrepareExpired.snapshot.currentTeamId === 'team-1'
+    && !shopPrepareExpired.snapshot.activeTurnTimer,
+    '选手卡准备倒计时结束后应开放当前队长开店，但不提前启动正式选手卡操作计时'
+  );
+
   const shopCommand = multiplayerShared.createCommand({
     commandId: 'cmd-timer-shop-open',
     tournamentId: 'tournament-shop-timer',
@@ -3460,11 +3639,11 @@ function testMultiplayerTurnTimers() {
     actorId: 'referee-timer',
     role: multiplayerShared.ROLES.REFEREE,
     teamId: 'team-1',
-    baseVersion: 0,
+    baseVersion: shopPrepareExpired.stateVersion,
     payload: { teamId: 'team-1' },
   });
   const shopOpened = multiplayerRules.acceptCommandAsEvent(
-    shopState,
+    shopPrepareExpired,
     shopCommand,
     { actorId: 'referee-timer', role: multiplayerShared.ROLES.REFEREE, teamId: '' },
     multiplayerShared.EVENT_TYPES.SHOP_OPENED,
@@ -3481,7 +3660,8 @@ function testMultiplayerTurnTimers() {
   );
   const shopTimer = shopOpened.state.snapshot.activeTurnTimer;
   assert(shopTimer && shopTimer.phase === 'gold_shop' && shopTimer.teamId === 'team-1', '打开金币商店后应启动抽选手卡倒计时');
-  const shopExpired = multiplayerRules.resolveExpiredTurnTimer(shopOpened.state, new Date(Date.parse(shopTimer.graceDeadlineAt) + 5).toISOString());
+  const shopTimeoutAt = new Date(Date.parse(shopTimer.graceDeadlineAt) + 5).toISOString();
+  const shopExpired = multiplayerRules.resolveExpiredTurnTimer(shopOpened.state, shopTimeoutAt);
   assert(
     shopExpired.snapshot.roundStates['team-1']['1'].skipped
     && shopExpired.snapshot.currentTeamId === 'team-2'
@@ -3489,6 +3669,140 @@ function testMultiplayerTurnTimers() {
     && shopExpired.snapshot.activeTurnTimer.teamId === 'team-2',
     '商店倒计时超时后服务端应自动跳过当前队长，并为下一队长启动商店计时'
   );
+  const shopExpiredAgain = multiplayerRules.resolveExpiredTurnTimer(shopExpired, shopTimeoutAt);
+  const timeoutSkipCount = shopExpiredAgain.events.filter(event =>
+    event.type === multiplayerShared.EVENT_TYPES.TURN_SKIPPED
+    && event.payload
+    && event.payload.timeout
+  ).length;
+  assert(
+    shopExpiredAgain.stateVersion === shopExpired.stateVersion
+    && timeoutSkipCount === 1,
+    '同一个商店超时结算重复触发时应保持幂等，不能重复跳过队长'
+  );
+}
+
+async function testMultiplayerTimerWeakNetworkRecovery() {
+  const store = new MemoryTournamentStore();
+  const server = multiplayerApiServer.createServer({ store });
+  const port = await listen(server);
+  let captainSse = null;
+  let viewerSse = null;
+  try {
+    const created = await requestJson(port, 'POST', '/api/tournaments', {
+      id: 't-timer-weak',
+      name: '计时弱网回归',
+      actorId: 'referee-timer-weak',
+      settings: {
+        teamCount: 2,
+        initialGold: 6,
+        roundIncome: 3,
+        refreshCosts: [1, 2, 3, 4],
+        turnTimers: { hexcoreSeconds: 0, shopSeconds: 1 },
+      },
+      teams: [
+        { teamId: 'team-1', name: '弱网1队', code: 'weak-captain-1', camp: 'local' },
+        { teamId: 'team-2', name: '弱网2队', code: 'weak-captain-2', camp: 'local' },
+      ],
+      players: [
+        { id: 'weak-player-1', name: '弱网选手1', status: 'available', camp: 'local', tier: 1 },
+        { id: 'weak-player-2', name: '弱网选手2', status: 'available', camp: 'local', tier: 1 },
+      ],
+      refereeCode: 'weak-referee-code',
+      viewerCode: 'weak-viewer-code',
+    });
+    assert(created.status === 201 && created.body.room.refereeCode === 'weak-referee-code', '弱网回归应能创建可控房间码赛事');
+    const refereeJoin = await requestJson(port, 'POST', '/api/tournaments/t-timer-weak/join', {
+      code: created.body.room.refereeCode,
+      displayName: '弱网裁判',
+    });
+    const captainJoin = await requestJson(port, 'POST', '/api/tournaments/t-timer-weak/join', {
+      code: created.body.room.captainCodes[0].code,
+      displayName: '弱网队长',
+    });
+    assert(refereeJoin.status === 200 && captainJoin.status === 200, '弱网回归应能获得裁判和队长 session');
+
+    const openShop = await requestJson(port, 'POST', '/api/tournaments/t-timer-weak/commands', {
+      sessionToken: refereeJoin.body.session.sessionToken,
+      command: {
+        commandId: 'cmd-weak-open-shop',
+        type: multiplayerShared.COMMAND_TYPES.OPEN_SHOP,
+        baseVersion: 1,
+        payload: { teamId: 'team-1', round: 1 },
+      },
+    });
+    assert(
+      openShop.status === 200
+      && openShop.body.event.type === multiplayerShared.EVENT_TYPES.SHOP_OPENED
+      && openShop.body.tournament.snapshot.activeTurnTimer
+      && openShop.body.tournament.snapshot.activeTurnTimer.teamId === 'team-1',
+      '弱网回归应先建立一个正在计时的商店回合'
+    );
+
+    const streamToken = await requestJson(port, 'POST', '/api/tournaments/t-timer-weak/stream-token', {
+      sessionToken: captainJoin.body.session.sessionToken,
+    });
+    assert(streamToken.status === 200 && streamToken.body.streamToken, '队长 SSE 弱网重连应使用短期 streamToken');
+
+    const authoritativeBefore = store.getTournament('t-timer-weak');
+    const timer = authoritativeBefore.snapshot.activeTurnTimer;
+    const startedMs = Date.now() - 10000;
+    authoritativeBefore.snapshot.activeTurnTimer = {
+      ...timer,
+      startedAt: new Date(startedMs).toISOString(),
+      deadlineAt: new Date(startedMs + 1000).toISOString(),
+      graceDeadlineAt: new Date(startedMs + 4000).toISOString(),
+    };
+    store.tournaments.set('t-timer-weak', authoritativeBefore);
+
+    captainSse = await subscribeSse(port, `/api/tournaments/t-timer-weak/events?view=captain&streamToken=${encodeURIComponent(streamToken.body.streamToken)}`);
+    const captainProjection = parseSseEventData(captainSse.initial);
+    assert(
+      captainProjection.stateVersion === openShop.body.tournament.stateVersion + 1
+      && captainProjection.snapshot.currentTeamId === 'team-2'
+      && captainProjection.snapshot.roundStates['team-1']['1'].skipped
+      && captainProjection.snapshot.activeTurnTimer
+      && captainProjection.snapshot.activeTurnTimer.teamId === 'team-2',
+      '队长端弱网重连后的 SSE 初始快照应先结算过期回合，再显示下一队长计时'
+    );
+
+    viewerSse = await subscribeSse(port, '/api/tournaments/t-timer-weak/events?view=viewer');
+    const viewerProjection = parseSseEventData(viewerSse.initial);
+    assert(
+      viewerProjection.stateVersion === captainProjection.stateVersion
+      && viewerProjection.snapshot.currentTeamId === 'team-2'
+      && viewerProjection.snapshot.roundStates['team-1']['1'].skipped,
+      '观众端实时画面重连后应看到与队长端一致的已校准回合状态'
+    );
+
+    const resolveOnce = await requestJson(port, 'POST', '/api/tournaments/t-timer-weak/timers/resolve', {
+      sessionToken: refereeJoin.body.session.sessionToken,
+    });
+    const resolveTwice = await requestJson(port, 'POST', '/api/tournaments/t-timer-weak/timers/resolve', {
+      sessionToken: refereeJoin.body.session.sessionToken,
+    });
+    const snapshotAfterReads = await requestJson(port, 'GET', '/api/tournaments/t-timer-weak/snapshot');
+    const authoritativeAfter = store.getTournament('t-timer-weak');
+    const timeoutSkips = authoritativeAfter.events.filter(event =>
+      event.type === multiplayerShared.EVENT_TYPES.TURN_SKIPPED
+      && event.payload
+      && event.payload.timeout
+    );
+    assert(
+      resolveOnce.status === 200
+      && resolveTwice.status === 200
+      && snapshotAfterReads.status === 200
+      && resolveOnce.body.tournament.stateVersion === captainProjection.stateVersion
+      && resolveTwice.body.tournament.stateVersion === captainProjection.stateVersion
+      && snapshotAfterReads.body.tournament.stateVersion === captainProjection.stateVersion
+      && timeoutSkips.length === 1,
+      '重复 resolve、快照读取和 SSE 重连不能重复执行同一个超时跳过动作'
+    );
+  } finally {
+    if (captainSse) captainSse.req.destroy();
+    if (viewerSse) viewerSse.req.destroy();
+    await closeServer(server);
+  }
 }
 
 async function testMultiplayerApiServer() {
@@ -4138,7 +4452,7 @@ async function testMultiplayerApiServer() {
       id: 't-hex-sync',
       name: '海克斯同步回归',
       actorId: 'referee-hex',
-      settings: { initialGold: 6 },
+      settings: { initialGold: 6, turnTimers: { hexcorePrepareSeconds: 0, shopPrepareSeconds: 0, hexcoreSeconds: 0, shopSeconds: 0 } },
       teams: [
         { teamId: 'team-1', name: '海克斯1队', code: 'hex-captain-1', camp: 'local', economy: { gold: 6 } },
         { teamId: 'team-2', name: '海克斯2队', code: 'hex-captain-2', camp: 'outsider', economy: { gold: 6 } },
@@ -6506,6 +6820,288 @@ function testMultiplayerViewerUiIsReadonlyCurrentCaptainPerspective() {
   );
 }
 
+function testMultiplayerGlobalTurnTimerBar() {
+  const sessionKey = 'hexcore2_multiplayer_session_v1';
+  const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+  const startedAt = new Date(Date.now() - 15 * 1000).toISOString();
+  const deadlineAt = new Date(Date.now() + 45 * 1000).toISOString();
+  const graceDeadlineAt = new Date(Date.now() + 48 * 1000).toISOString();
+  const roles = [
+    { role: 'referee', view: 'hexcores', query: '?role=referee', sessionRole: 'referee', expected: '裁判全局监控' },
+    { role: 'captain', view: 'teams', query: '?role=captain&teamId=c1', sessionRole: 'captain', expected: '本人回合' },
+    { role: 'viewer', view: 'hexcores', query: '?role=viewer', sessionRole: 'viewer', expected: '观众只读实时观看' },
+  ];
+  const phases = [
+    { phase: 'gold_shop_prepare', label: '抽选手卡准备倒计时', prepare: true },
+    { phase: 'gold_shop', label: '抽选手卡倒计时' },
+    { phase: 'hexcore_prepare', label: '抽海克斯准备倒计时', prepare: true },
+    { phase: 'hexcore_draw', label: '抽海克斯倒计时' },
+  ];
+  roles.forEach(item => phases.forEach(phase => {
+    const session = {
+      role: item.sessionRole,
+      teamId: item.role === 'captain' ? 'c1' : '',
+      tournamentId: 't-timer-ui',
+      apiBase: 'http://127.0.0.1:4196',
+      sessionToken: `session-${item.role}`,
+      stateVersion: 2,
+      savedAt: startedAt,
+      syncedAt: startedAt,
+      expiresAt,
+    };
+    const { H, app } = createHarness({
+      sourceFiles: multiplayerSourceFiles,
+      locationSearch: item.query,
+      localStorageItems: { [sessionKey]: JSON.stringify(session) },
+    });
+    installReadyTestData(H);
+    H.state.draft.phase = 'drafting';
+    H.state.draft.round = 1;
+    H.state.draft.currentOrder = H.state.captains.map(captain => captain.id);
+    H.state.draft.currentIndex = 0;
+    H.state.ui.activeView = item.view;
+    if (phase.phase === 'hexcore_draw') {
+      H.state.hexcoreDraft = {
+        captainId: 'c1',
+        teamId: 'c1',
+        slots: ['camp-scout', 'discount-coupon'],
+        chosen: [],
+        seenIds: ['camp-scout', 'discount-coupon'],
+        refreshUsed: false,
+        drawOrder: H.state.captains.map(captain => captain.id),
+      };
+    }
+    const expectedScope = item.role === 'captain' && phase.prepare ? '准备中，等待开始' : item.expected;
+    H.state.activeTurnTimer = {
+      timerId: `${phase.phase}:c1:timer-ui`,
+      phase: phase.phase,
+      teamId: 'c1',
+      round: 1,
+      startedAt,
+      deadlineAt,
+      graceDeadlineAt,
+      durationMs: 60 * 1000,
+    };
+    H.ui.render();
+    assert(
+      app.innerHTML.includes('topbar-turn-timer')
+      && app.innerHTML.includes(phase.label)
+      && app.innerHTML.includes(H.state.captains[0].name)
+      && app.innerHTML.includes(expectedScope)
+      && app.innerHTML.includes('topbar-turn-timer-track')
+      && !app.innerHTML.includes('turn-timer-panel'),
+      `${item.role} 端任意页面顶部应显示 ${phase.label} 全局倒计时横条，且不在内容区重复显示`,
+    );
+  }));
+  const notStartedHarness = createHarness({ sourceFiles: multiplayerSourceFiles, locationSearch: '?role=viewer' });
+  notStartedHarness.H.state.activeTurnTimer = {
+    timerId: 'gold_shop:c1:not-started',
+    phase: 'gold_shop',
+    teamId: 'c1',
+    round: 1,
+    startedAt,
+    deadlineAt,
+    graceDeadlineAt,
+    durationMs: 60 * 1000,
+  };
+  notStartedHarness.H.ui.render();
+  assert(!notStartedHarness.app.innerHTML.includes('topbar-turn-timer'), '数据准备或抽选未开始时不应显示倒计时横条');
+  const expiredHarness = createHarness({ sourceFiles: multiplayerSourceFiles, locationSearch: '?role=viewer' });
+  installReadyTestData(expiredHarness.H);
+  expiredHarness.H.state.draft.phase = 'drafting';
+  expiredHarness.H.state.activeTurnTimer = {
+    timerId: 'gold_shop:c1:expired',
+    phase: 'gold_shop',
+    teamId: 'c1',
+    round: 1,
+    startedAt: new Date(Date.now() - 70000).toISOString(),
+    deadlineAt: new Date(Date.now() - 10000).toISOString(),
+    graceDeadlineAt: new Date(Date.now() - 7000).toISOString(),
+    durationMs: 60 * 1000,
+  };
+  expiredHarness.H.ui.render();
+  assert(!expiredHarness.app.innerHTML.includes('回合已结束，0 秒后自动进入下一队长'), '宽限期已过的倒计时不应继续显示 0 秒结束横条');
+
+  const prepareEndedHarness = createHarness({ sourceFiles: multiplayerSourceFiles, locationSearch: '?role=captain&teamId=c1' });
+  installReadyTestData(prepareEndedHarness.H);
+  prepareEndedHarness.H.state.draft.phase = 'drafting';
+  prepareEndedHarness.H.state.activeTurnTimer = {
+    timerId: 'hexcore_prepare:c1:ended',
+    phase: 'hexcore_prepare',
+    teamId: 'c1',
+    round: 1,
+    startedAt: new Date(Date.now() - 11000).toISOString(),
+    deadlineAt: new Date(Date.now() - 1000).toISOString(),
+    graceDeadlineAt: new Date(Date.now() + 2000).toISOString(),
+    durationMs: 10 * 1000,
+  };
+  prepareEndedHarness.H.ui.render();
+  assert(
+    !prepareEndedHarness.app.innerHTML.includes('turn-timeout-layer')
+    && !prepareEndedHarness.app.innerHTML.includes('您的回合已经结束'),
+    '准备倒计时结束宽限期内不应弹出正式回合结束弹窗',
+  );
+}
+
+async function testMultiplayerCaptainHexcoreDraftButtonsRespectTurn() {
+  const sessionKey = 'hexcore2_multiplayer_session_v1';
+  const tabSessionKey = 'hexcore2_multiplayer_session_tab_v1';
+  const session = {
+    role: 'captain',
+    teamId: 'c2',
+    tournamentId: 't-hex-turn-gate',
+    apiBase: 'http://127.0.0.1:4196',
+    sessionToken: 'captain-c2-token',
+    savedAt: new Date().toISOString(),
+    expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+  };
+  const { H, app } = createHarness({
+    sourceFiles: multiplayerSourceFiles,
+    locationSearch: '?role=captain&teamId=c2',
+    localStorageItems: { [sessionKey]: JSON.stringify(session) },
+    sessionStorageItems: { [tabSessionKey]: JSON.stringify(session) },
+  });
+  installReadyTestData(H);
+  H.state.ui.activeView = 'draft';
+  H.state.hexcoreAssignments.c2 = [];
+  H.state.draft.phase = 'captain_action';
+  H.state.draft.currentOrder = H.state.captains.map(captain => captain.id);
+  H.state.draft.currentIndex = 0;
+  H.state.hexcoreDraft = {
+    captainId: 'c2',
+    teamId: 'c2',
+    slots: ['discount-coupon', 'reserved-seat', 'urgent-restock'],
+    chosen: [],
+    seenIds: ['discount-coupon', 'reserved-seat', 'urgent-restock'],
+    refreshUsed: false,
+    drawOrder: H.state.captains.map(captain => captain.id),
+  };
+  H.ui.render();
+  assert(
+    app.innerHTML.includes('未轮到本队操作')
+    && /hex-refresh-btn[^>]*disabled/.test(app.innerHTML)
+    && /hex-select-btn[^>]*disabled/.test(app.innerHTML),
+    '队长端海克斯候选按钮必须受当前回合限制，未轮到本队时刷新和选择都应禁用',
+  );
+  const beforeDraft = JSON.stringify(H.state.hexcoreDraft);
+  const beforeOwned = JSON.stringify(H.state.hexcoreAssignments.c2 || []);
+  await H.actions.selectHexcoreFromDraw('c2', 'discount-coupon');
+  await H.actions.refreshHexcoreSlot(0);
+  assert(
+    JSON.stringify(H.state.hexcoreDraft) === beforeDraft
+    && JSON.stringify(H.state.hexcoreAssignments.c2 || []) === beforeOwned,
+    '动作函数也必须阻断非本人回合海克斯选择和刷新，不能只依赖按钮 disabled',
+  );
+}
+
+function testMultiplayerImportStateSynchronizesRosterSetup() {
+  const tournamentId = 't-import-roster';
+  const state = multiplayerRules.createAuthorityState({
+    tournamentId,
+    snapshot: {
+      tournamentId,
+      name: '同步测试',
+      roomStatus: 'active',
+      currentTeamId: 'team-1',
+      currentRound: 1,
+      settings: { teamCount: 6, totalTeams: 6, playersPerTeam: 5, campMode: 'dual_camp' },
+      teams: Array.from({ length: 6 }, (_, index) => ({ teamId: `team-${index + 1}`, name: `队伍${index + 1}` })),
+      players: [],
+    },
+  });
+  const importedSnapshot = {
+    adminSecret: '不应写入权威状态',
+    settings: { teamCount: 6, totalTeams: 6, playersPerTeam: 5, campMode: 'dual_camp', pairingMode: 'camp_versus' },
+    players: [
+      { id: 'player-cap-2', name: '测试队长二', gameId: 'CAP_02', camp: 'local', lane: '上路', score: 5, tier: 1, status: 'captain', teamId: 'team-2' },
+    ],
+    teams: [
+      { teamId: 'team-1', name: '队伍1', camp: 'local', team: [] },
+      { teamId: 'team-2', name: '海斗2队', camp: 'local', playerId: 'player-cap-2', playerGameId: 'CAP_02', team: [] },
+      { teamId: 'team-3', name: '队伍3', camp: 'local', team: [] },
+      { teamId: 'team-4', name: '队伍4', camp: 'outsider', team: [] },
+      { teamId: 'team-5', name: '队伍5', camp: 'outsider', team: [] },
+      { teamId: 'team-6', name: '队伍6', camp: 'outsider', team: [] },
+    ],
+  };
+  const command = multiplayerShared.createCommand({
+    commandId: 'cmd-import-roster-1',
+    tournamentId,
+    type: multiplayerShared.COMMAND_TYPES.IMPORT_STATE,
+    actorId: 'referee-1',
+    role: multiplayerShared.ROLES.REFEREE,
+    baseVersion: 0,
+    payload: {
+      checksum: 'roster-sync-test',
+      sourceVersion: 'regression',
+      snapshot: importedSnapshot,
+    },
+  });
+  const result = multiplayerRules.acceptCommandAsEvent(
+    state,
+    command,
+    { actorId: 'referee-1', role: multiplayerShared.ROLES.REFEREE, teamId: '' },
+    multiplayerShared.EVENT_TYPES.STATE_IMPORTED,
+    command.payload,
+  );
+  const team2 = result.state.snapshot.teams.find(team => team.teamId === 'team-2');
+  const player = result.state.snapshot.players.find(item => item.id === 'player-cap-2');
+  const projection = createReadOnlyProjection(result.state, 'viewer');
+  const projectedTeam2 = projection.snapshot.teams.find(team => team.teamId === 'team-2');
+  assert(
+    team2 && team2.playerId === 'player-cap-2'
+    && player && player.status === 'captain' && player.teamId === 'team-2'
+    && projectedTeam2 && projectedTeam2.playerName === '测试队长二'
+    && !Object.prototype.hasOwnProperty.call(result.state.snapshot, 'adminSecret'),
+    'ImportState 应白名单同步裁判端选手库和队长绑定，并通过观众/队长投影显示队长信息',
+  );
+}
+
+function testMultiplayerSessionsAreTabScoped() {
+  const sessionKey = 'hexcore2_multiplayer_session_v1';
+  const tabSessionKey = 'hexcore2_multiplayer_session_tab_v1';
+  const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+  const localViewerSession = {
+    role: 'viewer',
+    tournamentId: 't-session-scope',
+    apiBase: 'http://127.0.0.1:4196',
+    sessionToken: 'viewer-token',
+    savedAt: new Date().toISOString(),
+    expiresAt,
+  };
+  const tabCaptainSession = {
+    role: 'captain',
+    teamId: 'c2',
+    tournamentId: 't-session-scope',
+    apiBase: 'http://127.0.0.1:4196',
+    sessionToken: 'captain-token',
+    savedAt: new Date().toISOString(),
+    expiresAt,
+  };
+  const { app } = createHarness({
+    sourceFiles: multiplayerSourceFiles,
+    locationSearch: '',
+    localStorageItems: { [sessionKey]: JSON.stringify(localViewerSession) },
+    sessionStorageItems: { [tabSessionKey]: JSON.stringify(tabCaptainSession) },
+  });
+  assert(
+    app.innerHTML.includes('队长端')
+    && !app.innerHTML.includes('观众端只读'),
+    '同一浏览器多标签应优先使用当前标签 sessionStorage，会话身份不能被其它标签的 localStorage 覆盖',
+  );
+
+  const staleTab = createHarness({
+    sourceFiles: multiplayerSourceFiles,
+    locationSearch: '?role=captain&teamId=c2',
+    localStorageItems: { [sessionKey]: JSON.stringify(localViewerSession) },
+  });
+  assert(
+    staleTab.app.innerHTML.includes('多人房间')
+    && staleTab.app.innerHTML.includes('加入已有赛事'),
+    '明确打开队长端时不能复用其它标签留下的观众 localStorage 会话，应要求重新加入正确身份',
+  );
+}
+
 function testMultiplayerJoinGateAndCors() {
   const ui = fs.readFileSync(path.join(root, 'apps/multiplayer/src/ui/referee-console.js'), 'utf8');
   const main = fs.readFileSync(path.join(root, 'apps/multiplayer/src/main.js'), 'utf8');
@@ -6517,7 +7113,9 @@ function testMultiplayerJoinGateAndCors() {
   const multiplayerServe = fs.readFileSync(path.join(root, 'scripts/serve-multiplayer.js'), 'utf8');
   assert(
     ui.includes('joinGatePage()')
-    && ui.includes("classList.toggle('join-gate-root', shouldShowJoinGate())")
+    && ui.includes('isAdminStandaloneRoute()')
+    && ui.includes('adminStandalonePage()')
+    && ui.includes("classList.toggle('admin-gate-root', isAdminStandaloneRoute())")
     && ui.includes('多人房间')
     && ui.includes('加入已有赛事')
     && ui.includes('join-tournament-id')
@@ -6535,9 +7133,16 @@ function testMultiplayerJoinGateAndCors() {
     && ui.includes('管理员端')
     && ui.includes('adminPanel(apiBase)')
     && ui.includes('系统管理员后台')
+    && ui.includes('admin-room-card')
+    && ui.includes('admin-room-main')
+    && ui.includes('admin-room-metrics')
+    && ui.includes('admin-route-actions')
+    && ui.includes('primary-btn admin-route-action')
+    && ui.includes('subtle-btn admin-route-action')
+    && !ui.includes('secondary-btn')
     && ui.includes('当前系统负荷')
     && ui.includes('updateDocumentTitle()')
-    && ui.includes('任何人都可创建赛事')
+    && !ui.includes('任何人都可创建赛事，创建成功后会显示')
     && ui.includes('create-tournament-id')
     && ui.includes('create-tournament-name')
     && ui.includes('createdRoomPanel()')
@@ -6588,7 +7193,9 @@ function testMultiplayerJoinGateAndCors() {
     && ui.includes('if (hasExplicitClientRole()) return !validRoleSession(session)')
     && ui.includes('Hexcore2.volatileCreatedRoom')
     && ui.includes('房间码明文已清空')
-    && ui.includes('创建成功后会显示该赛事裁判码、队长码和观众码')
+    && ui.includes('create-team-count')
+    && ui.includes('create-camp-mode')
+    && ui.includes('create-players-per-team')
     && ui.includes('roomSyncInfo()')
     && ui.includes('syncDetail')
     && ui.includes("label: '会话'")
@@ -6669,6 +7276,7 @@ function testMultiplayerJoinGateAndCors() {
     && main.includes("role=viewer")
     && main.includes("role=captain&teamId=")
     && main.includes("role=admin")
+    && main.includes('sessionPathForRole(role)')
     && main.includes('createTournamentRoom()')
     && main.includes('enterCreatedRefereeRoom()')
     && main.includes('MANAGEMENT_ROLES')
@@ -6707,6 +7315,8 @@ function testMultiplayerJoinGateAndCors() {
     && stackScript.includes('os.networkInterfaces()')
     && stackScript.includes('局域网访问页面')
     && multiplayerServe.includes("process.env.HOST || '0.0.0.0'")
+    && multiplayerServe.includes("requestedPath === 'admin' || requestedPath === 'admin/'")
+    && multiplayerServe.includes("requestedPath.startsWith('admin/src/')")
     && server.includes("process.env.HOST || '0.0.0.0'"),
     '多人端默认启动应监听局域网地址，并在控制台打印手机可访问的页面和 API 地址',
   );
@@ -6726,6 +7336,7 @@ function testMultiplayerJoinGateAndCors() {
     && css.includes('grid-column: 1 / -1')
     && css.includes('place-items: center')
     && css.includes('.join-gate-panel')
+    && css.includes('.admin-standalone-page')
     && css.includes('width: min(980px, calc(100vw - 64px))')
     && css.includes('.room-code-actions')
     && css.includes('.room-code-copy-source')
@@ -6753,6 +7364,10 @@ function testMultiplayerJoinGateAndCors() {
     && css.includes('.admin-entry-panel')
     && css.includes('.admin-load-grid')
     && css.includes('.admin-code-vault')
+    && css.includes('.admin-room-card')
+    && css.includes('.admin-room-main')
+    && css.includes('.admin-room-metrics')
+    && css.includes('.admin-room-card.active .admin-room-metric.status strong')
     && css.includes('.room-list-row')
     && css.includes('.room-list-status.archived')
     && css.includes('.room-lifecycle-panel')
@@ -6776,6 +7391,56 @@ function testMultiplayerJoinGateAndCors() {
     && stackScript.includes('windowsHide: true')
     && !stackScript.includes('shell: true'),
     '多人端应提供本地堆栈启动脚本，并避免通过 shell 拼接启动命令',
+  );
+}
+
+function testAdminDashboardRouteIsolation() {
+  const joinHarness = createHarness({
+    sourceFiles: multiplayerSourceFiles,
+    locationPathname: '/',
+    locationSearch: '',
+  });
+  const joinText = joinHarness.app.innerHTML;
+  assert(
+    joinText.includes('多人房间')
+    && joinText.includes('加入已有赛事')
+    && joinText.includes('创建赛事'),
+    '多人入口应保留加入和创建赛事入口',
+  );
+  assert(
+    !joinText.includes('任何人都可创建赛事，创建成功后会显示'),
+    '多人入口创建赛事卡片不应显示冗余说明文字',
+  );
+  assert(
+    !joinText.includes('系统管理员后台')
+    && !joinText.includes('管理员密码')
+    && !joinText.includes('当前系统负荷'),
+    '多人入口不应渲染系统管理员后台、管理员密码或系统负荷',
+  );
+
+  const adminHarness = createHarness({
+    sourceFiles: multiplayerSourceFiles,
+    locationPathname: '/admin/',
+    locationSearch: '',
+  });
+  const adminText = adminHarness.app.innerHTML;
+  assert(
+    adminText.includes('系统管理员后台')
+    && adminText.includes('管理员密码')
+    && adminText.includes('检测管理员状态')
+    && adminText.includes('primary-btn admin-route-action')
+    && adminText.includes('subtle-btn admin-route-action'),
+    '管理员路由应独立渲染系统管理员登录和初始化入口',
+  );
+  assert(
+    !adminText.includes('加入已有赛事')
+    && !adminText.includes('创建赛事')
+    && !adminText.includes('加入码'),
+    '管理员路由不应渲染多人房间加入和创建赛事表单',
+  );
+  assert(
+    adminHarness.H.ui && typeof adminHarness.H.ui.render === 'function',
+    '管理员路由仍应复用多人端 UI 渲染系统',
   );
 }
 
@@ -7352,6 +8017,7 @@ async function run() {
     testMultiplayerCopyIsolation,
     testMultiplayerSharedRulePreflight,
     testMultiplayerTurnTimers,
+    testMultiplayerTimerWeakNetworkRecovery,
     testMultiplayerApiServer,
     testMultiplayerSessionExpiry,
     testRuleTemplateSaveAndLoad,
@@ -7373,7 +8039,12 @@ async function run() {
     testHexcorePngIconAssets,
     testMultiplayerCaptainUiReusesRefereeScreensWithScopedAccess,
     testMultiplayerViewerUiIsReadonlyCurrentCaptainPerspective,
+    testMultiplayerGlobalTurnTimerBar,
+    testMultiplayerCaptainHexcoreDraftButtonsRespectTurn,
+    testMultiplayerImportStateSynchronizesRosterSetup,
+    testMultiplayerSessionsAreTabScoped,
     testMultiplayerJoinGateAndCors,
+    testAdminDashboardRouteIsolation,
     testMultiplayerClientSubmitsAuthoritativeCommands,
     testM12DynamicRulesBaseline,
     testM13DeploymentDeliveryArtifacts,

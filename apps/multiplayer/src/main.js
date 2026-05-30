@@ -3,6 +3,7 @@
   const HEXCORE_CANDIDATE_COUNT = 5;
   const HEXCORE_PICK_LIMIT = 1;
   const MULTIPLAYER_SESSION_KEY = 'hexcore2_multiplayer_session_v1';
+  const MULTIPLAYER_TAB_SESSION_KEY = 'hexcore2_multiplayer_session_tab_v1';
   const SYSTEM_ADMIN_SESSION_KEY = 'hexcore2_system_admin_session_v1';
   const MULTIPLAYER_API_BASE_KEY = 'hexcore2_multiplayer_api_base_v1';
   const MANAGEMENT_ROLES = ['referee', 'tournament_admin', 'super_admin'];
@@ -136,7 +137,8 @@
 
   function clientTeamId() {
     if (!isCaptainClient()) return '';
-    const requested = queryParam('teamId') || queryParam('captainId');
+    const session = multiplayerSession();
+    const requested = queryParam('teamId') || queryParam('captainId') || (session && session.teamId);
     if (requested && Hexcore2.state.captains.some(captain => captain.id === requested)) return requested;
     const current = Hexcore2.selectors.currentCaptain && Hexcore2.selectors.currentCaptain();
     return current ? current.id : (Hexcore2.state.captains[0] ? Hexcore2.state.captains[0].id : '');
@@ -151,9 +153,20 @@
     return false;
   }
 
+  function activePrepareTimerPhase() {
+    const timer = Hexcore2.state && Hexcore2.state.activeTurnTimer;
+    const phase = String((timer && timer.phase) || '').trim();
+    return phase === 'hexcore_prepare' || phase === 'gold_shop_prepare';
+  }
+
   function captainClientCanOperateCurrentTurn(actionLabel) {
     if (rejectViewerClient(actionLabel)) return false;
     if (!isCaptainClient()) return true;
+    if (activePrepareTimerPhase()) {
+      Hexcore2.eventStore.append(actionLabel || '队长操作失败', '准备倒计时未结束，暂不可操作', 'warn');
+      Hexcore2.ui.render();
+      return false;
+    }
     const current = Hexcore2.selectors.currentCaptain && Hexcore2.selectors.currentCaptain();
     if (current && current.id === clientTeamId()) return true;
     Hexcore2.eventStore.append(actionLabel || '队长操作失败', '非你的回合，仅可查看', 'warn');
@@ -1061,18 +1074,48 @@
     decision.error = String(message || '大炮已充能当前无法执行').slice(0, 120);
   }
 
-  function multiplayerSession() {
+  function readStoredJson(storage, key) {
     try {
-      const raw = global.localStorage && global.localStorage.getItem(MULTIPLAYER_SESSION_KEY);
+      const raw = storage && storage.getItem(key);
       return raw ? JSON.parse(raw) : null;
     } catch (error) {
       return null;
     }
   }
 
+  function sessionMatchesCurrentRoute(session) {
+    if (!session) return false;
+    const requestedRole = (queryParam('role') || queryParam('view') || queryParam('mode') || '').toLowerCase();
+    if (!requestedRole) return true;
+    const sessionRole = String(session.role || '').toLowerCase();
+    if (requestedRole === 'viewer') return sessionRole === 'viewer';
+    if (requestedRole === 'captain') {
+      const requestedTeamId = queryParam('teamId') || queryParam('captainId');
+      return sessionRole === 'captain' && (!requestedTeamId || String(session.teamId || '') === requestedTeamId);
+    }
+    if (requestedRole === 'referee') return sessionRole === 'referee';
+    if (requestedRole === 'admin' || requestedRole === 'super_admin' || requestedRole === 'tournament_admin') {
+      return isManagementRole(sessionRole) && sessionRole !== 'referee';
+    }
+    return true;
+  }
+
+  function multiplayerSession() {
+    const tabSession = readStoredJson(global.sessionStorage, MULTIPLAYER_TAB_SESSION_KEY);
+    if (tabSession) return tabSession;
+    const fallbackSession = readStoredJson(global.localStorage, MULTIPLAYER_SESSION_KEY);
+    return sessionMatchesCurrentRoute(fallbackSession) ? fallbackSession : null;
+  }
+
   function saveMultiplayerSession(session) {
-    if (!session || !global.localStorage) return;
-    global.localStorage.setItem(MULTIPLAYER_SESSION_KEY, JSON.stringify(session));
+    if (!session) return;
+    const serialized = JSON.stringify(session);
+    try {
+      if (global.sessionStorage) global.sessionStorage.setItem(MULTIPLAYER_TAB_SESSION_KEY, serialized);
+    } catch (error) {}
+    try {
+      if (global.localStorage) global.localStorage.setItem(MULTIPLAYER_SESSION_KEY, serialized);
+    } catch (error) {}
   }
 
   function localMultiplayerApiBase(location) {
@@ -1224,6 +1267,13 @@
     return MANAGEMENT_ROLES.includes(String(role || '').toLowerCase());
   }
 
+  function sessionPathForRole(role) {
+    const pathname = String(global.location && global.location.pathname ? global.location.pathname : '/');
+    const normalized = pathname.replace(/\/+$/, '') || '/';
+    if (role === 'admin' && normalized === '/admin') return '/';
+    return pathname || '/';
+  }
+
   function redirectForSession(session) {
     const role = session.role === 'viewer'
       ? 'viewer'
@@ -1231,7 +1281,7 @@
     const query = role === 'captain'
       ? `role=captain&teamId=${encodeURIComponent(session.teamId || '')}`
       : (role === 'viewer' ? 'role=viewer' : (role === 'admin' ? 'role=admin' : 'role=referee'));
-    global.location.href = `${global.location.pathname || '/'}?${query}`;
+    global.location.href = `${sessionPathForRole(role)}?${query}`;
   }
 
   function clearMultiplayerSession() {
@@ -1240,6 +1290,7 @@
     } catch (error) {}
     Hexcore2.roomEventSource = null;
     try {
+      if (global.sessionStorage) global.sessionStorage.removeItem(MULTIPLAYER_TAB_SESSION_KEY);
       if (global.localStorage) global.localStorage.removeItem(MULTIPLAYER_SESSION_KEY);
     } catch (error) {}
     if (Hexcore2.state && Hexcore2.state.ui) {
@@ -1942,6 +1993,119 @@
     ]).filter(([captainId]) => captainId));
   }
 
+  function projectedRoundStatesPayload() {
+    return Object.fromEntries((Hexcore2.state.captains || []).map(captain => {
+      const roundState = captain && captain.economy && captain.economy.roundState && typeof captain.economy.roundState === 'object'
+        ? captain.economy.roundState
+        : {};
+      return [String(captain.id || '').trim(), roundState];
+    }).filter(([teamId]) => teamId));
+  }
+
+  function projectedPlayerPayload(player = {}) {
+    return {
+      id: String(player.id || '').trim(),
+      name: String(player.name || '').trim(),
+      gameId: String(player.gameId || '').trim(),
+      camp: String(player.camp || '').trim(),
+      lane: String(player.lane || '').trim(),
+      tier: Math.max(0, Math.round(Number(player.tier) || 0)),
+      score: Math.max(0, Math.round(Number(player.score) || 0)),
+      heroes: Array.isArray(player.heroes) ? player.heroes.map(hero => String(hero || '').trim()).filter(Boolean).slice(0, 5) : [],
+      status: String(player.status || 'available').trim(),
+      profileId: String(player.profileId || '').trim(),
+      tournamentName: String(player.tournamentName || '').trim(),
+      region: String(player.region || '').trim(),
+      attendanceStatus: String(player.attendanceStatus || '').trim(),
+      drawWeight: Number.isFinite(Number(player.drawWeight)) ? Number(player.drawWeight) : undefined,
+      teamId: String(player.teamId || '').trim(),
+      isCaptain: Boolean(player.isCaptain || player.status === 'captain'),
+    };
+  }
+
+  function projectedTeamPayload(captain = {}) {
+    return {
+      teamId: String(captain.id || '').trim(),
+      name: String(captain.name || '').trim(),
+      camp: String(captain.camp || '').trim(),
+      playerId: String(captain.playerId || '').trim(),
+      playerGameId: String(captain.playerGameId || '').trim(),
+      team: Array.isArray(captain.team) ? captain.team.map(playerId => String(playerId || '').trim()).filter(Boolean) : [],
+      economy: {
+        gold: Math.max(0, Math.round(Number(captain.economy && captain.economy.gold) || 0)),
+        roundState: captain.economy && captain.economy.roundState && typeof captain.economy.roundState === 'object'
+          ? captain.economy.roundState
+          : {},
+      },
+      renameUsed: Boolean(captain.renameUsed),
+    };
+  }
+
+  function localRoomStateImportSnapshot() {
+    const current = Hexcore2.selectors.currentCaptain && Hexcore2.selectors.currentCaptain();
+    const settings = Hexcore2.state.settings || {};
+    const tournament = Hexcore2.state.tournament && typeof Hexcore2.state.tournament === 'object'
+      ? JSON.parse(JSON.stringify(Hexcore2.state.tournament))
+      : { status: 'empty', championId: '', rounds: [] };
+    return {
+      tournamentId: String((Hexcore2.state.multiplayer && Hexcore2.state.multiplayer.tournamentId) || '').trim(),
+      name: String(settings.systemName || 'HEXCORE 2.0').trim(),
+      currentTeamId: current ? String(current.id || '').trim() : '',
+      currentRound: Math.max(1, Math.round(Number(Hexcore2.state.draft && Hexcore2.state.draft.round) || 1)),
+      settings: {
+        teamCount: Math.max(0, Math.round(Number(settings.teamCount || settings.totalTeams || Hexcore2.state.captains.length) || 0)),
+        totalTeams: Math.max(0, Math.round(Number(settings.totalTeams || settings.teamCount || Hexcore2.state.captains.length) || 0)),
+        playersPerTeam: Math.max(0, Math.round(Number(settings.playersPerTeam) || 0)),
+        campMode: String(settings.campMode || 'dual_camp').trim(),
+        pairingMode: String(settings.pairingMode || '').trim(),
+        allowSubstitutes: settings.allowSubstitutes !== false,
+        initialGold: Math.max(0, Math.round(Number(settings.initialGold) || 0)),
+        roundIncome: Math.max(0, Math.round(Number(settings.roundIncome) || 0)),
+        refreshCosts: Array.isArray(settings.refreshCosts) ? settings.refreshCosts.map(cost => Math.max(0, Math.round(Number(cost) || 0))).slice(0, 4) : [],
+        turnTimers: settings.turnTimers && typeof settings.turnTimers === 'object' ? {
+          hexcorePrepareSeconds: Math.max(0, Math.min(300, Math.round(Number(settings.turnTimers.hexcorePrepareSeconds) || 0))),
+          hexcoreSeconds: Math.max(0, Math.round(Number(settings.turnTimers.hexcoreSeconds) || 0)),
+          shopPrepareSeconds: Math.max(0, Math.min(300, Math.round(Number(settings.turnTimers.shopPrepareSeconds) || 0))),
+          shopSeconds: Math.max(0, Math.round(Number(settings.turnTimers.shopSeconds) || 0)),
+        } : {},
+      },
+      teams: (Hexcore2.state.captains || []).map(projectedTeamPayload).filter(team => team.teamId),
+      players: (Hexcore2.state.players || []).map(projectedPlayerPayload).filter(player => player.id),
+      playerProfiles: Array.isArray(Hexcore2.state.playerProfiles) ? JSON.parse(JSON.stringify(Hexcore2.state.playerProfiles)).slice(0, 500) : [],
+      roundStates: projectedRoundStatesPayload(),
+      hexcoreAssignments: projectedHexcoreAssignmentsPayload(),
+      hexcoreDraft: Hexcore2.state.hexcoreDraft && typeof Hexcore2.state.hexcoreDraft === 'object'
+        ? JSON.parse(JSON.stringify(Hexcore2.state.hexcoreDraft))
+        : {},
+      tournament,
+    };
+  }
+
+  function checksumLocalImportSnapshot(snapshot) {
+    const raw = JSON.stringify(snapshot || {});
+    let checksum = 0;
+    for (let index = 0; index < raw.length; index += 1) {
+      checksum = (checksum + raw.charCodeAt(index) * (index + 1)) % 1000000007;
+    }
+    return `client-${raw.length}-${checksum}`;
+  }
+
+  async function syncLocalSetupStateToRoom(actionLabel = '同步房间状态失败') {
+    const session = multiplayerSession();
+    if (!session || !isManagementRole(session.role)) return;
+    const snapshotPayload = localRoomStateImportSnapshot();
+    try {
+      await submitRoomCommand('ImportState', {
+        checksum: checksumLocalImportSnapshot(snapshotPayload),
+        sourceVersion: String((Hexcore2.meta && Hexcore2.meta.version) || '2.0'),
+        reason: 'referee_roster_setup',
+        snapshot: snapshotPayload,
+      });
+    } catch (error) {
+      Hexcore2.eventStore.append(actionLabel, error && error.message ? error.message : String(error), 'warn');
+    }
+  }
+
   async function syncHexcoreAssignmentsToRoom(actionLabel) {
     const session = Hexcore2.state.hexcoreDraft || {};
     try {
@@ -2098,7 +2262,9 @@
     const source = settings && typeof settings === 'object' ? settings : {};
     const timers = source.turnTimers && typeof source.turnTimers === 'object' ? source.turnTimers : {};
     return {
+      hexcorePrepareSeconds: Math.max(0, Math.min(300, Math.round(Number(timers.hexcorePrepareSeconds) || 0))),
       hexcoreSeconds: Math.max(0, Math.min(3600, Math.round(Number(timers.hexcoreSeconds) || 0))),
+      shopPrepareSeconds: Math.max(0, Math.min(300, Math.round(Number(timers.shopPrepareSeconds) || 0))),
       shopSeconds: Math.max(0, Math.min(3600, Math.round(Number(timers.shopSeconds) || 0))),
     };
   }
@@ -2198,6 +2364,19 @@
     if (Object.prototype.hasOwnProperty.call(snapshot, 'lastSubstituteAction') && applyLastSubstituteProjection(snapshot.lastSubstituteAction)) changed = true;
     if (Object.prototype.hasOwnProperty.call(snapshot, 'tournament') && applyTournamentProjection(snapshot.tournament)) changed = true;
     if (Object.prototype.hasOwnProperty.call(snapshot, 'activeTurnTimer') && applyActiveTurnTimerProjection(snapshot.activeTurnTimer)) changed = true;
+    if (Object.prototype.hasOwnProperty.call(snapshot, 'currentPhase')) {
+      Hexcore2.state.multiplayer = Hexcore2.state.multiplayer || {};
+      const nextPhase = String(snapshot.currentPhase || '').trim();
+      if (Hexcore2.state.multiplayer.currentPhase !== nextPhase) {
+        Hexcore2.state.multiplayer.currentPhase = nextPhase;
+        changed = true;
+      }
+      if (['gold_shop_prepare', 'gold_shop'].includes(nextPhase) && Hexcore2.state.draft.phase === 'setup') {
+        Hexcore2.state.draft.phase = 'captain_action';
+        Hexcore2.state.draft.started = true;
+        changed = true;
+      }
+    }
     if (Object.prototype.hasOwnProperty.call(snapshot, 'roomStatus')) {
       Hexcore2.state.multiplayer = Hexcore2.state.multiplayer || {};
       const nextRoomStatus = ['active', 'archived'].includes(String(snapshot.roomStatus || '')) ? String(snapshot.roomStatus) : 'active';
@@ -2209,7 +2388,7 @@
     if (applyHexcoreWindowProjection(snapshot.hexcoreActionWindows)) changed = true;
     if (Object.prototype.hasOwnProperty.call(snapshot, 'hexcoreAssignments') && applyHexcoreAssignmentsProjection(snapshot.hexcoreAssignments)) changed = true;
     if (Object.prototype.hasOwnProperty.call(snapshot, 'hexcoreDraft') && applyHexcoreDraftProjection(snapshot.hexcoreDraft)) changed = true;
-    if (String(snapshot.currentPhase || '') === 'hexcore_draw' && String(snapshot.currentTeamId || '').trim()) {
+    if (['hexcore_prepare', 'hexcore_draw'].includes(String(snapshot.currentPhase || '')) && String(snapshot.currentTeamId || '').trim()) {
       Hexcore2.state.ui = Hexcore2.state.ui || {};
       const projectedHexCaptainId = String(snapshot.currentTeamId || '').trim();
       if (Hexcore2.state.ui.hexCaptainId !== projectedHexCaptainId) {
@@ -3266,7 +3445,7 @@
       }
     },
 
-    startDraft(options = {}) {
+    async startDraft(options = {}) {
       if (rejectViewerClient('开始抽选失败')) return;
       if (isCaptainClient()) {
         Hexcore2.eventStore.append('队长操作失败', '队长端不可执行裁判海克斯动作', 'warn');
@@ -3305,6 +3484,13 @@
       openNextChargedCannonDecision(1);
       const captain = Hexcore2.selectors.currentCaptain();
       Hexcore2.eventStore.append('抽卡开始', `第 1 轮金币商店开始，当前队长为 ${captain ? captain.name : '无'}`, 'info');
+      try {
+        if (captain) {
+          await submitRoomCommand('StartShopDraft', { teamId: captain.id, round: 1 }, options);
+        }
+      } catch (error) {
+        Hexcore2.eventStore.append('同步抽卡开始失败', error && error.message ? error.message : String(error), 'warn');
+      }
       renderAndPersist();
     },
 
@@ -4410,6 +4596,7 @@
 
     async drawHexcoreForCaptain(captainId) {
       if (!captainClientCanActOn(captainId, '抽取海克斯失败')) return;
+      if (!captainClientCanOperateCurrentTurn('抽取海克斯失败')) return;
       const captain = Hexcore2.state.captains.find(item => item.id === captainId);
       if (!captain) {
         Hexcore2.eventStore.append('抽取海克斯失败', '请选择有效队长', 'warn');
@@ -4461,6 +4648,7 @@
     async selectHexcoreFromDraw(captainId, hexcoreId) {
       if (!captainClientCanActOn(captainId, '选择海克斯失败')) return;
       if (!captainClientCanUseHexcoreSession('选择海克斯失败')) return;
+      if (!captainClientCanOperateCurrentTurn('选择海克斯失败')) return;
       const captain = Hexcore2.state.captains.find(item => item.id === captainId);
       const session = Hexcore2.state.hexcoreDraft || {};
       const hexcore = Hexcore2.sampleData.hexcores.find(item => item.id === hexcoreId);
@@ -4549,6 +4737,7 @@
 
     async refreshHexcoreSlot(slotIndex) {
       if (!captainClientCanUseHexcoreSession('刷新海克斯失败')) return;
+      if (!captainClientCanOperateCurrentTurn('刷新海克斯失败')) return;
       const session = Hexcore2.state.hexcoreDraft || {};
       const index = Number(slotIndex);
       if (!session.captainId || !Number.isInteger(index) || index < 0 || index >= session.slots.length) {
@@ -4896,7 +5085,7 @@
       Hexcore2.ui.render();
     },
 
-    dissolveAllTeams(keepCaptains) {
+    async dissolveAllTeams(keepCaptains) {
       if (!Hexcore2.state.captains.length) return;
       snapshot(`一键解散队伍前：${keepCaptains ? '保留队长' : '不保留队长'}`);
       let releasedMembers = 0;
@@ -4941,10 +5130,11 @@
           : `已清空队长身份和海克斯，${releasedCaptains + releasedMembers} 名成员返回可选池，请先重新设置队长并抽海克斯`,
         'warn'
       );
+      await syncLocalSetupStateToRoom('同步队伍解散失败');
       renderAndPersist();
     },
 
-    removePlayerFromTeam(captainId, playerId) {
+    async removePlayerFromTeam(captainId, playerId) {
       const captain = Hexcore2.state.captains.find(item => item.id === captainId);
       const player = Hexcore2.state.players.find(item => item.id === playerId);
       if (!captain || !player) return;
@@ -4964,10 +5154,11 @@
         `裁判将 ${player.name} 从 ${captain.name} 移回可选池`,
         'warn'
       );
+      await syncLocalSetupStateToRoom('同步队伍移除失败');
       renderAndPersist();
     },
 
-    assignPlayerToTeam(captainId, playerId) {
+    async assignPlayerToTeam(captainId, playerId) {
       const captain = Hexcore2.state.captains.find(item => item.id === captainId);
       const selectedPlayerId = playerId || (document.getElementById(`team-add-player-${captainId}`) || {}).value;
       const player = Hexcore2.state.players.find(item => item.id === selectedPlayerId);
@@ -5000,6 +5191,7 @@
         `裁判为 ${captain.name} 补录队员 ${player.name}`,
         'success'
       );
+      await syncLocalSetupStateToRoom('同步队伍补录失败');
       renderAndPersist();
     },
 
@@ -5070,7 +5262,7 @@
       renderAndPersist();
     },
 
-    promotePlayerToCaptain(playerId) {
+    async promotePlayerToCaptain(playerId) {
       if (rejectGoldLockedMutation('设为队长失败')) return;
       const player = Hexcore2.state.players.find(item => item.id === playerId);
       if (!player) {
@@ -5150,10 +5342,11 @@
           : `${player.name} 设为队长并新建队伍 ${targetCaptain.name}`,
         'success'
       );
+      await syncLocalSetupStateToRoom('同步队长设置失败');
       renderAndPersist();
     },
 
-    releaseCaptain(playerId) {
+    async releaseCaptain(playerId) {
       if (rejectGoldLockedMutation('解除队长失败')) return;
       const player = Hexcore2.state.players.find(item => item.id === playerId);
       const captain = player && Hexcore2.state.captains.find(item => item.playerId === player.id);
@@ -5168,6 +5361,7 @@
       markPlayerAvailable(player);
       normalizeAfterConfigChange();
       Hexcore2.eventStore.append('队长设置', `${player.name} 已解除 ${captain.name} 队长身份，回到普通选手池`, 'warn');
+      await syncLocalSetupStateToRoom('同步队长解除失败');
       renderAndPersist();
     },
 
@@ -5212,7 +5406,7 @@
       renderAndPersist();
     },
 
-    updateTeamCountFromTeams() {
+    async updateTeamCountFromTeams() {
       if (rejectGoldLockedMutation('队伍数量失败')) return;
       const input = document.getElementById('teams-team-count');
       const teamCount = Number(input && input.value);
@@ -5250,6 +5444,7 @@
       }
       normalizeAfterConfigChange();
       Hexcore2.eventStore.append('队伍管理', `队伍数量调整为 ${teamCount} 队`, 'success');
+      await syncLocalSetupStateToRoom('同步队伍数量失败');
       renderAndPersist();
     },
 
@@ -5353,14 +5548,22 @@
         Hexcore2.ui.render();
         return;
       }
+      const hexPrepareInput = document.getElementById('rules-hexcore-prepare-timer');
       const hexInput = document.getElementById('rules-hexcore-timer');
+      const shopPrepareInput = document.getElementById('rules-shop-prepare-timer');
       const shopInput = document.getElementById('rules-shop-timer');
+      const hexcorePrepareSeconds = Math.max(0, Math.min(300, Math.round(Number(hexPrepareInput && hexPrepareInput.value) || 0)));
       const hexcoreSeconds = Math.max(0, Math.min(3600, Math.round(Number(hexInput && hexInput.value) || 0)));
+      const shopPrepareSeconds = Math.max(0, Math.min(300, Math.round(Number(shopPrepareInput && shopPrepareInput.value) || 0)));
       const shopSeconds = Math.max(0, Math.min(3600, Math.round(Number(shopInput && shopInput.value) || 0)));
-      Hexcore2.state.settings.turnTimers = { hexcoreSeconds, shopSeconds };
-      Hexcore2.eventStore.append('回合计时设置', `海克斯 ${hexcoreSeconds || '关闭'} 秒，商店 ${shopSeconds || '关闭'} 秒`, 'success');
+      Hexcore2.state.settings.turnTimers = { hexcorePrepareSeconds, hexcoreSeconds, shopPrepareSeconds, shopSeconds };
+      Hexcore2.eventStore.append(
+        '回合计时设置',
+        `海克斯准备 ${hexcorePrepareSeconds || '关闭'} 秒，海克斯操作 ${hexcoreSeconds || '关闭'} 秒；选手卡准备 ${shopPrepareSeconds || '关闭'} 秒，选手卡操作 ${shopSeconds || '关闭'} 秒`,
+        'success'
+      );
       try {
-        await submitRoomCommand('UpdateTurnTimers', { hexcoreSeconds, shopSeconds });
+        await submitRoomCommand('UpdateTurnTimers', { hexcorePrepareSeconds, hexcoreSeconds, shopPrepareSeconds, shopSeconds });
       } catch (error) {
         Hexcore2.eventStore.append('同步计时设置失败', error && error.message ? error.message : String(error), 'warn');
       }
@@ -5508,7 +5711,7 @@
       renderAndPersist();
     },
 
-    confirmAddPlayer() {
+    async confirmAddPlayer() {
       const nameInput = document.getElementById('add-player-name');
       const laneInput = document.getElementById('add-player-lane');
       const campInput = document.getElementById('add-player-camp');
@@ -5552,6 +5755,7 @@
       Hexcore2.state.ui.playerImportPage = 1;
       if (Hexcore2.normalizeState) Hexcore2.normalizeState(Hexcore2.state);
       Hexcore2.eventStore.append('选手库', `新增选手 ${player.name}`, 'success');
+      await syncLocalSetupStateToRoom('同步新增选手失败');
       renderAndPersist();
     },
 
@@ -5575,7 +5779,7 @@
       });
     },
 
-    confirmPlayerImport() {
+    async confirmPlayerImport() {
       if (rejectGoldLockedMutation('选手导入失败')) return;
       const preview = Hexcore2.state.ui && Hexcore2.state.ui.playerImportPreview;
       const accepted = preview && Array.isArray(preview.accepted) ? preview.accepted : [];
@@ -5623,6 +5827,7 @@
         `确认导入 ${imported.length} 名选手${skipped ? `，确认时跳过 ${skipped} 名重复游戏ID` : ''}`,
         imported.length ? 'success' : 'warn'
       );
+      await syncLocalSetupStateToRoom('同步选手导入失败');
       renderAndPersist();
     },
 
@@ -5693,7 +5898,7 @@
       renderAndPersist();
     },
 
-    clearAllPlayers() {
+    async clearAllPlayers() {
       const firstConfirmed = typeof confirm === 'function'
         ? confirm('高风险操作：将清空所有选手，并移除所有队伍中的队长和队员，所有卡池会变为空。是否继续？')
         : true;
@@ -5753,10 +5958,11 @@
       if (Hexcore2.normalizeState) Hexcore2.normalizeState(Hexcore2.state);
       Hexcore2.turnOrderEngine.recompute();
       Hexcore2.eventStore.append('选手库清空', '裁判清空了所有选手，队伍、卡池、海克斯和选人流程已初始化', 'warn');
+      await syncLocalSetupStateToRoom('同步清空选手失败');
       renderAndPersist();
     },
 
-    savePlayer(playerId) {
+    async savePlayer(playerId) {
       const player = Hexcore2.state.players.find(item => item.id === playerId);
       if (!player) return;
       const lane = document.getElementById(`player-lane-${playerId}`);
@@ -5782,6 +5988,7 @@
       player.manifesto = nextManifesto;
       if (Hexcore2.normalizeState) Hexcore2.normalizeState(Hexcore2.state);
       Hexcore2.eventStore.append('选手库', `保存选手 ${player.name} 的基础信息`, 'success');
+      await syncLocalSetupStateToRoom('同步选手信息失败');
       renderAndPersist();
     },
 
@@ -5837,7 +6044,7 @@
       Hexcore2.ui.render();
     },
 
-    savePlayerName(playerId) {
+    async savePlayerName(playerId) {
       const player = Hexcore2.state.players.find(item => item.id === playerId);
       const input = document.getElementById(`player-display-name-${playerId}`);
       if (!player || !input) return;
@@ -5867,6 +6074,7 @@
       Hexcore2.state.ui.editingNamePlayerId = '';
       if (Hexcore2.normalizeState) Hexcore2.normalizeState(Hexcore2.state);
       Hexcore2.eventStore.append('选手库', `${oldName} 更名为 ${player.name}`, 'success');
+      await syncLocalSetupStateToRoom('同步选手名称失败');
       renderAndPersist();
     },
 
@@ -5875,7 +6083,7 @@
       Hexcore2.ui.render();
     },
 
-    savePlayerGameId(playerId) {
+    async savePlayerGameId(playerId) {
       const player = Hexcore2.state.players.find(item => item.id === playerId);
       const input = document.getElementById(`player-game-id-${playerId}`);
       if (!player || !input) return;
@@ -5904,10 +6112,11 @@
       Hexcore2.state.ui.editingGameIdPlayerId = '';
       if (Hexcore2.normalizeState) Hexcore2.normalizeState(Hexcore2.state);
       Hexcore2.eventStore.append('选手库', `${player.name} 游戏ID更新为 ${player.gameId}`, 'success');
+      await syncLocalSetupStateToRoom('同步游戏ID失败');
       renderAndPersist();
     },
 
-    togglePlayerDisabled(playerId) {
+    async togglePlayerDisabled(playerId) {
       if (rejectGoldLockedMutation('选手状态失败')) return;
       const player = Hexcore2.state.players.find(item => item.id === playerId);
       if (!player) return;
@@ -5925,10 +6134,11 @@
       snapshot(`切换选手状态前：${player.name}`);
       player.status = player.status === 'disabled' ? 'available' : 'disabled';
       Hexcore2.eventStore.append('选手库', `${player.name} 已${player.status === 'disabled' ? '禁用' : '恢复可选'}`, player.status === 'disabled' ? 'warn' : 'success');
+      await syncLocalSetupStateToRoom('同步选手状态失败');
       renderAndPersist();
     },
 
-    setPlayerAttendance(playerId, status) {
+    async setPlayerAttendance(playerId, status) {
       if (rejectGoldLockedMutation('出勤状态失败')) return;
       const player = Hexcore2.state.players.find(item => item.id === playerId);
       if (!player) return;
@@ -5948,6 +6158,7 @@
       player.drawWeight = defaults[nextStatus] ?? 1;
       if (Hexcore2.normalizeState) Hexcore2.normalizeState(Hexcore2.state);
       Hexcore2.eventStore.append('出勤管理', `${player.name} 出勤状态调整为 ${Hexcore2.selectors.attendanceLabel(nextStatus)}，抽取权重 ${player.drawWeight}`, nextStatus === 'confirmed' ? 'success' : 'warn');
+      await syncLocalSetupStateToRoom('同步出勤状态失败');
       renderAndPersist();
     },
 

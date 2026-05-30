@@ -91,11 +91,15 @@ npm run verify:docker-postgres
 
 ### 提示未检测到 docker
 
-说明 Docker Desktop 未安装，或安装后终端没有刷新环境变量。安装 Docker Desktop 后重启电脑或重新打开终端。
+说明 Docker Desktop 未安装，或安装后系统尚未完成初始化。当前启动脚本会优先尝试系统 PATH 中的 `docker`，也会自动查找 Docker Desktop 默认安装目录里的 `docker.exe`；如果仍提示未检测到，请先安装 Docker Desktop 并打开一次。
 
 ### Docker Desktop 已打开但启动失败
 
-等待 Docker Desktop 完成初始化；如提示 WSL2 未就绪，按 Docker Desktop 的提示完成 WSL2 更新或重启电脑。
+等待 Docker Desktop 完成初始化；如提示 WSL2 未就绪、虚拟化不可用或 `no virtualization available`，需要安装 WSL、启用“适用于 Linux 的 Windows 子系统”和“虚拟机平台”，然后重启 Windows。重启后先打开 Docker Desktop，等状态变为 Running，再启动 HEXCORE2。
+
+### Docker 镜像拉取超时
+
+首次启动需要拉取 PostgreSQL 和 Node 镜像。启动脚本会先使用默认镜像名，失败时自动尝试备用官方镜像源并写入本地标签；这一步只影响镜像下载，不会输出数据库密码或房间码密钥。如果现场网络持续无法访问镜像源，请先让电脑连接可访问外网的网络后重试“启动 HEXCORE2”。
 
 ### 页面能打开但健康检查不是 postgres
 
