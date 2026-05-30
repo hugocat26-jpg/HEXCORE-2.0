@@ -10,7 +10,7 @@ $ProjectRoot = [System.IO.Path]::GetFullPath((Join-Path $ScriptRoot "..\.."))
 
 $docker = Get-Command docker -ErrorAction SilentlyContinue
 if (-not $docker) {
-  throw "未检测到 docker 命令，无法查看日志。"
+  throw "Docker command was not found. Cannot show logs."
 }
 
 Set-Location $ProjectRoot

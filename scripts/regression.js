@@ -1171,7 +1171,7 @@ function testSystemIntegrityCheck() {
   H.actions.setActiveView('settings');
   H.actions.runSystemCheck();
 
-  assert(H.meta.version === '2.0.20' && app.innerHTML.includes('HEXCORE 2.0 v2.0.20 裁判端'), '系统设置页应展示统一项目版本号');
+  assert(H.meta.version === '2.0.21' && app.innerHTML.includes('HEXCORE 2.0 v2.0.21 裁判端'), '系统设置页应展示统一项目版本号');
   assert(H.state.ui.systemCheckResult && !H.state.ui.systemCheckResult.ok, '状态检查应保存可视化结果');
   assert(H.state.ui.systemCheckResult.issues.some(issue => issue.type === '重复归属'), '状态检查应识别重复归属');
   assert(H.state.ui.systemCheckResult.issues.some(issue => issue.type === '跨阵营'), '状态检查应识别跨阵营');
@@ -6795,6 +6795,9 @@ function testMultiplayerClientSubmitsAuthoritativeCommands() {
     && !postgresRestore.includes('--dbname=$env:HEXCORE_POSTGRES_URL')
     && postgresStore.includes('class PostgresTournamentStore extends MemoryTournamentStore')
     && postgresStore.includes('static async create')
+    && postgresStore.includes('connectWithRetry')
+    && postgresStore.includes('HEXCORE_POSTGRES_CONNECT_ATTEMPTS')
+    && postgresStore.includes('EAI_AGAIN')
     && postgresStore.includes('await this.pool.query(schema)')
     && postgresStore.includes('const previous = this.tournaments.get(id)')
     && postgresStore.includes('this.tournaments.set(id, previous)')
@@ -7066,8 +7069,13 @@ function testM13DeploymentDeliveryArtifacts() {
   );
 
   assert(
+    !/[^\x00-\x7F]/.test(startScript + stopScript + logScript + openScript),
+    'M13：Win11 PowerShell 运行脚本应保持 ASCII 文案，避免 Windows PowerShell 5.1 误读 UTF-8 无 BOM 中文字符串'
+  );
+
+  assert(
     installer.includes('AppVersion={#AppVersion}')
-    && installer.includes('#define AppVersion "2.0.20"')
+    && installer.includes('#define AppVersion "2.0.21"')
     && installer.includes('OutputBaseFilename=HEXCORE2_Setup_v{#AppVersion}')
     && installer.includes('DefaultDirName={localappdata}\\HEXCORE2')
     && installer.includes('PrivilegesRequired=lowest')
@@ -7131,7 +7139,7 @@ function testM13DeploymentDeliveryArtifacts() {
   );
 
   assert(
-    winGuide.includes('HEXCORE2_Setup_v2.0.20.exe')
+    winGuide.includes('HEXCORE2_Setup_v2.0.21.exe')
     && winGuide.includes('winget install Docker.DockerDesktop')
     && winGuide.includes('runtime.storage')
     && winGuide.includes('postgres')

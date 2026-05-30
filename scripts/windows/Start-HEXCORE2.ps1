@@ -23,7 +23,12 @@ function Write-Step {
 
 function New-HexcoreSecret {
   $bytes = New-Object byte[] 32
-  [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+  $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+  try {
+    $rng.GetBytes($bytes)
+  } finally {
+    $rng.Dispose()
+  }
   return [Convert]::ToBase64String($bytes).TrimEnd("=").Replace("+", "-").Replace("/", "_")
 }
 
@@ -54,11 +59,11 @@ function Get-HexcoreEnvValue {
 
 function Ensure-HexcoreEnvFile {
   if (Test-Path $EnvPath) {
-    Write-Step "已检测到 .env，沿用现有本机配置。"
+    Write-Step ".env found. Using existing local config."
     return
   }
   if (-not (Test-Path $EnvExamplePath)) {
-    throw "缺少 .env.example，无法生成本机运行配置。请确认安装包完整。"
+    throw ".env.example is missing. Please reinstall HEXCORE2."
   }
 
   $content = Get-Content -LiteralPath $EnvExamplePath -Raw
@@ -70,17 +75,17 @@ function Ensure-HexcoreEnvFile {
   }
 
   Write-Utf8NoBom -Path $EnvPath -Value $content
-  Write-Step "已生成本机 .env。密码只写入本机文件，不会显示在控制台。"
+  Write-Step ".env generated. The database password is stored only in the local file."
 }
 
 function Assert-DockerCommand {
   $docker = Get-Command docker -ErrorAction SilentlyContinue
   if (-not $docker) {
     throw @"
-未检测到 docker 命令。
-请先安装并启动 Docker Desktop，然后重新运行本脚本。
-可选安装方式：winget install Docker.DockerDesktop
-安装后如仍不可用，请重启电脑或重新打开终端。
+Docker command was not found.
+Please install and start Docker Desktop, then run this shortcut again.
+Optional install command: winget install Docker.DockerDesktop
+If Docker was just installed, restart Windows or reopen this terminal.
 "@
   }
 }
@@ -93,7 +98,7 @@ function Assert-DockerDaemon {
 
   $dockerDesktop = Join-Path ${env:ProgramFiles} "Docker\Docker\Docker Desktop.exe"
   if (Test-Path $dockerDesktop) {
-    Write-Step "Docker Desktop 已安装但服务未就绪，正在尝试启动。"
+    Write-Step "Docker Desktop is installed but not ready. Starting it now."
     Start-Process -FilePath $dockerDesktop -WindowStyle Hidden | Out-Null
     for ($index = 0; $index -lt 60; $index += 1) {
       Start-Sleep -Seconds 2
@@ -104,14 +109,15 @@ function Assert-DockerDaemon {
     }
   }
 
-  throw "Docker Desktop 未启动或 WSL2 尚未就绪。请打开 Docker Desktop，等待状态正常后重新运行本脚本。"
+  throw "Docker Desktop is not ready. Open Docker Desktop, wait until it is running, then run this shortcut again."
 }
 
 function Invoke-DockerCompose {
   param([string[]]$Arguments)
   & docker @Arguments
   if ($LASTEXITCODE -ne 0) {
-    throw "docker $($Arguments -join ' ') 执行失败，退出码：$LASTEXITCODE"
+    $argumentText = $Arguments -join " "
+    throw "docker $argumentText failed. Exit code: $LASTEXITCODE"
   }
 }
 
@@ -122,18 +128,18 @@ function Wait-HexcoreHealth {
     try {
       $health = Invoke-RestMethod -UseBasicParsing -Uri $healthUrl -TimeoutSec 3
       if ($health.ok -and $health.runtime.storage -eq "postgres") {
-        Write-Step "服务已就绪，当前存储：postgres。"
+        Write-Step "Service is ready. Storage: postgres."
         return $healthUrl
       }
     } catch {
       Start-Sleep -Seconds 2
     }
   }
-  throw "服务启动后未能在限定时间内确认 PostgreSQL 健康状态：$healthUrl"
+  throw "PostgreSQL health check did not become ready in time: $healthUrl"
 }
 
 Set-Location $ProjectRoot
-Write-Step "工作目录：$ProjectRoot"
+Write-Step "Project root: $ProjectRoot"
 Ensure-HexcoreEnvFile
 Assert-DockerCommand
 Assert-DockerDaemon
@@ -143,14 +149,14 @@ if (-not $SkipBuild) {
   $composeArgs += "--build"
 }
 
-Write-Step "启动 Docker PostgreSQL 版本。"
+Write-Step "Starting Docker PostgreSQL stack."
 Invoke-DockerCompose -Arguments $composeArgs
 $healthUrl = Wait-HexcoreHealth
 
 $appPort = Get-HexcoreEnvValue -Name "HEXCORE_APP_PORT" -DefaultValue "4186"
 $appUrl = "http://127.0.0.1:$appPort/"
-Write-Step "页面地址：$appUrl"
-Write-Step "健康检查：$healthUrl"
+Write-Step "App URL: $appUrl"
+Write-Step "Health URL: $healthUrl"
 
 if (-not $NoOpen) {
   Start-Process $appUrl | Out-Null

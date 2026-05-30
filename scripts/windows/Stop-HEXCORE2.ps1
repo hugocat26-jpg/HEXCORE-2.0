@@ -14,15 +14,15 @@ function Write-Step {
 
 $docker = Get-Command docker -ErrorAction SilentlyContinue
 if (-not $docker) {
-  throw "未检测到 docker 命令，无法停止容器。若 Docker Desktop 已卸载，可忽略此提示。"
+  throw "Docker command was not found. Cannot stop containers. If Docker Desktop was uninstalled, ignore this message."
 }
 
 Set-Location $ProjectRoot
 
 if ($RemoveVolumes) {
-  $confirm = Read-Host "将删除 PostgreSQL 数据卷，赛事数据会丢失。输入 DELETE 确认"
+  $confirm = Read-Host "This will delete the PostgreSQL data volume. Type DELETE to confirm"
   if ($confirm -ne "DELETE") {
-    Write-Step "已取消删除数据卷，仅停止容器。"
+    Write-Step "Data volume deletion cancelled. Containers will be stopped only."
     & docker compose down
     exit $LASTEXITCODE
   }
@@ -30,6 +30,6 @@ if ($RemoveVolumes) {
   exit $LASTEXITCODE
 }
 
-Write-Step "停止 HEXCORE2 容器，保留 PostgreSQL 数据卷。"
+Write-Step "Stopping HEXCORE2 containers and keeping the PostgreSQL data volume."
 & docker compose down
 exit $LASTEXITCODE

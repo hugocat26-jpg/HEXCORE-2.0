@@ -22,6 +22,10 @@ function loadPg() {
   }
 }
 
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 class PostgresTournamentStore extends MemoryTournamentStore {
   constructor(options = {}) {
     super({ dataFile: '', sessionTtlMs: options.sessionTtlMs, maxRooms: options.maxRooms });
@@ -41,8 +45,10 @@ class PostgresTournamentStore extends MemoryTournamentStore {
 
   static async create(options = {}) {
     const store = new PostgresTournamentStore(options);
-    await store.ensureSchema();
-    await store.loadFromPostgres();
+    await store.connectWithRetry(async () => {
+      await store.ensureSchema();
+      await store.loadFromPostgres();
+    });
     return store;
   }
 
@@ -70,6 +76,25 @@ class PostgresTournamentStore extends MemoryTournamentStore {
     const schemaPath = path.join(__dirname, 'postgres', 'schema.sql');
     const schema = fs.readFileSync(schemaPath, 'utf8');
     await this.pool.query(schema);
+  }
+
+  async connectWithRetry(operation) {
+    const attempts = Math.max(1, Number(process.env.HEXCORE_POSTGRES_CONNECT_ATTEMPTS || 30));
+    const delayMs = Math.max(250, Number(process.env.HEXCORE_POSTGRES_CONNECT_RETRY_MS || 1000));
+    let lastError = null;
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
+      try {
+        return await operation();
+      } catch (error) {
+        lastError = error;
+        const code = String(error && error.code ? error.code : '');
+        const retryable = ['ECONNREFUSED', 'EAI_AGAIN', 'ENOTFOUND', 'ETIMEDOUT', '57P03'].includes(code);
+        if (!retryable || attempt === attempts) break;
+        console.warn(`PostgreSQL not ready yet (${code || 'unknown'}), retrying ${attempt}/${attempts}`);
+        await sleep(delayMs);
+      }
+    }
+    throw lastError;
   }
 
   async loadFromPostgres() {

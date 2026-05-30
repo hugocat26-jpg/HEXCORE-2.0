@@ -23,4 +23,4 @@ function Get-HexcoreEnvValue {
 $appPort = Get-HexcoreEnvValue -Name "HEXCORE_APP_PORT" -DefaultValue "4186"
 $url = "http://127.0.0.1:$appPort/"
 Start-Process $url | Out-Null
-Write-Host "[HEXCORE2] 已打开：$url"
+Write-Host "[HEXCORE2] Opened: $url"
