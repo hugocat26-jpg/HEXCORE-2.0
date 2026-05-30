@@ -59,7 +59,21 @@ function Get-HexcoreEnvValue {
 
 function Ensure-HexcoreEnvFile {
   if (Test-Path $EnvPath) {
-    Write-Step ".env found. Using existing local config."
+    $content = Get-Content -LiteralPath $EnvPath -Raw
+    $changed = $false
+    if (-not ($content -match "(?m)^HEXCORE_ROOM_CODE_SECRET=")) {
+      $content = $content.TrimEnd() + "`r`nHEXCORE_ROOM_CODE_SECRET=$(New-HexcoreSecret)`r`n"
+      $changed = $true
+    } elseif ($content -match "(?m)^HEXCORE_ROOM_CODE_SECRET=change-this-local-room-code-secret\s*$") {
+      $content = $content -replace "(?m)^HEXCORE_ROOM_CODE_SECRET=.*$", "HEXCORE_ROOM_CODE_SECRET=$(New-HexcoreSecret)"
+      $changed = $true
+    }
+    if ($changed) {
+      Write-Utf8NoBom -Path $EnvPath -Value $content
+      Write-Step ".env found. Added missing local room-code secret."
+    } else {
+      Write-Step ".env found. Using existing local config."
+    }
     return
   }
   if (-not (Test-Path $EnvExamplePath)) {
@@ -68,14 +82,20 @@ function Ensure-HexcoreEnvFile {
 
   $content = Get-Content -LiteralPath $EnvExamplePath -Raw
   $password = New-HexcoreSecret
+  $roomCodeSecret = New-HexcoreSecret
   if ($content -match "(?m)^HEXCORE_POSTGRES_PASSWORD=") {
     $content = $content -replace "(?m)^HEXCORE_POSTGRES_PASSWORD=.*$", "HEXCORE_POSTGRES_PASSWORD=$password"
   } else {
     $content = $content.TrimEnd() + "`r`nHEXCORE_POSTGRES_PASSWORD=$password`r`n"
   }
+  if ($content -match "(?m)^HEXCORE_ROOM_CODE_SECRET=") {
+    $content = $content -replace "(?m)^HEXCORE_ROOM_CODE_SECRET=.*$", "HEXCORE_ROOM_CODE_SECRET=$roomCodeSecret"
+  } else {
+    $content = $content.TrimEnd() + "`r`nHEXCORE_ROOM_CODE_SECRET=$roomCodeSecret`r`n"
+  }
 
   Write-Utf8NoBom -Path $EnvPath -Value $content
-  Write-Step ".env generated. The database password is stored only in the local file."
+  Write-Step ".env generated. Local secrets are stored only in the local file."
 }
 
 function Assert-DockerCommand {

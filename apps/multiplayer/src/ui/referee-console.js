@@ -1,6 +1,8 @@
 (function initRefereeConsole(global) {
   const Hexcore2 = global.Hexcore2 || (global.Hexcore2 = {});
   const MULTIPLAYER_SESSION_KEY = 'hexcore2_multiplayer_session_v1';
+  const SYSTEM_ADMIN_SESSION_KEY = 'hexcore2_system_admin_session_v1';
+  const MANAGEMENT_ROLES = ['referee', 'tournament_admin', 'super_admin'];
 
   function playerById(playerId) {
     return Hexcore2.state.players.find(player => player.id === playerId);
@@ -30,7 +32,7 @@
   function clientRole() {
     const session = storedMultiplayerSession();
     const role = (queryParam('role') || queryParam('view') || queryParam('mode') || (session && session.role) || '').toLowerCase();
-    return role === 'viewer' ? 'viewer' : (role === 'captain' ? 'captain' : 'referee');
+    return role === 'viewer' ? 'viewer' : (role === 'captain' ? 'captain' : (role === 'admin' || role === 'super_admin' || role === 'tournament_admin' ? 'admin' : 'referee'));
   }
 
   function hasExplicitClientRole() {
@@ -44,6 +46,28 @@
     } catch (error) {
       return null;
     }
+  }
+
+  function storedSystemAdminSession() {
+    try {
+      const raw = global.localStorage && global.localStorage.getItem(SYSTEM_ADMIN_SESSION_KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch (error) {
+      return null;
+    }
+  }
+
+  function validRoleSession(session) {
+    return Boolean(session && ['referee', 'tournament_admin', 'super_admin', 'captain', 'viewer'].includes(String(session.role || '').toLowerCase()));
+  }
+
+  function isManagementRole(role) {
+    return MANAGEMENT_ROLES.includes(String(role || '').toLowerCase());
+  }
+
+  function isAdminClient() {
+    const session = storedMultiplayerSession();
+    return clientRole() === 'admin' || Boolean(session && isManagementRole(session.role) && session.role !== 'referee');
   }
 
   function roomCommandSubmitting(type = '') {
@@ -122,9 +146,9 @@
       ];
     }
     return [
-      { label: '身份', value: '裁判端', detail: '主持与管理' },
+      { label: '身份', value: isAdminClient() ? '管理员端' : '裁判端', detail: isAdminClient() ? '最高权限' : '主持与管理' },
       { label: '视角', value: currentName, detail: '全局裁判视角' },
-      { label: '权限', value: roleStatus, detail: '可代执行、修正和管理赛事', tone: 'active' },
+      { label: '权限', value: roleStatus, detail: isAdminClient() ? '可管理房间并执行全部命令' : '可代执行、修正和管理赛事', tone: 'active' },
       { label: '同步', value: syncInfo.label, detail: syncDetail, tone: syncInfo.status || 'local' },
       { label: '会话', value: syncInfo.remaining, detail: syncInfo.session ? '本机已加入' : '未加入' },
     ];
@@ -146,7 +170,22 @@
   }
 
   function shouldShowJoinGate() {
-    return !hasExplicitClientRole() && !storedMultiplayerSession();
+    const session = storedMultiplayerSession();
+    if (!session) return true;
+    if (hasExplicitClientRole()) return !validRoleSession(session);
+    return false;
+  }
+
+  function pageTitleText() {
+    if (shouldShowJoinGate()) return storedSystemAdminSession() ? 'HEXCORE 2.0 管理员后台' : 'HEXCORE 2.0 多人登录页';
+    if (isViewerClient()) return 'HEXCORE 2.0 观众端';
+    if (isCaptainClient()) return 'HEXCORE 2.0 队长端';
+    if (isAdminClient()) return 'HEXCORE 2.0 管理员端';
+    return 'HEXCORE 2.0 裁判端';
+  }
+
+  function updateDocumentTitle() {
+    if (global.document) global.document.title = pageTitleText();
   }
 
   function isCaptainClient() {
@@ -340,7 +379,9 @@
             <strong>赛事已创建</strong>
             <span>${escapeHtml(created.tournamentId || room.tournamentId || '')}</span>
           </div>
-          <button class="primary-btn" onclick="window.hexcoreUI.enterCreatedRefereeRoom()">用裁判码进入裁判端</button>
+          <div class="room-code-head-actions">
+            <button class="subtle-btn" onclick="window.hexcoreUI.enterCreatedRefereeRoom()">用裁判码进入裁判端</button>
+          </div>
         </div>
         <div class="room-code-warning">房间码明文只显示一次；刷新页面后将无法再次查看，请立即分发给对应身份。</div>
         <div class="room-code-actions">
@@ -459,7 +500,7 @@
         ${roomList ? `<div class="join-api-check ${escapeHtml(level)}"><strong>${escapeHtml(roomList.text || '')}</strong></div>` : ''}
         <div id="join-room-list" class="room-list-table">
           ${rooms.length ? rooms.map(room => `
-            <article class="room-list-row">
+            <button class="room-list-row" type="button" onclick='window.hexcoreUI.openRoomActionDialog(${safeJsonString(room.tournamentId)})'>
               <div>
                 <strong>${escapeHtml(room.name || room.tournamentId)}</strong>
                 <span>${escapeHtml(room.tournamentId)} · ${escapeHtml(modeLabel(room.campMode))} · ${escapeHtml(pairingLabel(room.pairingMode))}</span>
@@ -468,9 +509,177 @@
               <div><span>订阅</span><strong>${escapeHtml(room.subscriberCount || 0)}</strong></div>
               <div><span>更新</span><strong>${escapeHtml(room.updatedAt || room.createdAt || '-')}</strong></div>
               <em class="room-list-status ${escapeHtml(room.status || 'active')}">${escapeHtml(statusLabel(room.status))}</em>
-            </article>
+            </button>
           `).join('') : `<div class="empty-log">${roomList ? '当前服务端没有可显示房间，或列表读取失败。' : '点击“刷新房间列表”查看服务端现有房间和 active 上限。'}</div>`}
         </div>
+      </div>
+    `;
+  }
+
+  function roomActionDialog() {
+    const dialog = Hexcore2.state.ui && Hexcore2.state.ui.roomActionDialog;
+    if (!dialog || !dialog.tournamentId) return '';
+    const roomList = Hexcore2.state.ui && Hexcore2.state.ui.roomList;
+    const rooms = roomList && Array.isArray(roomList.rooms) ? roomList.rooms : [];
+    const room = rooms.find(item => item.tournamentId === dialog.tournamentId);
+    if (!room) return '';
+    const status = room.status === 'archived' ? '已归档' : '活跃';
+    const message = dialog.message && dialog.message.text ? dialog.message : null;
+    return `
+      <div class="modal-backdrop room-action-backdrop" role="dialog" aria-modal="true" aria-label="房间操作">
+        <section class="form-modal room-action-modal">
+          <div class="modal-head">
+            <div>
+              <h2>${escapeHtml(room.name || room.tournamentId)}</h2>
+              <p>${escapeHtml(room.tournamentId)} · ${escapeHtml(status)} · ${escapeHtml(room.teamCount || 0)} 队 · ${escapeHtml(room.storage || 'unknown')}</p>
+            </div>
+            <button class="icon-close" type="button" onclick="window.hexcoreUI.closeRoomActionDialog()" aria-label="关闭">×</button>
+          </div>
+          <div class="room-action-body">
+            <label>
+              <span>加入码</span>
+              <input id="room-action-code" placeholder="输入裁判码或队长码；观众可留空" aria-label="房间加入码" autocomplete="off">
+            </label>
+            <div class="room-action-buttons">
+              <button class="primary-btn" type="button" ${room.status === 'archived' ? 'disabled' : ''} onclick="window.hexcoreUI.joinSelectedRoomWithCode()">用加入码进入</button>
+              <button class="subtle-btn" type="button" ${room.status === 'archived' ? 'disabled' : ''} onclick="window.hexcoreUI.joinSelectedRoomAsViewer()">免码进入观众端</button>
+              <button class="subtle-btn" type="button" ${room.status === 'archived' ? 'disabled' : ''} onclick="window.hexcoreUI.archiveSelectedRoom()">归档/关闭房间</button>
+              <button class="danger-btn" type="button" onclick="window.hexcoreUI.deleteSelectedRoom()">删除房间</button>
+            </div>
+            <div class="modal-derived-note">
+              <strong>操作说明</strong>
+              <span>输入裁判码进入裁判端，输入队长码进入对应队长端；不输入加入码可直接进入观众端。归档和删除需要裁判码，系统管理员请在管理员后台操作。</span>
+            </div>
+            ${message ? `<div class="join-api-check ${escapeHtml(message.level || 'info')}"><strong>${escapeHtml(message.text)}</strong></div>` : ''}
+          </div>
+        </section>
+      </div>
+    `;
+  }
+
+  function adminPanel(apiBase) {
+    const adminStatus = Hexcore2.state.ui && Hexcore2.state.ui.adminStatus;
+    const message = Hexcore2.state.ui && Hexcore2.state.ui.adminMessage;
+    const session = storedSystemAdminSession();
+    const setupRequired = adminStatus ? Boolean(adminStatus.setupRequired) : false;
+    const environmentSecretMode = adminStatus ? Boolean(adminStatus.environmentSecretMode) : false;
+    const dashboard = Hexcore2.state.ui && Hexcore2.state.ui.adminDashboard;
+    const roomList = dashboard && dashboard.roomList;
+    const rooms = roomList && Array.isArray(roomList.rooms) ? roomList.rooms : [];
+    const load = dashboard && dashboard.load && typeof dashboard.load === 'object' ? dashboard.load : {};
+    const config = dashboard && dashboard.config && typeof dashboard.config === 'object'
+      ? dashboard.config
+      : (adminStatus && adminStatus.config ? adminStatus.config : {});
+    const events = dashboard && Array.isArray(dashboard.events) ? dashboard.events : [];
+    const statusText = adminStatus
+      ? (setupRequired ? '未初始化' : (environmentSecretMode ? '环境口令模式' : '已初始化'))
+      : '未检测';
+    const authForm = session ? '' : `
+      <div class="admin-auth-grid">
+        <label>
+          <span>显示名称</span>
+          <input id="admin-display-name" value="系统管理员" aria-label="管理员显示名称">
+        </label>
+        <label>
+          <span>${setupRequired ? '设置密码' : '管理员密码'}</span>
+          <input id="admin-password" type="password" autocomplete="current-password" aria-label="管理员密码">
+        </label>
+        ${setupRequired && !environmentSecretMode ? `
+          <label>
+            <span>确认密码</span>
+            <input id="admin-password-confirm" type="password" autocomplete="new-password" aria-label="确认管理员密码">
+          </label>
+        ` : ''}
+        <div class="admin-auth-actions">
+          <button class="subtle-btn" onclick="window.hexcoreUI.loadAdminStatus()">检测管理员状态</button>
+          ${setupRequired && !environmentSecretMode
+            ? '<button class="primary-btn" onclick="window.hexcoreUI.setupSystemAdmin()">首次设置并登录</button>'
+            : '<button class="primary-btn" onclick="window.hexcoreUI.loginSystemAdmin()">登录管理员后台</button>'}
+        </div>
+      </div>
+    `;
+    const dashboardPanel = !session ? '' : `
+      <div class="admin-dashboard">
+        <div class="admin-dashboard-head">
+          <div>
+            <strong>管理员后台</strong>
+            <span>${escapeHtml(session.displayName || '系统管理员')} · ${escapeHtml(session.apiBase || apiBase || '')}</span>
+          </div>
+          <div class="join-access-actions">
+            <button class="subtle-btn" onclick="window.hexcoreUI.loadAdminDashboard()">刷新后台</button>
+            <button class="subtle-btn" onclick="window.hexcoreUI.logoutSystemAdmin()">退出管理员</button>
+          </div>
+        </div>
+        <div class="admin-load-grid" aria-label="当前系统负荷">
+          <div><span>运行时长</span><strong>${escapeHtml(load.uptimeSeconds || 0)} 秒</strong></div>
+          <div><span>存储</span><strong>${escapeHtml(load.storage || 'unknown')}</strong></div>
+          <div><span>房间</span><strong>${escapeHtml(load.activeRoomCount || 0)} / ${escapeHtml(load.maxRooms || 0)}</strong></div>
+          <div><span>赛事</span><strong>${escapeHtml(load.tournamentCount || 0)}</strong></div>
+          <div><span>赛事会话</span><strong>${escapeHtml(load.sessionCount || 0)}</strong></div>
+          <div><span>管理员会话</span><strong>${escapeHtml(load.systemAdminSessionCount || 0)}</strong></div>
+          <div><span>SSE 订阅</span><strong>${escapeHtml(load.subscriberCount || 0)}</strong></div>
+          <div><span>内存 RSS</span><strong>${escapeHtml(load.process && load.process.rssMb || 0)} MB</strong></div>
+          <div><span>堆内存</span><strong>${escapeHtml(load.process && load.process.heapUsedMb || 0)} / ${escapeHtml(load.process && load.process.heapTotalMb || 0)} MB</strong></div>
+          <div><span>CPU</span><strong>${escapeHtml(load.cpu && load.cpu.count || 0)} 核</strong></div>
+          <div><span>Load</span><strong>${escapeHtml(load.cpu && Array.isArray(load.cpu.loadAverage) ? load.cpu.loadAverage.join(' / ') : '-')}</strong></div>
+          <div><span>PostgreSQL</span><strong>${escapeHtml(load.postgresConnected ? '已连接' : '未连接/未启用')}</strong></div>
+        </div>
+        <div class="admin-config-grid">
+          <label><span>最大 active 房间</span><input id="admin-config-max-rooms" type="number" min="1" max="500" value="${escapeHtml(config.maxRooms || 20)}"></label>
+          <label><span>会话 TTL 小时</span><input id="admin-config-session-ttl" type="number" min="1" max="168" value="${escapeHtml(config.sessionTtlHours || 24)}"></label>
+          <label><span>SSE 凭据秒数</span><input id="admin-config-stream-ttl" type="number" min="30" max="3600" value="${escapeHtml(config.streamTokenTtlSeconds || 120)}"></label>
+          <button class="primary-btn" onclick="window.hexcoreUI.saveAdminConfig()">保存系统配置</button>
+        </div>
+        <div class="room-list-table admin-room-table" aria-label="管理员赛事列表">
+          ${rooms.length ? rooms.map(room => `
+            <div class="room-list-row admin-room-row">
+              <div>
+                <strong>${escapeHtml(room.name || room.tournamentId)}</strong>
+                <span>${escapeHtml(room.tournamentId)} · ${escapeHtml(room.campMode === 'no_camp' ? '无阵营' : '双阵营')} · ${escapeHtml(room.pairingMode || '-')}</span>
+              </div>
+              <div><span>状态</span><strong>${escapeHtml(room.status === 'archived' ? '已归档' : '活跃')}</strong></div>
+              <div><span>队伍</span><strong>${escapeHtml(room.teamCount || 0)}</strong></div>
+              <div><span>订阅</span><strong>${escapeHtml(room.subscriberCount || 0)}</strong></div>
+              <div class="admin-room-actions">
+                <button class="subtle-btn" ${room.status === 'archived' ? 'disabled' : ''} onclick='window.hexcoreUI.adminEnterTournament(${safeJsonString(room.tournamentId)})'>进入管理</button>
+                <button class="subtle-btn" onclick='window.hexcoreUI.adminCopyRoomCodes(${safeJsonString(room.tournamentId)})'>复制房间码</button>
+                <button class="subtle-btn" onclick='window.hexcoreUI.adminExportRoom(${safeJsonString(room.tournamentId)})'>导出</button>
+                <button class="subtle-btn" ${room.status === 'archived' ? 'disabled' : ''} onclick='window.hexcoreUI.adminArchiveRoom(${safeJsonString(room.tournamentId)})'>归档</button>
+                <button class="danger-btn" onclick='window.hexcoreUI.adminDeleteRoom(${safeJsonString(room.tournamentId)})'>删除</button>
+              </div>
+              ${room.codes && room.codes.available ? `
+                <details class="admin-code-vault">
+                  <summary>查看房间码</summary>
+                  <div><span>裁判码</span><code>${escapeHtml(room.codes.refereeCode || '')}</code></div>
+                  <div><span>观众码</span><code>${escapeHtml(room.codes.viewerCode || '')}</code></div>
+                  ${(Array.isArray(room.codes.captainCodes) ? room.codes.captainCodes : []).map(item => `
+                    <div><span>${escapeHtml(item.teamName || item.teamId || '队伍')}</span><code>${escapeHtml(item.code || '')}</code></div>
+                  `).join('')}
+                </details>
+              ` : '<div class="admin-code-vault unavailable">该房间创建于旧版本，服务端无法恢复房间码明文。</div>'}
+            </div>
+          `).join('') : '<div class="empty-log">暂无赛事。可在下方创建赛事表单中创建新房间。</div>'}
+        </div>
+        <div class="admin-events-panel">
+          <strong>最近安全事件</strong>
+          ${events.length ? events.slice(0, 8).map(event => `
+            <span>${escapeHtml(event.createdAt || '')} · ${escapeHtml(event.type || '')}${event.tournamentId ? ` · ${escapeHtml(event.tournamentId)}` : ''}</span>
+          `).join('') : '<span>暂无安全事件。</span>'}
+        </div>
+      </div>
+    `;
+    return `
+      <div class="join-access-panel admin-entry-panel" aria-label="系统管理员后台">
+        <div class="join-access-head">
+          <div>
+            <strong>系统管理员后台</strong>
+            <span>管理所有房间、赛事和运行限制；不是某个赛事里的管理员码。</span>
+          </div>
+          <em class="room-list-status ${session ? 'active' : 'archived'}">${escapeHtml(session ? '已登录' : statusText)}</em>
+        </div>
+        ${message ? `<div class="join-api-check ${escapeHtml(message.level || 'info')}"><strong>${escapeHtml(message.text || '')}</strong></div>` : ''}
+        ${authForm}
+        ${dashboardPanel}
       </div>
     `;
   }
@@ -504,7 +713,7 @@
               </div>
             </div>
             <div class="join-gate-card create-room-panel">
-              <h2>裁判创建赛事</h2>
+              <h2>创建赛事</h2>
               <div class="settings-form">
                 <label>
                   <span>赛事名称</span>
@@ -531,13 +740,15 @@
                     <input id="create-players-per-team" type="number" min="2" max="8" value="5" aria-label="每队人数">
                   </label>
                 </div>
-                <div class="form-hint">创建前会先校验服务端是否已有同名赛事，避免旧房间码把人带进错房间。</div>
+                <div class="form-hint">任何人都可创建赛事，创建成功后会显示该赛事裁判码、队长码和观众码。创建前会校验同名赛事，避免旧房间码把人带进错房间。</div>
                 <button class="primary-btn" onclick="window.hexcoreUI.createTournamentRoom()">创建赛事</button>
               </div>
             </div>
           </div>
+          ${adminPanel(apiBase)}
           ${joinGateAccessPanel(apiBase)}
           ${roomListPanel()}
+          ${roomActionDialog()}
           ${createdRoomPanel()}
           <div class="empty-log">已加入的会话会保存在本机；需要切换身份时可清理浏览器本地数据后重新加入。</div>
           ${joinGateMessagePanel()}
@@ -2041,7 +2252,7 @@
       : (isViewerClient() ? '只读模式' : '最高权限');
     return `
       <header class="topbar">
-        <div class="mode">${isReadonlyClient() ? '观众端' : (isCaptainClient() ? '队长端' : '裁判代执行')}</div>
+        <div class="mode">${isReadonlyClient() ? '观众端' : (isCaptainClient() ? '队长端' : (isAdminClient() ? '管理员端' : '裁判代执行'))}</div>
         ${showRoomReturn ? '<button class="ghost-btn multiplayer-return-btn" onclick="window.hexcoreUI.leaveMultiplayerRoom()">返回多人房间</button>' : ''}
         ${showRoomReturn ? `
           ${topbarRoleStrip(captain, roleStatus, syncInfo)}
@@ -4180,7 +4391,7 @@
 
   function roomLifecyclePanel() {
     const session = storedMultiplayerSession();
-    if (!session || session.role !== 'referee') return '';
+    if (!session || !isManagementRole(session.role)) return '';
     const archived = roomIsArchived();
     return `
       <section class="data-panel room-lifecycle-panel">
@@ -4356,6 +4567,7 @@
         };
       }) : [];
       applyTheme();
+      updateDocumentTitle();
       const appRoot = document.getElementById('app');
       if (appRoot && appRoot.classList) appRoot.classList.toggle('join-gate-root', shouldShowJoinGate());
       appRoot.innerHTML = app();

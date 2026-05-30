@@ -46,7 +46,14 @@ class SqliteTournamentStore extends MemoryTournamentStore {
     this.tournaments = mapFromEntries(readJsonValue(select, 'tournaments'));
     this.roomAccess = mapFromEntries(readJsonValue(select, 'roomAccess'));
     this.sessions = mapFromEntries(readJsonValue(select, 'sessions'));
+    const systemConfig = readJsonObject(select, 'systemConfig');
+    if (systemConfig) this.systemConfig = systemConfig;
+    this.systemAdmin = readJsonObject(select, 'systemAdmin');
+    this.systemAdminSessions = mapFromEntries(readJsonValue(select, 'systemAdminSessions'));
+    const securityEvents = readJsonValue(select, 'securityEvents');
+    this.securityEvents = Array.isArray(securityEvents) ? securityEvents : [];
     this.initialRoomAccess = new Map();
+    this.applySystemConfigRuntime();
   }
 
   persistToDisk() {
@@ -62,6 +69,10 @@ class SqliteTournamentStore extends MemoryTournamentStore {
       upsert.run('tournaments', JSON.stringify(entriesFromMap(this.tournaments)), now);
       upsert.run('roomAccess', JSON.stringify(entriesFromMap(this.roomAccess)), now);
       upsert.run('sessions', JSON.stringify(entriesFromMap(this.sessions)), now);
+      upsert.run('systemConfig', JSON.stringify(this.systemConfig || {}), now);
+      upsert.run('systemAdmin', JSON.stringify(this.systemAdmin || null), now);
+      upsert.run('systemAdminSessions', JSON.stringify(entriesFromMap(this.systemAdminSessions)), now);
+      upsert.run('securityEvents', JSON.stringify(this.securityEvents || []), now);
       this.db.exec('COMMIT');
     } catch (error) {
       this.db.exec('ROLLBACK');
@@ -74,6 +85,13 @@ function readJsonValue(statement, key) {
   const row = statement.get(key);
   if (!row || !row.value) return [];
   return JSON.parse(row.value);
+}
+
+function readJsonObject(statement, key) {
+  const row = statement.get(key);
+  if (!row || !row.value) return null;
+  const parsed = JSON.parse(row.value);
+  return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
 }
 
 module.exports = {

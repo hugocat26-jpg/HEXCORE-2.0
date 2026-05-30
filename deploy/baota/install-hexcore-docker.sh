@@ -40,13 +40,19 @@ ensure_env_file() {
   fi
   [[ -f .env.example ]] || fail "缺少 .env.example。"
   cp .env.example .env
-  local password
+  local password room_code_secret
   password="$(generate_secret)"
+  room_code_secret="$(generate_secret)"
   sed -i "s/^HEXCORE_POSTGRES_PASSWORD=.*/HEXCORE_POSTGRES_PASSWORD=${password}/" .env
+  if grep -q '^HEXCORE_ROOM_CODE_SECRET=' .env; then
+    sed -i "s/^HEXCORE_ROOM_CODE_SECRET=.*/HEXCORE_ROOM_CODE_SECRET=${room_code_secret}/" .env
+  else
+    printf '\nHEXCORE_ROOM_CODE_SECRET=%s\n' "$room_code_secret" >> .env
+  fi
   sed -i "s/^HEXCORE_APP_PORT=.*/HEXCORE_APP_PORT=${HEXCORE_APP_PORT}/" .env
   sed -i "s/^HEXCORE_API_PORT=.*/HEXCORE_API_PORT=${HEXCORE_API_PORT}/" .env
   chmod 600 .env
-  log "已生成 .env，数据库密码只写入服务器本机文件。"
+  log "已生成 .env，本机密钥只写入服务器本机文件。"
 }
 
 check_ports() {

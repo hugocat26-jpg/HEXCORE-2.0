@@ -1,7 +1,7 @@
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
-const { MemoryTournamentStore, hashSecret, roomAccessSummary, roomLifecycleSummary } = require('./memory-store');
+const { MemoryTournamentStore, hashSecret, roomAccessSummary, roomLifecycleSummary, normalizeSystemConfig } = require('./memory-store');
 const { ROLES } = require('../../packages/shared');
 
 function clone(value) {
@@ -98,16 +98,25 @@ class PostgresTournamentStore extends MemoryTournamentStore {
   }
 
   async loadFromPostgres() {
-    const [tournaments, roomAccess, sessions] = await Promise.all([
+    const [tournaments, roomAccess, sessions, systemConfig, systemAdmin, systemAdminSessions, securityEvents] = await Promise.all([
       this.pool.query('SELECT tournament_id, state_json FROM hexcore_tournaments'),
       this.pool.query('SELECT tournament_id, access_json FROM hexcore_room_access'),
       this.pool.query('SELECT session_token_hash, session_json FROM hexcore_sessions'),
+      this.pool.query("SELECT config_json FROM hexcore_system_config WHERE config_key = 'runtime'"),
+      this.pool.query("SELECT admin_json FROM hexcore_system_admin WHERE admin_id = 'primary'"),
+      this.pool.query('SELECT session_token_hash, session_json FROM hexcore_system_admin_sessions'),
+      this.pool.query('SELECT event_json FROM hexcore_security_events ORDER BY created_at ASC LIMIT 500'),
     ]);
     this.tournaments = new Map(tournaments.rows.map(row => [String(row.tournament_id), clone(row.state_json)]));
     this.roomAccess = new Map(roomAccess.rows.map(row => [String(row.tournament_id), clone(row.access_json)]));
     this.sessions = new Map(sessions.rows.map(row => [String(row.session_token_hash), clone(row.session_json)]));
+    this.systemConfig = normalizeSystemConfig(systemConfig.rows[0] && systemConfig.rows[0].config_json, this.systemConfig);
+    this.systemAdmin = systemAdmin.rows[0] && systemAdmin.rows[0].admin_json ? clone(systemAdmin.rows[0].admin_json) : null;
+    this.systemAdminSessions = new Map(systemAdminSessions.rows.map(row => [String(row.session_token_hash), clone(row.session_json)]));
+    this.securityEvents = securityEvents.rows.map(row => clone(row.event_json));
     this.initialRoomAccess = new Map();
     this.subscribers = new Map(Array.from(this.tournaments.keys()).map(id => [id, new Set()]));
+    this.applySystemConfigRuntime();
     for (const [id, state] of this.tournaments.entries()) {
       this.eventWatermarks.set(id, latestEventSeq(state));
     }
@@ -198,12 +207,64 @@ class PostgresTournamentStore extends MemoryTournamentStore {
           ]
         );
       }
+      await this.persistSystemRows(client);
       await client.query('COMMIT');
     } catch (error) {
       await client.query('ROLLBACK');
       throw error;
     } finally {
       client.release();
+    }
+  }
+
+  async persistSystemRows(client) {
+    await client.query(
+      `INSERT INTO hexcore_system_config (config_key, config_json, updated_at)
+       VALUES ('runtime', $1::jsonb, now())
+       ON CONFLICT (config_key) DO UPDATE
+       SET config_json = excluded.config_json,
+           updated_at = excluded.updated_at`,
+      [JSON.stringify(this.systemConfig || {})]
+    );
+
+    if (this.systemAdmin) {
+      await client.query(
+        `INSERT INTO hexcore_system_admin (admin_id, admin_json, updated_at)
+         VALUES ('primary', $1::jsonb, now())
+         ON CONFLICT (admin_id) DO UPDATE
+         SET admin_json = excluded.admin_json,
+             updated_at = excluded.updated_at`,
+        [JSON.stringify(this.systemAdmin)]
+      );
+    } else {
+      await client.query("DELETE FROM hexcore_system_admin WHERE admin_id = 'primary'");
+    }
+
+    await client.query('DELETE FROM hexcore_system_admin_sessions');
+    for (const [hash, session] of this.systemAdminSessions.entries()) {
+      await client.query(
+        `INSERT INTO hexcore_system_admin_sessions (session_token_hash, session_json, expires_at, updated_at)
+         VALUES ($1, $2::jsonb, $3, now())`,
+        [hash, JSON.stringify(session), session.expiresAt]
+      );
+    }
+
+    await client.query('DELETE FROM hexcore_security_events');
+    for (const event of this.securityEvents.slice(-500)) {
+      await client.query(
+        `INSERT INTO hexcore_security_events (event_id, event_type, actor_id, role, tournament_id, event_json, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7)
+         ON CONFLICT (event_id) DO NOTHING`,
+        [
+          event.eventId,
+          event.type,
+          event.actorId || '',
+          event.role || '',
+          event.tournamentId || '',
+          JSON.stringify(event),
+          event.createdAt || new Date().toISOString(),
+        ]
+      );
     }
   }
 
@@ -344,6 +405,61 @@ class PostgresTournamentStore extends MemoryTournamentStore {
       deletedAt: now,
       deletedBy: session.actorId || '',
     };
+  }
+
+  async setupSystemAdmin(input = {}) {
+    const session = super.setupSystemAdmin(input);
+    await this.persistToPostgres();
+    return session;
+  }
+
+  async loginSystemAdmin(input = {}) {
+    try {
+      const session = super.loginSystemAdmin(input);
+      await this.persistToPostgres();
+      return session;
+    } catch (error) {
+      await this.persistToPostgres();
+      throw error;
+    }
+  }
+
+  async logoutSystemAdmin(sessionToken) {
+    const result = super.logoutSystemAdmin(sessionToken);
+    if (result) await this.persistToPostgres();
+    return result;
+  }
+
+  async updateSystemConfig(sessionToken, input = {}) {
+    const config = super.updateSystemConfig(sessionToken, input);
+    await this.persistToPostgres();
+    return config;
+  }
+
+  async archiveTournamentAsAdmin(id, sessionToken) {
+    const room = super.archiveTournamentAsAdmin(id, sessionToken);
+    if (room) await this.persistToPostgres();
+    return room;
+  }
+
+  async deleteTournamentAsAdmin(id, sessionToken) {
+    const room = super.deleteTournamentAsAdmin(id, sessionToken);
+    if (!room) return null;
+    await this.pool.query('DELETE FROM hexcore_tournaments WHERE tournament_id = $1', [id]);
+    await this.persistToPostgres();
+    return room;
+  }
+
+  async getTournamentBackupAsAdmin(id, sessionToken) {
+    const backup = super.getTournamentBackupAsAdmin(id, sessionToken);
+    await this.persistToPostgres();
+    return backup;
+  }
+
+  async createTournamentSessionAsAdmin(id, sessionToken) {
+    const session = super.createTournamentSessionAsAdmin(id, sessionToken);
+    if (session) await this.persistToPostgres();
+    return session;
   }
 
   async getAuditLog(id, sessionToken) {

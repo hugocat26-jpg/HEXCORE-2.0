@@ -57,6 +57,7 @@ CREATE TABLE IF NOT EXISTS hexcore_room_access (
   CONSTRAINT hexcore_room_access_no_plain_codes
     CHECK (
       access_json::TEXT NOT LIKE '%"refereeCode":%'
+      AND access_json::TEXT NOT LIKE '%"superAdminCode":%'
       AND access_json::TEXT NOT LIKE '%"viewerCode":%'
       AND access_json::TEXT NOT LIKE '%"code":%'
     )
@@ -118,6 +119,7 @@ CREATE TABLE IF NOT EXISTS hexcore_audit_log (
       summary_json::TEXT NOT LIKE '%sessionToken%'
       AND summary_json::TEXT NOT LIKE '%streamToken%'
       AND summary_json::TEXT NOT LIKE '%refereeCode%'
+      AND summary_json::TEXT NOT LIKE '%superAdminCode%'
       AND summary_json::TEXT NOT LIKE '%viewerCode%'
     )
 );
@@ -134,6 +136,88 @@ CREATE TABLE IF NOT EXISTS hexcore_checkpoints (
 
 CREATE INDEX IF NOT EXISTS hexcore_checkpoints_latest_idx
   ON hexcore_checkpoints(tournament_id, state_version DESC);
+
+CREATE TABLE IF NOT EXISTS hexcore_system_config (
+  config_key TEXT PRIMARY KEY,
+  config_json JSONB NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT hexcore_system_config_no_secret
+    CHECK (
+      config_json::TEXT NOT LIKE '%"password"%'
+      AND config_json::TEXT NOT LIKE '%"sessionToken"%'
+      AND config_json::TEXT NOT LIKE '%"streamToken"%'
+      AND config_json::TEXT NOT LIKE '%"refereeCode"%'
+      AND config_json::TEXT NOT LIKE '%"viewerCode"%'
+      AND config_json::TEXT NOT LIKE '%"superAdminCode"%'
+    )
+);
+
+ALTER TABLE hexcore_system_config
+  DROP CONSTRAINT IF EXISTS hexcore_system_config_no_secret;
+ALTER TABLE hexcore_system_config
+  ADD CONSTRAINT hexcore_system_config_no_secret
+  CHECK (
+    config_json::TEXT NOT LIKE '%"password"%'
+    AND config_json::TEXT NOT LIKE '%"sessionToken"%'
+    AND config_json::TEXT NOT LIKE '%"streamToken"%'
+    AND config_json::TEXT NOT LIKE '%"refereeCode"%'
+    AND config_json::TEXT NOT LIKE '%"viewerCode"%'
+    AND config_json::TEXT NOT LIKE '%"superAdminCode"%'
+  );
+
+CREATE TABLE IF NOT EXISTS hexcore_system_admin (
+  admin_id TEXT PRIMARY KEY,
+  admin_json JSONB NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT hexcore_system_admin_no_plain_secret
+    CHECK (
+      admin_json::TEXT NOT LIKE '%"password"%'
+      AND admin_json::TEXT NOT LIKE '%sessionToken%'
+      AND admin_json::TEXT NOT LIKE '%streamToken%'
+      AND admin_json::TEXT NOT LIKE '%refereeCode%'
+      AND admin_json::TEXT NOT LIKE '%viewerCode%'
+      AND admin_json::TEXT NOT LIKE '%superAdminCode%'
+    )
+);
+
+CREATE TABLE IF NOT EXISTS hexcore_system_admin_sessions (
+  session_token_hash TEXT PRIMARY KEY,
+  session_json JSONB NOT NULL,
+  expires_at TIMESTAMPTZ NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT hexcore_system_admin_sessions_no_plain_token
+    CHECK (
+      session_json::TEXT NOT LIKE '%"sessionToken"%'
+      AND session_json::TEXT NOT LIKE '%"streamToken"%'
+      AND session_json::TEXT NOT LIKE '%"password"%'
+    )
+);
+
+CREATE INDEX IF NOT EXISTS hexcore_system_admin_sessions_expiry_idx
+  ON hexcore_system_admin_sessions(expires_at);
+
+CREATE TABLE IF NOT EXISTS hexcore_security_events (
+  event_id TEXT PRIMARY KEY,
+  event_type TEXT NOT NULL,
+  actor_id TEXT NOT NULL DEFAULT '',
+  role TEXT NOT NULL DEFAULT '',
+  tournament_id TEXT NOT NULL DEFAULT '',
+  event_json JSONB NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT hexcore_security_events_no_secret
+    CHECK (
+      event_json::TEXT NOT LIKE '%password%'
+      AND event_json::TEXT NOT LIKE '%sessionToken%'
+      AND event_json::TEXT NOT LIKE '%streamToken%'
+      AND event_json::TEXT NOT LIKE '%refereeCode%'
+      AND event_json::TEXT NOT LIKE '%viewerCode%'
+      AND event_json::TEXT NOT LIKE '%superAdminCode%'
+      AND event_json::TEXT NOT LIKE '%codeHash%'
+    )
+);
+
+CREATE INDEX IF NOT EXISTS hexcore_security_events_created_idx
+  ON hexcore_security_events(created_at DESC);
 
 INSERT INTO hexcore_schema_migrations (version, checksum)
 VALUES ('001_initial_postgres_schema', 'manual-schema-v1')

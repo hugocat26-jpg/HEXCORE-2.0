@@ -3,7 +3,9 @@
   const HEXCORE_CANDIDATE_COUNT = 5;
   const HEXCORE_PICK_LIMIT = 1;
   const MULTIPLAYER_SESSION_KEY = 'hexcore2_multiplayer_session_v1';
+  const SYSTEM_ADMIN_SESSION_KEY = 'hexcore2_system_admin_session_v1';
   const MULTIPLAYER_API_BASE_KEY = 'hexcore2_multiplayer_api_base_v1';
+  const MANAGEMENT_ROLES = ['referee', 'tournament_admin', 'super_admin'];
   let hexDetailHideTimer = null;
   let roomEventStreamConnecting = false;
   Hexcore2.volatileCreatedRoom = null;
@@ -1134,6 +1136,78 @@
     } catch (error) {}
   }
 
+  function systemAdminSession() {
+    try {
+      const raw = global.localStorage && global.localStorage.getItem(SYSTEM_ADMIN_SESSION_KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch (error) {
+      return null;
+    }
+  }
+
+  function saveSystemAdminSession(session, apiBase) {
+    const next = {
+      ...session,
+      apiBase,
+      savedAt: new Date().toISOString(),
+    };
+    try {
+      if (global.localStorage) global.localStorage.setItem(SYSTEM_ADMIN_SESSION_KEY, JSON.stringify(next));
+    } catch (error) {}
+    return next;
+  }
+
+  function clearSystemAdminSession() {
+    try {
+      if (global.localStorage) global.localStorage.removeItem(SYSTEM_ADMIN_SESSION_KEY);
+    } catch (error) {}
+    if (Hexcore2.state && Hexcore2.state.ui) {
+      delete Hexcore2.state.ui.adminDashboard;
+      delete Hexcore2.state.ui.adminMessage;
+    }
+  }
+
+  function systemAdminHeaders(session = systemAdminSession()) {
+    return session && session.sessionToken
+      ? { 'Authorization': `Bearer ${session.sessionToken}`, 'Accept': 'application/json' }
+      : { 'Accept': 'application/json' };
+  }
+
+  async function adminApiRequest(apiBase, pathname, options = {}) {
+    const base = String(apiBase || '').trim().replace(/\/+$/, '');
+    if (!base) throw new Error('请先填写服务地址');
+    const headers = {
+      ...systemAdminHeaders(options.session),
+      ...(options.body ? { 'Content-Type': 'application/json' } : {}),
+    };
+    const response = await fetch(`${base}${pathname}`, {
+      method: options.method || 'GET',
+      headers,
+      body: options.body ? JSON.stringify(options.body) : undefined,
+    });
+    let payload = {};
+    try {
+      payload = await response.json();
+    } catch (error) {
+      throw new Error('服务返回格式异常，请确认填写的是多人端 API 地址');
+    }
+    if (!response.ok || !payload || payload.ok === false) {
+      const message = payload && payload.error ? payload.error : '管理员接口请求失败';
+      const nextError = new Error(message);
+      nextError.status = response.status;
+      throw nextError;
+    }
+    return payload;
+  }
+
+  function normalizeAdminDashboardPayload(payload) {
+    const roomList = normalizeRoomListPayload(payload);
+    return {
+      ...roomList,
+      text: '管理员房间列表已更新',
+    };
+  }
+
   function persistJoinedSession(apiBase, tournamentId, payload) {
     const session = {
       ...payload.session,
@@ -1146,11 +1220,17 @@
     return session;
   }
 
+  function isManagementRole(role) {
+    return MANAGEMENT_ROLES.includes(String(role || '').toLowerCase());
+  }
+
   function redirectForSession(session) {
-    const role = session.role === 'viewer' ? 'viewer' : (session.role === 'captain' ? 'captain' : 'referee');
+    const role = session.role === 'viewer'
+      ? 'viewer'
+      : (session.role === 'captain' ? 'captain' : (isManagementRole(session.role) && session.role !== 'referee' ? 'admin' : 'referee'));
     const query = role === 'captain'
       ? `role=captain&teamId=${encodeURIComponent(session.teamId || '')}`
-      : (role === 'viewer' ? 'role=viewer' : 'role=referee');
+      : (role === 'viewer' ? 'role=viewer' : (role === 'admin' ? 'role=admin' : 'role=referee'));
     global.location.href = `${global.location.pathname || '/'}?${query}`;
   }
 
@@ -1165,8 +1245,14 @@
     if (Hexcore2.state && Hexcore2.state.ui) {
       delete Hexcore2.state.ui.roomSyncStatus;
       delete Hexcore2.state.ui.roomCommandSubmitting;
+      delete Hexcore2.state.ui.roomActionDialog;
+      delete Hexcore2.state.ui.roomWelcomeDismissed;
     }
-    if (Hexcore2.state && Hexcore2.state.multiplayer) delete Hexcore2.state.multiplayer.stateVersion;
+    if (Hexcore2.state && Hexcore2.state.multiplayer) {
+      delete Hexcore2.state.multiplayer.stateVersion;
+      delete Hexcore2.state.multiplayer.role;
+      delete Hexcore2.state.multiplayer.teamId;
+    }
   }
 
   function returnToMultiplayerGate() {
@@ -1179,13 +1265,17 @@
     if (global.location) global.location.href = path;
   }
 
-  async function joinRoomWithCode(apiBase, tournamentId, code) {
+  async function joinRoomWithCode(apiBase, tournamentId, code, options = {}) {
     let response;
     try {
       response = await fetch(`${apiBase}/api/tournaments/${encodeURIComponent(tournamentId)}/join`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code }),
+        body: JSON.stringify({
+          code,
+          role: options.role || '',
+          displayName: options.displayName || '',
+        }),
       });
     } catch (error) {
       const networkError = new Error('服务地址无法连接，请确认 API 地址是裁判电脑 IP 且服务已启动');
@@ -1414,6 +1504,48 @@
     return payload;
   }
 
+  function selectedRoomFromList() {
+    const dialog = Hexcore2.state.ui && Hexcore2.state.ui.roomActionDialog;
+    const tournamentId = String(dialog && dialog.tournamentId || '').trim();
+    const rooms = Hexcore2.state.ui && Hexcore2.state.ui.roomList && Array.isArray(Hexcore2.state.ui.roomList.rooms)
+      ? Hexcore2.state.ui.roomList.rooms
+      : [];
+    return rooms.find(room => room.tournamentId === tournamentId) || null;
+  }
+
+  function roomActionApiBase() {
+    const input = document.getElementById('join-api-base');
+    return String(input && input.value ? input.value : recentMultiplayerApiBase()).replace(/\/+$/, '');
+  }
+
+  function selectedRoomCode() {
+    const input = document.getElementById('room-action-code');
+    return String(input && input.value ? input.value : '').trim();
+  }
+
+  function setRoomActionMessage(level, text) {
+    Hexcore2.state.ui = Hexcore2.state.ui || {};
+    Hexcore2.state.ui.roomActionDialog = Hexcore2.state.ui.roomActionDialog || {};
+    Hexcore2.state.ui.roomActionDialog.message = { level, text };
+  }
+
+  async function refereeSessionForRoom(apiBase, tournamentId, code) {
+    const current = multiplayerSession();
+    if (!code && current && isManagementRole(current.role) && current.tournamentId === tournamentId && current.apiBase === apiBase) {
+      return current;
+    }
+    if (!code) throw new Error('归档或删除房间需要输入裁判码；系统管理员请在管理员后台操作。');
+    const payload = await joinRoomWithCode(apiBase, tournamentId, code);
+    if (!payload.session || !isManagementRole(payload.session.role)) {
+      throw new Error('该加入码不是裁判码，不能在多人入口归档或删除房间。');
+    }
+    return {
+      ...payload.session,
+      apiBase,
+      tournamentId,
+    };
+  }
+
   function normalizeRoomListPayload(payload) {
     const runtime = payload && payload.runtime && typeof payload.runtime === 'object' ? payload.runtime : {};
     const rooms = Array.isArray(payload && payload.rooms) ? payload.rooms : [];
@@ -1442,6 +1574,16 @@
         pairingMode: String(room.pairingMode || '').slice(0, 40),
         storage: String(room.storage || runtime.storage || 'unknown').slice(0, 40),
         subscriberCount: Math.max(0, Number(room.subscriberCount) || 0),
+        codes: room.codes && typeof room.codes === 'object' ? {
+          available: Boolean(room.codes.available),
+          refereeCode: String(room.codes.refereeCode || ''),
+          viewerCode: String(room.codes.viewerCode || ''),
+          captainCodes: (Array.isArray(room.codes.captainCodes) ? room.codes.captainCodes : []).map((item, index) => ({
+            teamId: String(item.teamId || `team-${index + 1}`).slice(0, 80),
+            teamName: String(item.teamName || `队伍${index + 1}`).slice(0, 40),
+            code: String(item.code || ''),
+          })).slice(0, 20),
+        } : null,
       })).filter(room => room.tournamentId).slice(0, 80),
     };
   }
@@ -2139,7 +2281,7 @@
   function projectionViewForSession(session = multiplayerSession()) {
     if (!session) return 'viewer';
     if (session.role === 'captain') return 'captain';
-    if (session.role === 'referee') return 'referee';
+    if (isManagementRole(session.role)) return 'referee';
     return 'viewer';
   }
 
@@ -2358,7 +2500,7 @@
     const params = new URLSearchParams({ view });
     try {
       await fetchRoomProjection(session);
-      if (session.role === 'captain' || session.role === 'referee') {
+      if (session.role === 'captain' || isManagementRole(session.role)) {
         const streamToken = await requestRoomStreamToken(session);
         params.set('streamToken', streamToken);
       }
@@ -2455,8 +2597,8 @@
 
     async archiveCurrentRoom() {
       const session = multiplayerSession();
-      if (!session || session.role !== 'referee') {
-        Hexcore2.eventStore.append('归档房间失败', '只有裁判会话可以归档当前房间', 'warn');
+      if (!session || !isManagementRole(session.role)) {
+        Hexcore2.eventStore.append('归档房间失败', '只有管理员或裁判会话可以归档当前房间', 'warn');
         Hexcore2.ui.render();
         return;
       }
@@ -2483,8 +2625,8 @@
 
     async deleteCurrentRoom() {
       const session = multiplayerSession();
-      if (!session || session.role !== 'referee') {
-        Hexcore2.eventStore.append('删除房间失败', '只有裁判会话可以删除当前房间', 'warn');
+      if (!session || !isManagementRole(session.role)) {
+        Hexcore2.eventStore.append('删除房间失败', '只有管理员或裁判会话可以删除当前房间', 'warn');
         Hexcore2.ui.render();
         return;
       }
@@ -2511,6 +2653,240 @@
     },
 
     recentMultiplayerApiBase,
+
+    systemAdminSession,
+
+    async loadAdminStatus() {
+      const input = document.getElementById('join-api-base');
+      const apiBase = String(input && input.value ? input.value : recentMultiplayerApiBase()).replace(/\/+$/, '');
+      Hexcore2.state.ui = Hexcore2.state.ui || {};
+      try {
+        rememberMultiplayerApiBase(apiBase);
+        const payload = await adminApiRequest(apiBase, '/api/admin/status', { session: null });
+        Hexcore2.state.ui.adminStatus = payload.admin || {};
+        Hexcore2.state.ui.adminMessage = { level: 'success', text: '管理员状态已更新' };
+      } catch (error) {
+        Hexcore2.state.ui.adminMessage = { level: 'warn', text: error && error.message ? error.message : '管理员状态读取失败' };
+      }
+      Hexcore2.ui.render();
+    },
+
+    async setupSystemAdmin() {
+      const input = document.getElementById('admin-password');
+      const confirmInput = document.getElementById('admin-password-confirm');
+      const nameInput = document.getElementById('admin-display-name');
+      const apiInput = document.getElementById('join-api-base');
+      const apiBase = String(apiInput && apiInput.value ? apiInput.value : recentMultiplayerApiBase()).replace(/\/+$/, '');
+      const password = String(input && input.value ? input.value : '');
+      const confirmPassword = String(confirmInput && confirmInput.value ? confirmInput.value : '');
+      if (!password || password !== confirmPassword) {
+        Hexcore2.state.ui = Hexcore2.state.ui || {};
+        Hexcore2.state.ui.adminMessage = { level: 'warn', text: '两次管理员密码不一致。' };
+        Hexcore2.ui.render();
+        return;
+      }
+      try {
+        const payload = await adminApiRequest(apiBase, '/api/admin/setup', {
+          method: 'POST',
+          session: null,
+          body: { password, displayName: String(nameInput && nameInput.value ? nameInput.value : '系统管理员') },
+        });
+        saveSystemAdminSession(payload.session, apiBase);
+        Hexcore2.state.ui.adminStatus = payload.admin || {};
+        Hexcore2.state.ui.adminMessage = { level: 'success', text: '系统管理员已初始化并登录。' };
+        await this.loadAdminDashboard();
+      } catch (error) {
+        Hexcore2.state.ui = Hexcore2.state.ui || {};
+        Hexcore2.state.ui.adminMessage = { level: 'warn', text: error && error.message ? error.message : '管理员初始化失败' };
+        Hexcore2.ui.render();
+      }
+    },
+
+    async loginSystemAdmin() {
+      const input = document.getElementById('admin-password');
+      const nameInput = document.getElementById('admin-display-name');
+      const apiInput = document.getElementById('join-api-base');
+      const apiBase = String(apiInput && apiInput.value ? apiInput.value : recentMultiplayerApiBase()).replace(/\/+$/, '');
+      try {
+        const payload = await adminApiRequest(apiBase, '/api/admin/login', {
+          method: 'POST',
+          session: null,
+          body: {
+            password: String(input && input.value ? input.value : ''),
+            displayName: String(nameInput && nameInput.value ? nameInput.value : '系统管理员'),
+          },
+        });
+        saveSystemAdminSession(payload.session, apiBase);
+        Hexcore2.state.ui = Hexcore2.state.ui || {};
+        Hexcore2.state.ui.adminStatus = payload.admin || {};
+        Hexcore2.state.ui.adminMessage = { level: 'success', text: '管理员已登录。' };
+        await this.loadAdminDashboard();
+      } catch (error) {
+        Hexcore2.state.ui = Hexcore2.state.ui || {};
+        Hexcore2.state.ui.adminMessage = { level: 'warn', text: error && error.message ? error.message : '管理员登录失败' };
+        Hexcore2.ui.render();
+      }
+    },
+
+    async logoutSystemAdmin() {
+      const session = systemAdminSession();
+      if (session && session.apiBase) {
+        try {
+          await adminApiRequest(session.apiBase, '/api/admin/logout', { method: 'POST', session });
+        } catch (error) {}
+      }
+      clearSystemAdminSession();
+      Hexcore2.state.ui = Hexcore2.state.ui || {};
+      Hexcore2.state.ui.adminMessage = { level: 'success', text: '管理员已退出。' };
+      Hexcore2.ui.render();
+    },
+
+    async loadAdminDashboard() {
+      const session = systemAdminSession();
+      const apiInput = document.getElementById('join-api-base');
+      const apiBase = String((session && session.apiBase) || (apiInput && apiInput.value) || recentMultiplayerApiBase()).replace(/\/+$/, '');
+      if (!session || !session.sessionToken) {
+        Hexcore2.state.ui = Hexcore2.state.ui || {};
+        Hexcore2.state.ui.adminMessage = { level: 'warn', text: '请先登录系统管理员。' };
+        Hexcore2.ui.render();
+        return;
+      }
+      try {
+        rememberMultiplayerApiBase(apiBase);
+        const [rooms, config, load, events] = await Promise.all([
+          adminApiRequest(apiBase, '/api/admin/tournaments', { session }),
+          adminApiRequest(apiBase, '/api/admin/config', { session }),
+          adminApiRequest(apiBase, '/api/admin/system-load', { session }),
+          adminApiRequest(apiBase, '/api/admin/security-events?limit=20', { session }).catch(() => ({ events: [] })),
+        ]);
+        Hexcore2.state.ui = Hexcore2.state.ui || {};
+        Hexcore2.state.ui.adminDashboard = {
+          roomList: normalizeAdminDashboardPayload(rooms),
+          config: config.config || {},
+          load: load.load || {},
+          events: Array.isArray(events.events) ? events.events : [],
+          loadedAt: new Date().toISOString(),
+        };
+        Hexcore2.state.ui.adminMessage = { level: 'success', text: '管理员后台已更新。' };
+      } catch (error) {
+        if (error && (error.status === 401 || error.status === 403)) clearSystemAdminSession();
+        Hexcore2.state.ui = Hexcore2.state.ui || {};
+        Hexcore2.state.ui.adminMessage = { level: 'warn', text: error && error.message ? error.message : '管理员后台读取失败' };
+      }
+      Hexcore2.ui.render();
+    },
+
+    async saveAdminConfig() {
+      const session = systemAdminSession();
+      if (!session || !session.sessionToken) {
+        Hexcore2.state.ui.adminMessage = { level: 'warn', text: '请先登录系统管理员。' };
+        Hexcore2.ui.render();
+        return;
+      }
+      const apiBase = session.apiBase || recentMultiplayerApiBase();
+      const body = {
+        maxRooms: Number(document.getElementById('admin-config-max-rooms') && document.getElementById('admin-config-max-rooms').value),
+        sessionTtlHours: Number(document.getElementById('admin-config-session-ttl') && document.getElementById('admin-config-session-ttl').value),
+        streamTokenTtlSeconds: Number(document.getElementById('admin-config-stream-ttl') && document.getElementById('admin-config-stream-ttl').value),
+      };
+      try {
+        const payload = await adminApiRequest(apiBase, '/api/admin/config', { method: 'PUT', session, body });
+        Hexcore2.state.ui.adminDashboard = Hexcore2.state.ui.adminDashboard || {};
+        Hexcore2.state.ui.adminDashboard.config = payload.config || {};
+        Hexcore2.state.ui.adminMessage = { level: 'success', text: '系统配置已保存。' };
+      } catch (error) {
+        Hexcore2.state.ui.adminMessage = { level: 'warn', text: error && error.message ? error.message : '系统配置保存失败' };
+      }
+      Hexcore2.ui.render();
+    },
+
+    async adminArchiveRoom(tournamentId) {
+      const session = systemAdminSession();
+      if (!session) return;
+      const confirmed = typeof confirm === 'function' ? confirm(`确认归档赛事「${tournamentId}」？`) : true;
+      if (!confirmed) return;
+      try {
+        await adminApiRequest(session.apiBase, `/api/admin/tournaments/${encodeURIComponent(tournamentId)}/archive`, { method: 'POST', session });
+        Hexcore2.state.ui.adminMessage = { level: 'success', text: '赛事已归档。' };
+        await this.loadAdminDashboard();
+      } catch (error) {
+        Hexcore2.state.ui.adminMessage = { level: 'warn', text: error && error.message ? error.message : '归档失败' };
+        Hexcore2.ui.render();
+      }
+    },
+
+    async adminDeleteRoom(tournamentId) {
+      const session = systemAdminSession();
+      if (!session) return;
+      const confirmed = typeof confirm === 'function' ? confirm(`确认删除赛事「${tournamentId}」？删除后不可恢复。`) : true;
+      if (!confirmed) return;
+      try {
+        await adminApiRequest(session.apiBase, `/api/admin/tournaments/${encodeURIComponent(tournamentId)}`, { method: 'DELETE', session });
+        Hexcore2.state.ui.adminMessage = { level: 'success', text: '赛事已删除。' };
+        await this.loadAdminDashboard();
+      } catch (error) {
+        Hexcore2.state.ui.adminMessage = { level: 'warn', text: error && error.message ? error.message : '删除失败' };
+        Hexcore2.ui.render();
+      }
+    },
+
+    async adminExportRoom(tournamentId) {
+      const session = systemAdminSession();
+      if (!session) return;
+      try {
+        const payload = await adminApiRequest(session.apiBase, `/api/admin/tournaments/${encodeURIComponent(tournamentId)}/export`, { session });
+        const text = JSON.stringify(payload.backup, null, 2);
+        const ok = Hexcore2.exportService && Hexcore2.exportService.downloadText
+          ? Hexcore2.exportService.downloadText(`HEXCORE2_管理员备份_${tournamentId}.json`, text, 'application/json;charset=utf-8')
+          : await copyTextToClipboard(text);
+        Hexcore2.state.ui.adminMessage = { level: ok ? 'success' : 'warn', text: ok ? '赛事备份已导出。' : '浏览器不支持下载，已尝试复制。' };
+      } catch (error) {
+        Hexcore2.state.ui.adminMessage = { level: 'warn', text: error && error.message ? error.message : '导出失败' };
+      }
+      Hexcore2.ui.render();
+    },
+
+    async adminCopyRoomCodes(tournamentId) {
+      const dashboard = Hexcore2.state.ui && Hexcore2.state.ui.adminDashboard;
+      const roomList = dashboard && dashboard.roomList;
+      const rooms = roomList && Array.isArray(roomList.rooms) ? roomList.rooms : [];
+      const room = rooms.find(item => item.tournamentId === tournamentId);
+      const codes = room && room.codes;
+      if (!codes || !codes.available) {
+        Hexcore2.state.ui.adminMessage = { level: 'warn', text: '该房间没有可恢复的房间码明文。' };
+        Hexcore2.ui.render();
+        return;
+      }
+      const lines = [
+        `赛事 ID：${room.tournamentId}`,
+        `赛事名称：${room.name || room.tournamentId}`,
+        `裁判码：${codes.refereeCode || ''}`,
+        `观众码：${codes.viewerCode || ''}`,
+        '',
+        '队长码：',
+        ...(Array.isArray(codes.captainCodes) ? codes.captainCodes.map(item => `${item.teamName || item.teamId || '队伍'}：${item.code || ''}`) : []),
+      ];
+      const ok = await copyTextToClipboard(lines.join('\n'));
+      Hexcore2.state.ui.adminMessage = {
+        level: ok ? 'success' : 'warn',
+        text: ok ? '房间码已复制。' : '浏览器不允许访问剪贴板，请手动展开查看房间码。',
+      };
+      Hexcore2.ui.render();
+    },
+
+    async adminEnterTournament(tournamentId) {
+      const session = systemAdminSession();
+      if (!session) return;
+      try {
+        const payload = await adminApiRequest(session.apiBase, `/api/admin/tournaments/${encodeURIComponent(tournamentId)}/session`, { method: 'POST', session });
+        const tournamentSession = persistJoinedSession(session.apiBase, tournamentId, payload);
+        redirectForSession(tournamentSession);
+      } catch (error) {
+        Hexcore2.state.ui = Hexcore2.state.ui || {};
+        Hexcore2.state.ui.adminMessage = { level: 'warn', text: error && error.message ? error.message : '进入赛事管理视图失败' };
+        Hexcore2.ui.render();
+      }
+    },
 
     async copyJoinGateAccessText() {
       const ok = await copyTextToClipboard(joinGateAccessText());
@@ -2585,6 +2961,143 @@
         Hexcore2.eventStore.append('房间列表获取失败', Hexcore2.state.ui.roomList.text, 'warn');
       }
       Hexcore2.ui.render();
+    },
+
+    openRoomActionDialog(tournamentId) {
+      const cleanId = String(tournamentId || '').trim();
+      const roomList = Hexcore2.state.ui && Hexcore2.state.ui.roomList;
+      const rooms = roomList && Array.isArray(roomList.rooms) ? roomList.rooms : [];
+      const room = rooms.find(item => item.tournamentId === cleanId);
+      if (!room) {
+        Hexcore2.eventStore.append('房间操作失败', '目标房间不存在或房间列表已过期，请刷新房间列表', 'warn');
+        Hexcore2.ui.render();
+        return;
+      }
+      Hexcore2.state.ui = Hexcore2.state.ui || {};
+      Hexcore2.state.ui.roomActionDialog = {
+        tournamentId: cleanId,
+        openedAt: new Date().toISOString(),
+        message: null,
+      };
+      Hexcore2.ui.render();
+    },
+
+    closeRoomActionDialog() {
+      if (Hexcore2.state.ui) delete Hexcore2.state.ui.roomActionDialog;
+      Hexcore2.ui.render();
+    },
+
+    async joinSelectedRoomWithCode() {
+      const room = selectedRoomFromList();
+      if (!room) {
+        setRoomActionMessage('warn', '目标房间不存在，请刷新房间列表后重试。');
+        Hexcore2.ui.render();
+        return;
+      }
+      const apiBase = roomActionApiBase();
+      const code = selectedRoomCode();
+      if (!code) {
+        setRoomActionMessage('warn', '进入裁判端或队长端需要输入对应加入码。');
+        Hexcore2.ui.render();
+        return;
+      }
+      try {
+        rememberMultiplayerApiBase(apiBase);
+        const payload = await joinRoomWithCode(apiBase, room.tournamentId, code);
+        const session = persistJoinedSession(apiBase, room.tournamentId, payload);
+        redirectForSession(session);
+      } catch (error) {
+        setRoomActionMessage('warn', error && error.message ? error.message : String(error));
+        Hexcore2.ui.render();
+      }
+    },
+
+    async joinSelectedRoomAsViewer() {
+      const room = selectedRoomFromList();
+      if (!room) {
+        setRoomActionMessage('warn', '目标房间不存在，请刷新房间列表后重试。');
+        Hexcore2.ui.render();
+        return;
+      }
+      const apiBase = roomActionApiBase();
+      try {
+        rememberMultiplayerApiBase(apiBase);
+        const payload = await joinRoomWithCode(apiBase, room.tournamentId, '', {
+          role: 'viewer',
+          displayName: '观众',
+        });
+        const session = persistJoinedSession(apiBase, room.tournamentId, payload);
+        redirectForSession(session);
+      } catch (error) {
+        setRoomActionMessage('warn', error && error.message ? error.message : String(error));
+        Hexcore2.ui.render();
+      }
+    },
+
+    async archiveSelectedRoom() {
+      const room = selectedRoomFromList();
+      if (!room) {
+        setRoomActionMessage('warn', '目标房间不存在，请刷新房间列表后重试。');
+        Hexcore2.ui.render();
+        return;
+      }
+      if (room.status === 'archived') {
+        setRoomActionMessage('warn', '该房间已经归档。');
+        Hexcore2.ui.render();
+        return;
+      }
+      const confirmed = typeof confirm === 'function'
+        ? confirm(`确认归档/关闭房间「${room.name || room.tournamentId}」？归档后禁止新的加入和写操作。`)
+        : true;
+      if (!confirmed) return;
+      const apiBase = roomActionApiBase();
+      try {
+        const session = await refereeSessionForRoom(apiBase, room.tournamentId, selectedRoomCode());
+        const response = await fetch(`${apiBase}/api/tournaments/${encodeURIComponent(room.tournamentId)}/archive`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionToken: session.sessionToken }),
+        });
+        const payload = await response.json();
+        if (!response.ok || !payload.ok) throw new Error(payload && payload.error ? payload.error : '服务端拒绝归档');
+        setRoomActionMessage('success', '房间已归档/关闭。');
+        Hexcore2.eventStore.append('房间已归档', room.tournamentId, 'success');
+        await this.loadRoomList();
+        Hexcore2.state.ui.roomActionDialog = { tournamentId: room.tournamentId, openedAt: new Date().toISOString(), message: { level: 'success', text: '房间已归档/关闭。' } };
+      } catch (error) {
+        setRoomActionMessage('warn', error && error.message ? error.message : String(error));
+      }
+      Hexcore2.ui.render();
+    },
+
+    async deleteSelectedRoom() {
+      const room = selectedRoomFromList();
+      if (!room) {
+        setRoomActionMessage('warn', '目标房间不存在，请刷新房间列表后重试。');
+        Hexcore2.ui.render();
+        return;
+      }
+      const confirmed = typeof confirm === 'function'
+        ? confirm(`确认删除房间「${room.name || room.tournamentId}」？删除后赛事状态、事件、会话和房间访问记录都会从服务端移除。`)
+        : true;
+      if (!confirmed) return;
+      const apiBase = roomActionApiBase();
+      try {
+        const session = await refereeSessionForRoom(apiBase, room.tournamentId, selectedRoomCode());
+        const response = await fetch(`${apiBase}/api/tournaments/${encodeURIComponent(room.tournamentId)}`, {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionToken: session.sessionToken }),
+        });
+        const payload = await response.json();
+        if (!response.ok || !payload.ok) throw new Error(payload && payload.error ? payload.error : '服务端拒绝删除');
+        Hexcore2.eventStore.append('房间已删除', room.tournamentId, 'success');
+        if (Hexcore2.state.ui) delete Hexcore2.state.ui.roomActionDialog;
+        await this.loadRoomList();
+      } catch (error) {
+        setRoomActionMessage('warn', error && error.message ? error.message : String(error));
+        Hexcore2.ui.render();
+      }
     },
 
     dismissRoomWelcome() {
@@ -2697,7 +3210,7 @@
           body: JSON.stringify({
             id: tournamentId,
             name,
-            actorId: 'local-referee',
+            actorId: 'local-creator',
             settings: {
               teamCount,
               totalTeams: teamCount,
@@ -2725,6 +3238,7 @@
         };
         Hexcore2.state.ui.joinGateMessage = { level: 'success', text: '赛事已创建，请复制或下载房间码并分发给对应身份。' };
         Hexcore2.eventStore.append('创建赛事成功', '房间码明文只显示一次，请立即分发给对应身份', 'success');
+        if (systemAdminSession()) await this.loadAdminDashboard();
       } catch (error) {
         const message = error && error.message ? error.message : String(error);
         Hexcore2.state.ui = Hexcore2.state.ui || {};

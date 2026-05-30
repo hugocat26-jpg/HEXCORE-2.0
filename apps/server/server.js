@@ -1,5 +1,6 @@
 const http = require('http');
 const crypto = require('crypto');
+const os = require('os');
 const { URL } = require('url');
 const { MemoryTournamentStore } = require('./memory-store');
 const {
@@ -49,7 +50,7 @@ function sendJson(res, status, body) {
     'Cache-Control': 'no-store',
     'X-Content-Type-Options': 'nosniff',
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET,POST,DELETE,OPTIONS',
+    'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type,Authorization',
   });
   res.end(JSON.stringify(body));
@@ -87,6 +88,13 @@ function matchTournamentRoute(pathname, suffix) {
   return match[1];
 }
 
+function matchAdminTournamentRoute(pathname, suffix) {
+  const match = pathname.match(/^\/api\/admin\/tournaments\/([A-Za-z0-9._:-]{1,80})(.*)$/);
+  if (!match) return null;
+  if (match[2] !== suffix) return null;
+  return match[1];
+}
+
 function roleBindingFromRequest(body) {
   const binding = body.resolvedRoleBinding || {};
   if (!binding.actorId || !binding.role) throw new Error('缺少有效 sessionToken 或角色绑定');
@@ -107,6 +115,7 @@ function hashStreamToken(token) {
 
 function createStreamTokenStore(ttlMs = STREAM_TOKEN_TTL_MS) {
   const tokens = new Map();
+  let currentTtlMs = ttlMs;
   function cleanup(now = Date.now()) {
     for (const [hash, record] of tokens.entries()) {
       if (!record || Number(record.expiresAtMs) <= now) tokens.delete(hash);
@@ -116,7 +125,7 @@ function createStreamTokenStore(ttlMs = STREAM_TOKEN_TTL_MS) {
     issue(tournamentId, binding) {
       cleanup();
       const streamToken = `stream_${crypto.randomBytes(24).toString('base64url')}`;
-      const expiresAtMs = Date.now() + ttlMs;
+      const expiresAtMs = Date.now() + currentTtlMs;
       tokens.set(hashStreamToken(streamToken), {
         tournamentId: String(tournamentId || ''),
         actorId: binding.actorId,
@@ -127,7 +136,7 @@ function createStreamTokenStore(ttlMs = STREAM_TOKEN_TTL_MS) {
       return {
         streamToken,
         expiresAt: new Date(expiresAtMs).toISOString(),
-        ttlSeconds: Math.max(1, Math.ceil(ttlMs / 1000)),
+        ttlSeconds: Math.max(1, Math.ceil(currentTtlMs / 1000)),
       };
     },
     resolve(tournamentId, streamToken) {
@@ -135,6 +144,15 @@ function createStreamTokenStore(ttlMs = STREAM_TOKEN_TTL_MS) {
       const record = tokens.get(hashStreamToken(streamToken));
       if (!record || record.tournamentId !== tournamentId) return null;
       return { actorId: record.actorId, role: record.role, teamId: record.teamId || '' };
+    },
+    setTtlMs(nextTtlMs) {
+      const value = Number(nextTtlMs);
+      if (Number.isFinite(value) && value >= 30 * 1000 && value <= 3600 * 1000) {
+        currentTtlMs = Math.round(value);
+      }
+    },
+    ttlMs() {
+      return currentTtlMs;
     },
   };
 }
@@ -152,6 +170,46 @@ function bearerSessionTokenFromRequest(req) {
 
 function publicSnapshot(state) {
   return createReadOnlyProjection(state, 'public');
+}
+
+function isManagementRole(role) {
+  return [ROLES.REFEREE, ROLES.TOURNAMENT_ADMIN, ROLES.SUPER_ADMIN].includes(role);
+}
+
+async function systemLoadSnapshot(store, startedAtMs, startedAt) {
+  const runtime = store.publicStats ? await store.publicStats() : {};
+  const storeLoad = store.systemLoadStats ? await store.systemLoadStats() : {};
+  const memory = process.memoryUsage();
+  const cpus = os.cpus ? os.cpus() : [];
+  return {
+    sampledAt: new Date().toISOString(),
+    startedAt,
+    uptimeSeconds: Math.max(0, Math.round((Date.now() - startedAtMs) / 1000)),
+    storage: runtime.storage || storeLoad.storage || 'unknown',
+    tournamentCount: Number(storeLoad.tournamentCount ?? runtime.tournamentCount ?? 0),
+    roomCount: Number(storeLoad.roomCount ?? runtime.roomCount ?? 0),
+    activeRoomCount: Number(storeLoad.activeRoomCount ?? runtime.activeRoomCount ?? 0),
+    maxRooms: Number(storeLoad.maxRooms ?? runtime.maxRooms ?? 0),
+    sessionCount: Number(storeLoad.sessionCount ?? 0),
+    systemAdminSessionCount: Number(storeLoad.systemAdminSessionCount ?? 0),
+    subscriberCount: Number(storeLoad.subscriberCount ?? runtime.subscriberCount ?? 0),
+    postgresConnected: Boolean(runtime.postgresConnected),
+    crossInstanceEventPolling: Boolean(runtime.crossInstanceEventPolling),
+    eventPollMs: Number(runtime.eventPollMs || 0),
+    process: {
+      pid: process.pid,
+      node: process.version,
+      platform: process.platform,
+      rssMb: Math.round(memory.rss / 1024 / 1024),
+      heapUsedMb: Math.round(memory.heapUsed / 1024 / 1024),
+      heapTotalMb: Math.round(memory.heapTotal / 1024 / 1024),
+      externalMb: Math.round(memory.external / 1024 / 1024),
+    },
+    cpu: {
+      count: cpus.length,
+      loadAverage: typeof os.loadavg === 'function' ? os.loadavg().map(value => Math.round(value * 100) / 100) : [],
+    },
+  };
 }
 
 async function resolveTimerBeforeRead(store, tournamentId, state = null, now = new Date().toISOString()) {
@@ -226,6 +284,10 @@ function createServer(options = {}) {
   const server = http.createServer(async (req, res) => {
     try {
       const store = await storePromise;
+      if (store.publicSystemConfig && streamTokens.setTtlMs) {
+        const config = store.publicSystemConfig();
+        streamTokens.setTtlMs(Number(config.streamTokenTtlSeconds || 120) * 1000);
+      }
       const parsed = new URL(req.url, `http://${host}:${port}`);
       const pathname = parsed.pathname;
 
@@ -234,7 +296,7 @@ function createServer(options = {}) {
           'Cache-Control': 'no-store',
           'X-Content-Type-Options': 'nosniff',
           'Access-Control-Allow-Origin': '*',
-          'Access-Control-Allow-Methods': 'GET,POST,DELETE,OPTIONS',
+          'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS',
           'Access-Control-Allow-Headers': 'Content-Type,Authorization',
         });
         res.end();
@@ -250,6 +312,168 @@ function createServer(options = {}) {
           uptimeSeconds: Math.max(0, Math.round((Date.now() - startedAtMs) / 1000)),
           runtime: store.publicStats ? await store.publicStats() : { storage: 'unknown' },
         });
+        return;
+      }
+
+      if (req.method === 'GET' && pathname === '/api/admin/status') {
+        sendJson(res, 200, {
+          ok: true,
+          admin: store.getSystemAdminStatus ? await store.getSystemAdminStatus() : { setupRequired: true },
+        });
+        return;
+      }
+
+      if (req.method === 'POST' && pathname === '/api/admin/setup') {
+        const body = await readJson(req);
+        const session = await store.setupSystemAdmin(body);
+        sendJson(res, 201, {
+          ok: true,
+          session,
+          admin: store.getSystemAdminStatus ? await store.getSystemAdminStatus() : null,
+        });
+        return;
+      }
+
+      if (req.method === 'POST' && pathname === '/api/admin/login') {
+        const body = await readJson(req);
+        const session = await store.loginSystemAdmin(body);
+        sendJson(res, 200, {
+          ok: true,
+          session,
+          admin: store.getSystemAdminStatus ? await store.getSystemAdminStatus() : null,
+        });
+        return;
+      }
+
+      if (req.method === 'POST' && pathname === '/api/admin/logout') {
+        await store.logoutSystemAdmin(bearerSessionTokenFromRequest(req));
+        sendJson(res, 200, { ok: true });
+        return;
+      }
+
+      if (req.method === 'GET' && pathname === '/api/admin/tournaments') {
+        const token = bearerSessionTokenFromRequest(req);
+        sendJson(res, 200, {
+          ok: true,
+          rooms: store.listAdminTournaments ? await store.listAdminTournaments(token) : [],
+          runtime: store.publicStats ? await store.publicStats() : { storage: 'unknown' },
+        });
+        return;
+      }
+
+      if (req.method === 'POST' && pathname === '/api/admin/tournaments') {
+        const token = bearerSessionTokenFromRequest(req);
+        const adminSession = await store.requireSystemAdminSession(token, '创建赛事');
+        const body = await readJson(req);
+        const state = await store.createTournament(body);
+        const next = appendEvent(state, {
+          type: EVENT_TYPES.TOURNAMENT_CREATED,
+          actorId: adminSession.actorId || 'system-admin',
+          payload: { name: state.snapshot.name, rulesVersion: state.rulesVersion },
+        });
+        await store.replaceTournament(state.tournamentId, next);
+        if (store.recordSecurityEvent) {
+          store.recordSecurityEvent('admin_tournament_created', {
+            actorId: adminSession.actorId || 'system-admin',
+            tournamentId: state.tournamentId,
+          }, { persist: true });
+          if (store.persistToPostgres) await store.persistToPostgres();
+        }
+        sendJson(res, 201, {
+          ok: true,
+          tournament: publicSnapshot(next),
+          room: await store.consumeInitialRoomAccess(state.tournamentId),
+        });
+        return;
+      }
+
+      const adminArchiveTournamentId = req.method === 'POST' ? matchAdminTournamentRoute(pathname, '/archive') : null;
+      if (adminArchiveTournamentId) {
+        const room = store.archiveTournamentAsAdmin
+          ? await store.archiveTournamentAsAdmin(adminArchiveTournamentId, bearerSessionTokenFromRequest(req))
+          : null;
+        if (!room) {
+          sendJson(res, 404, { ok: false, error: '赛事不存在' });
+          return;
+        }
+        sendJson(res, 200, { ok: true, room });
+        return;
+      }
+
+      const adminDeleteTournamentMatch = req.method === 'DELETE' ? pathname.match(/^\/api\/admin\/tournaments\/([A-Za-z0-9._:-]{1,80})$/) : null;
+      if (adminDeleteTournamentMatch) {
+        const room = store.deleteTournamentAsAdmin
+          ? await store.deleteTournamentAsAdmin(adminDeleteTournamentMatch[1], bearerSessionTokenFromRequest(req))
+          : null;
+        if (!room) {
+          sendJson(res, 404, { ok: false, error: '赛事不存在' });
+          return;
+        }
+        sendJson(res, 200, { ok: true, room });
+        return;
+      }
+
+      const adminExportTournamentId = req.method === 'GET' ? matchAdminTournamentRoute(pathname, '/export') : null;
+      if (adminExportTournamentId) {
+        const backup = store.getTournamentBackupAsAdmin
+          ? await store.getTournamentBackupAsAdmin(adminExportTournamentId, bearerSessionTokenFromRequest(req))
+          : null;
+        if (!backup) {
+          sendJson(res, 404, { ok: false, error: '赛事不存在' });
+          return;
+        }
+        sendJson(res, 200, { ok: true, backup });
+        return;
+      }
+
+      const adminSessionTournamentId = req.method === 'POST' ? matchAdminTournamentRoute(pathname, '/session') : null;
+      if (adminSessionTournamentId) {
+        const session = store.createTournamentSessionAsAdmin
+          ? await store.createTournamentSessionAsAdmin(adminSessionTournamentId, bearerSessionTokenFromRequest(req))
+          : null;
+        if (!session) {
+          sendJson(res, 404, { ok: false, error: '赛事不存在' });
+          return;
+        }
+        const state = await resolveTimerBeforeRead(store, adminSessionTournamentId);
+        sendJson(res, 200, {
+          ok: true,
+          session,
+          tournament: state ? createReadOnlyProjection(state, 'referee') : null,
+        });
+        return;
+      }
+
+      if (req.method === 'GET' && pathname === '/api/admin/config') {
+        sendJson(res, 200, {
+          ok: true,
+          config: store.getSystemConfig ? await store.getSystemConfig(bearerSessionTokenFromRequest(req)) : {},
+        });
+        return;
+      }
+
+      if (req.method === 'GET' && pathname === '/api/admin/system-load') {
+        if (store.requireSystemAdminSession) await store.requireSystemAdminSession(bearerSessionTokenFromRequest(req), '系统负荷');
+        sendJson(res, 200, {
+          ok: true,
+          load: await systemLoadSnapshot(store, startedAtMs, startedAt),
+        });
+        return;
+      }
+
+      if (req.method === 'PUT' && pathname === '/api/admin/config') {
+        const body = await readJson(req);
+        const config = await store.updateSystemConfig(bearerSessionTokenFromRequest(req), body);
+        if (streamTokens.setTtlMs) streamTokens.setTtlMs(Number(config.streamTokenTtlSeconds || 120) * 1000);
+        sendJson(res, 200, { ok: true, config });
+        return;
+      }
+
+      if (req.method === 'GET' && pathname === '/api/admin/security-events') {
+        const events = store.getSecurityEvents
+          ? await store.getSecurityEvents(bearerSessionTokenFromRequest(req), parsed.searchParams.get('limit') || 50)
+          : [];
+        sendJson(res, 200, { ok: true, events });
         return;
       }
 
@@ -336,7 +560,7 @@ function createServer(options = {}) {
         const binding = await store.getSessionBinding(sessionToken, timerResolveTournamentId);
         if (!binding) throw new Error('sessionToken 无效或已过期');
         const state = await resolveTimerBeforeRead(store, timerResolveTournamentId);
-        const view = binding.role === ROLES.REFEREE ? 'referee' : (binding.role === ROLES.CAPTAIN ? 'captain' : 'viewer');
+        const view = isManagementRole(binding.role) ? 'referee' : (binding.role === ROLES.CAPTAIN ? 'captain' : 'viewer');
         sendJson(res, 200, {
           ok: true,
           tournament: createReadOnlyProjection(state, view, { teamId: binding.teamId || '' }),

@@ -899,10 +899,18 @@ body:has(.join-gate-page) {
   align-items: center;
   gap: 10px;
   min-width: 0;
+  width: 100%;
   padding: 10px;
   border: 1px solid var(--line-soft);
   border-radius: 7px;
   background: rgba(5, 12, 17, 0.52);
+  color: inherit;
+  text-align: left;
+}
+
+.room-list-row:hover {
+  border-color: rgba(25, 212, 240, 0.48);
+  background: rgba(25, 212, 240, 0.08);
 }
 
 .room-list-row div {
@@ -944,6 +952,235 @@ body:has(.join-gate-page) {
   border-color: rgba(148, 163, 184, 0.38);
   background: rgba(148, 163, 184, 0.12);
   color: #b8c7d8;
+}
+
+.admin-entry-panel {
+  border-color: rgba(245, 158, 11, 0.34);
+  background: rgba(22, 18, 9, 0.56);
+}
+
+.admin-auth-grid,
+.admin-config-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  align-items: end;
+}
+
+.admin-load-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.admin-load-grid div {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+  padding: 9px;
+  border: 1px solid rgba(37, 199, 218, 0.2);
+  border-radius: 7px;
+  background: rgba(5, 12, 17, 0.5);
+}
+
+.admin-load-grid span {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-load-grid strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-auth-grid label,
+.admin-config-grid label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.admin-auth-grid span,
+.admin-config-grid span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.admin-auth-grid input,
+.admin-config-grid input {
+  width: 100%;
+  height: 40px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--input-bg);
+  color: var(--text);
+  padding: 0 10px;
+}
+
+.admin-auth-actions,
+.admin-room-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.admin-dashboard {
+  display: grid;
+  gap: 12px;
+}
+
+.admin-dashboard-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px;
+  border: 1px solid rgba(245, 158, 11, 0.22);
+  border-radius: 7px;
+  background: rgba(245, 158, 11, 0.06);
+}
+
+.admin-dashboard-head div {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.admin-dashboard-head strong {
+  color: var(--amber);
+}
+
+.admin-dashboard-head span {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-room-table {
+  max-height: 460px;
+  overflow: auto;
+}
+
+.admin-room-row {
+  grid-template-columns: minmax(220px, 1.4fr) repeat(3, minmax(64px, 0.4fr)) minmax(360px, 1fr);
+}
+
+.admin-room-row:hover {
+  border-color: rgba(245, 158, 11, 0.42);
+  background: rgba(245, 158, 11, 0.08);
+}
+
+.admin-room-actions .subtle-btn,
+.admin-room-actions .danger-btn {
+  min-height: 32px;
+  padding: 0 9px;
+  white-space: nowrap;
+}
+
+.admin-code-vault {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid rgba(37, 199, 218, 0.18);
+  border-radius: 6px;
+  background: rgba(5, 12, 17, 0.58);
+}
+
+.admin-code-vault summary {
+  cursor: pointer;
+  color: var(--cyan);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.admin-code-vault div {
+  display: grid;
+  grid-template-columns: minmax(100px, 0.28fr) minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+}
+
+.admin-code-vault code {
+  overflow-wrap: anywhere;
+  color: var(--text);
+  font-family: "Consolas", "SFMono-Regular", monospace;
+  font-size: 12px;
+}
+
+.admin-code-vault.unavailable {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.admin-events-panel {
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: 7px;
+  background: rgba(5, 12, 17, 0.48);
+}
+
+.admin-events-panel strong {
+  color: var(--cyan);
+}
+
+.admin-events-panel span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.room-action-modal {
+  width: min(620px, calc(100vw - 48px));
+}
+
+.room-action-body {
+  display: grid;
+  gap: 12px;
+}
+
+.room-action-body label {
+  display: grid;
+  gap: 7px;
+}
+
+.room-action-body label span {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.room-action-body input {
+  width: 100%;
+  height: 40px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--input-bg);
+  color: var(--text);
+  padding: 0 10px;
+}
+
+.room-action-buttons {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.room-action-buttons .primary-btn,
+.room-action-buttons .subtle-btn,
+.room-action-buttons .danger-btn {
+  width: 100%;
 }
 
 .room-lifecycle-panel {
@@ -994,6 +1231,14 @@ body:has(.join-gate-page) {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+}
+
+.room-code-head-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .created-room-head div {
@@ -1178,7 +1423,11 @@ body:has(.join-gate-page) {
 
   .join-gate-grid,
   .join-access-grid,
+  .admin-auth-grid,
+  .admin-config-grid,
+  .admin-load-grid,
   .room-list-row,
+  .admin-room-row,
   .create-room-options,
   .room-code-grid,
   .captain-code-list {
@@ -1193,7 +1442,9 @@ body:has(.join-gate-page) {
     flex-direction: column;
   }
 
+  .admin-dashboard-head,
   .room-lifecycle-actions {
+    flex-direction: column;
     justify-content: flex-start;
   }
 
@@ -1203,6 +1454,11 @@ body:has(.join-gate-page) {
   }
 
   .join-access-actions {
+    justify-content: flex-start;
+  }
+
+  .admin-room-actions,
+  .admin-auth-actions {
     justify-content: flex-start;
   }
 

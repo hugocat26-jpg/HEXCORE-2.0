@@ -37,24 +37,32 @@ function writeUtf8NoBom(filePath, content) {
   fs.writeFileSync(filePath, content, { encoding: 'utf8' });
 }
 
+function replaceOrAppendEnvValue(content, key, value) {
+  const pattern = new RegExp(`^${key}=.*$`, 'm');
+  if (pattern.test(content)) return content.replace(pattern, `${key}=${value}`);
+  return `${content.trimEnd()}\n${key}=${value}\n`;
+}
+
 function ensureEnvFile() {
   const envPath = path.join(root, '.env');
   const examplePath = path.join(root, '.env.example');
   if (!fs.existsSync(envPath)) {
     if (!fs.existsSync(examplePath)) fail('缺少 .env.example，无法生成 Docker 验收环境。');
     let content = fs.readFileSync(examplePath, 'utf8');
-    const password = randomSecret();
-    if (/^HEXCORE_POSTGRES_PASSWORD=/m.test(content)) {
-      content = content.replace(/^HEXCORE_POSTGRES_PASSWORD=.*$/m, `HEXCORE_POSTGRES_PASSWORD=${password}`);
-    } else {
-      content = `${content.trimEnd()}\nHEXCORE_POSTGRES_PASSWORD=${password}\n`;
-    }
+    content = replaceOrAppendEnvValue(content, 'HEXCORE_POSTGRES_PASSWORD', randomSecret());
+    content = replaceOrAppendEnvValue(content, 'HEXCORE_ROOM_CODE_SECRET', randomSecret());
     writeUtf8NoBom(envPath, content);
-    log('已从 .env.example 生成本机 .env，数据库密码未输出。');
+    log('已从 .env.example 生成本机 .env，本机密钥未输出。');
   }
-  const env = readEnvFile(envPath);
+  let env = readEnvFile(envPath);
   if (!env.HEXCORE_POSTGRES_PASSWORD || env.HEXCORE_POSTGRES_PASSWORD === 'change-this-local-password') {
     fail('.env 中的 HEXCORE_POSTGRES_PASSWORD 仍为空或默认值，请先设置随机强密码。');
+  }
+  if (!env.HEXCORE_ROOM_CODE_SECRET || env.HEXCORE_ROOM_CODE_SECRET === 'change-this-local-room-code-secret') {
+    const content = replaceOrAppendEnvValue(fs.readFileSync(envPath, 'utf8'), 'HEXCORE_ROOM_CODE_SECRET', randomSecret());
+    writeUtf8NoBom(envPath, content);
+    env = readEnvFile(envPath);
+    log('已为本机 .env 补充随机房间码加密密钥。');
   }
   return env;
 }

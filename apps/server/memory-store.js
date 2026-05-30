@@ -4,6 +4,10 @@ const path = require('path');
 const { createAuthorityState } = require('../../packages/rules');
 const { ROLES } = require('../../packages/shared');
 
+const SYSTEM_ADMIN_ROLE = 'system_admin';
+const SYSTEM_ADMIN_ACTOR_ID = 'system-admin';
+const SECURITY_EVENT_LIMIT = 500;
+
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
@@ -13,12 +17,28 @@ class MemoryTournamentStore {
     this.dataFile = options.dataFile || process.env.HEXCORE_DATA_FILE || '';
     this.sessionTtlMs = normalizeSessionTtlMs(options.sessionTtlMs);
     this.maxRooms = normalizeMaxRooms(options.maxRooms);
+    this.adminSecret = String(options.adminSecret || process.env.HEXCORE_ADMIN_SECRET || '').trim();
+    this.systemConfig = normalizeSystemConfig(options.systemConfig, {
+      maxRooms: this.maxRooms,
+      sessionTtlHours: Math.max(1, Math.round(this.sessionTtlMs / (60 * 60 * 1000))),
+      streamTokenTtlSeconds: normalizeStreamTokenTtlSeconds(options.streamTokenTtlSeconds),
+    });
+    this.systemAdmin = null;
+    this.systemAdminSessions = new Map();
+    this.securityEvents = [];
+    this.loadedSystemConfigFromDisk = false;
     this.tournaments = new Map();
     this.subscribers = new Map();
     this.roomAccess = new Map();
     this.initialRoomAccess = new Map();
     this.sessions = new Map();
     this.loadFromDisk();
+    this.applySystemConfigRuntime({
+      preserveSessionTtlMs: Number.isFinite(Number(options.sessionTtlMs))
+        && !options.systemConfig
+        && !this.loadedSystemConfigFromDisk
+        && !process.env.HEXCORE_SESSION_TTL_HOURS,
+    });
   }
 
   createTournament(input = {}) {
@@ -151,8 +171,297 @@ class MemoryTournamentStore {
       maxRooms: this.maxRooms,
       postgresConnected: false,
       sessionTtlSeconds: Math.max(1, Math.ceil(this.sessionTtlMs / 1000)),
+      streamTokenTtlSeconds: this.systemConfig.streamTokenTtlSeconds,
+      systemAdminInitialized: this.systemAdminInitialized(),
       subscriberCount,
     };
+  }
+
+  systemLoadStats() {
+    const subscriberCount = Array.from(this.subscribers.values()).reduce((sum, bucket) => sum + bucket.size, 0);
+    return {
+      tournamentCount: this.tournaments.size,
+      roomCount: this.roomAccess.size,
+      activeRoomCount: this.activeRoomCount(),
+      maxRooms: this.maxRooms,
+      sessionCount: this.sessions.size,
+      systemAdminSessionCount: this.systemAdminSessions.size,
+      subscriberCount,
+      storage: this.storageLabel(),
+    };
+  }
+
+  systemAdminInitialized() {
+    return Boolean(this.adminSecret || (this.systemAdmin && this.systemAdmin.credentialHash));
+  }
+
+  getSystemAdminStatus() {
+    return {
+      setupRequired: !this.systemAdminInitialized(),
+      environmentSecretMode: Boolean(this.adminSecret),
+      config: this.publicSystemConfig(),
+      securityEventCount: this.securityEvents.length,
+    };
+  }
+
+  publicSystemConfig() {
+    return clone({
+      maxRooms: this.maxRooms,
+      sessionTtlHours: Math.max(1, Math.round(this.sessionTtlMs / (60 * 60 * 1000))),
+      streamTokenTtlSeconds: this.systemConfig.streamTokenTtlSeconds,
+    });
+  }
+
+  setupSystemAdmin(input = {}) {
+    if (this.adminSecret) {
+      const error = new Error('当前为环境口令模式，不能在页面设置管理员密码');
+      error.statusCode = 409;
+      throw error;
+    }
+    if (this.systemAdminInitialized()) {
+      const error = new Error('系统管理员已初始化');
+      error.statusCode = 409;
+      throw error;
+    }
+    const password = normalizeAdminPassword(input.password);
+    const credential = hashPassword(password);
+    const now = new Date().toISOString();
+    this.systemAdmin = {
+      adminId: 'primary',
+      credentialHash: credential.credentialHash,
+      salt: credential.salt,
+      algorithm: credential.algorithm,
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.recordSecurityEvent('admin_setup_completed', { actorId: SYSTEM_ADMIN_ACTOR_ID });
+    const session = this.issueSystemAdminSession({
+      actorId: SYSTEM_ADMIN_ACTOR_ID,
+      displayName: String(input.displayName || '系统管理员').trim().slice(0, 40) || '系统管理员',
+    });
+    this.persistToDisk();
+    return session;
+  }
+
+  loginSystemAdmin(input = {}) {
+    const password = String(input.password || '');
+    const displayName = String(input.displayName || '系统管理员').trim().slice(0, 40) || '系统管理员';
+    const ok = this.adminSecret
+      ? constantTimeEqual(password, this.adminSecret)
+      : verifyPassword(password, this.systemAdmin);
+    if (!ok) {
+      this.recordSecurityEvent('admin_login_failed', { actorId: SYSTEM_ADMIN_ACTOR_ID }, { persist: true });
+      const error = new Error('管理员登录失败');
+      error.statusCode = 401;
+      throw error;
+    }
+    const session = this.issueSystemAdminSession({ actorId: SYSTEM_ADMIN_ACTOR_ID, displayName });
+    this.recordSecurityEvent('admin_login_succeeded', { actorId: SYSTEM_ADMIN_ACTOR_ID });
+    this.persistToDisk();
+    return session;
+  }
+
+  logoutSystemAdmin(sessionToken) {
+    const tokenHash = hashSecret(sessionToken);
+    const existed = this.systemAdminSessions.delete(tokenHash);
+    if (existed) {
+      this.recordSecurityEvent('admin_logout', { actorId: SYSTEM_ADMIN_ACTOR_ID });
+      this.persistToDisk();
+    }
+    return existed;
+  }
+
+  issueSystemAdminSession(input = {}) {
+    const sessionToken = generateSecret('admin_sess');
+    const issuedAt = new Date();
+    const session = {
+      sessionTokenHash: hashSecret(sessionToken),
+      actorId: String(input.actorId || SYSTEM_ADMIN_ACTOR_ID).trim().slice(0, 80),
+      displayName: String(input.displayName || '系统管理员').trim().slice(0, 40),
+      role: SYSTEM_ADMIN_ROLE,
+      issuedAt: issuedAt.toISOString(),
+      expiresAt: new Date(issuedAt.getTime() + this.sessionTtlMs).toISOString(),
+    };
+    this.systemAdminSessions.set(session.sessionTokenHash, session);
+    return clone({ ...session, sessionToken, sessionTokenHash: undefined });
+  }
+
+  getSystemAdminSession(sessionToken) {
+    const sessionHash = hashSecret(sessionToken);
+    const session = this.systemAdminSessions.get(sessionHash);
+    if (!session) return null;
+    if (this.isSessionExpired(session)) {
+      this.systemAdminSessions.delete(sessionHash);
+      this.persistToDisk();
+      return null;
+    }
+    return clone(session);
+  }
+
+  requireSystemAdminSession(sessionToken, resourceName = '系统管理员接口') {
+    const session = this.getSystemAdminSession(sessionToken);
+    if (!session) {
+      const error = new Error(`需要有效系统管理员 session 才能访问${resourceName}`);
+      error.statusCode = 401;
+      throw error;
+    }
+    return session;
+  }
+
+  listAdminTournaments(sessionToken) {
+    this.requireSystemAdminSession(sessionToken, '所有赛事');
+    return this.listRooms().map(room => {
+      const access = this.roomAccess.get(room.tournamentId);
+      return {
+        ...room,
+        codes: roomCodesFromAccess(access),
+      };
+    });
+  }
+
+  getSystemConfig(sessionToken) {
+    this.requireSystemAdminSession(sessionToken, '系统配置');
+    return this.publicSystemConfig();
+  }
+
+  updateSystemConfig(sessionToken, input = {}) {
+    const session = this.requireSystemAdminSession(sessionToken, '系统配置');
+    validateSystemConfigInput(input);
+    const nextConfig = normalizeSystemConfig(input, this.publicSystemConfig());
+    this.systemConfig = nextConfig;
+    this.applySystemConfigRuntime();
+    this.recordSecurityEvent('admin_config_updated', {
+      actorId: session.actorId,
+      config: this.publicSystemConfig(),
+    });
+    this.persistToDisk();
+    return this.publicSystemConfig();
+  }
+
+  archiveTournamentAsAdmin(id, sessionToken) {
+    const session = this.requireSystemAdminSession(sessionToken, '房间归档');
+    const access = this.roomAccess.get(id);
+    const state = this.tournaments.get(id);
+    if (!access || !state) return null;
+    const now = new Date().toISOString();
+    const nextAccess = {
+      ...access,
+      status: 'archived',
+      archivedAt: access.archivedAt || now,
+      updatedAt: now,
+    };
+    const nextState = clone(state);
+    nextState.snapshot = nextState.snapshot && typeof nextState.snapshot === 'object' ? nextState.snapshot : {};
+    nextState.snapshot.roomStatus = 'archived';
+    this.roomAccess.set(id, nextAccess);
+    this.tournaments.set(id, nextState);
+    this.recordSecurityEvent('admin_tournament_archived', { actorId: session.actorId, tournamentId: id });
+    this.persistToDisk();
+    return roomLifecycleSummary(id, nextAccess);
+  }
+
+  deleteTournamentAsAdmin(id, sessionToken) {
+    const session = this.requireSystemAdminSession(sessionToken, '房间删除');
+    const access = this.roomAccess.get(id);
+    if (!access || !this.tournaments.has(id)) return null;
+    const now = new Date().toISOString();
+    this.tournaments.delete(id);
+    this.roomAccess.delete(id);
+    this.initialRoomAccess.delete(id);
+    this.subscribers.delete(id);
+    for (const [hash, current] of Array.from(this.sessions.entries())) {
+      if (current && current.tournamentId === id) this.sessions.delete(hash);
+    }
+    this.recordSecurityEvent('admin_tournament_deleted', { actorId: session.actorId, tournamentId: id });
+    this.persistToDisk();
+    return {
+      tournamentId: id,
+      status: 'deleted',
+      deletedAt: now,
+      deletedBy: session.actorId || '',
+    };
+  }
+
+  getTournamentBackupAsAdmin(id, sessionToken) {
+    const session = this.requireSystemAdminSession(sessionToken, '赛事备份');
+    const state = this.tournaments.get(id);
+    if (!state) return null;
+    const tournament = clone(state);
+    this.recordSecurityEvent('admin_tournament_exported', { actorId: session.actorId, tournamentId: id });
+    this.persistToDisk();
+    return {
+      backupVersion: 'hexcore-multiplayer-backup-v1',
+      exportedAt: new Date().toISOString(),
+      storage: this.storageLabel(),
+      checksum: checksumJson(tournament),
+      tournament,
+    };
+  }
+
+  createTournamentSessionAsAdmin(id, sessionToken) {
+    const adminSession = this.requireSystemAdminSession(sessionToken, '赛事管理视图');
+    const access = this.roomAccess.get(id);
+    if (!access || !this.tournaments.has(id)) return null;
+    if (roomStatus(access) === 'archived') {
+      const error = new Error('房间已归档，只能查看和导出，不能进入写入管理视图');
+      error.statusCode = 403;
+      throw error;
+    }
+    const token = generateSecret('sess');
+    const issuedAt = new Date();
+    const session = {
+      sessionTokenHash: hashSecret(token),
+      tournamentId: id,
+      actorId: adminSession.actorId || SYSTEM_ADMIN_ACTOR_ID,
+      displayName: adminSession.displayName || '系统管理员',
+      role: ROLES.SUPER_ADMIN,
+      teamId: '',
+      joinedAt: issuedAt.toISOString(),
+      issuedAt: issuedAt.toISOString(),
+      expiresAt: new Date(issuedAt.getTime() + this.sessionTtlMs).toISOString(),
+      bridgedBySystemAdmin: true,
+    };
+    this.sessions.set(session.sessionTokenHash, session);
+    this.recordSecurityEvent('admin_tournament_session_issued', { actorId: adminSession.actorId, tournamentId: id });
+    this.persistToDisk();
+    return clone({ ...session, sessionToken: token, sessionTokenHash: undefined });
+  }
+
+  getSecurityEvents(sessionToken, limit = 50) {
+    this.requireSystemAdminSession(sessionToken, '安全事件');
+    const count = safePositiveNumber(limit, 50, 200);
+    return clone(this.securityEvents.slice(-count).reverse());
+  }
+
+  recordSecurityEvent(type, payload = {}, options = {}) {
+    const event = sanitizeSecurityEvent({
+      eventId: `sec_${Date.now()}_${crypto.randomBytes(6).toString('base64url')}`,
+      type: String(type || 'security_event').trim().slice(0, 80),
+      actorId: String(payload.actorId || '').trim().slice(0, 80),
+      role: SYSTEM_ADMIN_ROLE,
+      tournamentId: String(payload.tournamentId || '').trim().slice(0, 80),
+      summary: payload.summary && typeof payload.summary === 'object' ? payload.summary : {},
+      config: payload.config && typeof payload.config === 'object' ? payload.config : undefined,
+      createdAt: new Date().toISOString(),
+    });
+    this.securityEvents.push(event);
+    if (this.securityEvents.length > SECURITY_EVENT_LIMIT) {
+      this.securityEvents = this.securityEvents.slice(-SECURITY_EVENT_LIMIT);
+    }
+    if (options.persist) this.persistToDisk();
+    return clone(event);
+  }
+
+  applySystemConfigRuntime(options = {}) {
+    this.systemConfig = normalizeSystemConfig(this.systemConfig, {
+      maxRooms: this.maxRooms,
+      sessionTtlHours: Math.max(1, Math.round(this.sessionTtlMs / (60 * 60 * 1000))),
+      streamTokenTtlSeconds: normalizeStreamTokenTtlSeconds(),
+    });
+    this.maxRooms = this.systemConfig.maxRooms;
+    if (!options.preserveSessionTtlMs) {
+      this.sessionTtlMs = this.systemConfig.sessionTtlHours * 60 * 60 * 1000;
+    }
   }
 
   listRooms() {
@@ -187,8 +496,11 @@ class MemoryTournamentStore {
       throw error;
     }
     const code = String(input.code || '').trim();
+    const requestedRole = String(input.role || input.view || '').trim().toLowerCase();
     const displayName = String(input.displayName || '未命名用户').trim().slice(0, 40);
-    const binding = bindingFromCode(access, code);
+    const binding = !code && requestedRole === 'viewer'
+      ? { role: ROLES.VIEWER }
+      : bindingFromCode(access, code);
     if (!binding) throw new Error('房间码无效');
     const actorId = `user-${crypto.randomUUID()}`;
     const sessionToken = generateSecret('sess');
@@ -319,6 +631,13 @@ class MemoryTournamentStore {
       this.tournaments = mapFromEntries(parsed.tournaments);
       this.roomAccess = mapFromEntries(parsed.roomAccess);
       this.sessions = mapFromEntries(parsed.sessions);
+      this.systemConfig = normalizeSystemConfig(parsed.systemConfig, this.systemConfig);
+      this.loadedSystemConfigFromDisk = Boolean(parsed.systemConfig);
+      this.systemAdmin = parsed.systemAdmin && typeof parsed.systemAdmin === 'object' ? clone(parsed.systemAdmin) : null;
+      this.systemAdminSessions = mapFromEntries(parsed.systemAdminSessions);
+      this.securityEvents = Array.isArray(parsed.securityEvents)
+        ? parsed.securityEvents.map(event => sanitizeSecurityEvent(event)).slice(-SECURITY_EVENT_LIMIT)
+        : [];
       this.initialRoomAccess = new Map();
     } catch (error) {
       throw new Error(`读取多人端持久化文件失败：${error.message}`);
@@ -333,6 +652,10 @@ class MemoryTournamentStore {
       tournaments: entriesFromMap(this.tournaments),
       roomAccess: entriesFromMap(this.roomAccess),
       sessions: entriesFromMap(this.sessions),
+      systemConfig: clone(this.systemConfig),
+      systemAdmin: this.systemAdmin ? clone(this.systemAdmin) : null,
+      systemAdminSessions: entriesFromMap(this.systemAdminSessions),
+      securityEvents: clone(this.securityEvents),
     };
     const target = path.resolve(this.dataFile);
     fs.mkdirSync(path.dirname(target), { recursive: true });
@@ -362,6 +685,45 @@ function normalizeMaxRooms(value) {
   const configured = Number(value ?? process.env.HEXCORE_MAX_ROOMS);
   if (Number.isInteger(configured) && configured >= 1 && configured <= 500) return configured;
   return 20;
+}
+
+function normalizeStreamTokenTtlSeconds(value) {
+  const configured = Number(value ?? process.env.HEXCORE_STREAM_TOKEN_TTL_SECONDS);
+  if (Number.isInteger(configured) && configured >= 30 && configured <= 3600) return configured;
+  return 120;
+}
+
+function normalizeSystemConfig(input = {}, fallback = {}) {
+  const source = input && typeof input === 'object' ? input : {};
+  const base = fallback && typeof fallback === 'object' ? fallback : {};
+  const maxRooms = Number(source.maxRooms ?? base.maxRooms ?? process.env.HEXCORE_MAX_ROOMS);
+  const sessionTtlHours = Number(source.sessionTtlHours ?? base.sessionTtlHours ?? process.env.HEXCORE_SESSION_TTL_HOURS);
+  const streamTokenTtlSeconds = Number(source.streamTokenTtlSeconds ?? base.streamTokenTtlSeconds ?? process.env.HEXCORE_STREAM_TOKEN_TTL_SECONDS);
+  return {
+    maxRooms: Number.isInteger(maxRooms) && maxRooms >= 1 && maxRooms <= 500 ? maxRooms : normalizeMaxRooms(base.maxRooms),
+    sessionTtlHours: Number.isInteger(sessionTtlHours) && sessionTtlHours >= 1 && sessionTtlHours <= 168 ? sessionTtlHours : 24,
+    streamTokenTtlSeconds: Number.isInteger(streamTokenTtlSeconds) && streamTokenTtlSeconds >= 30 && streamTokenTtlSeconds <= 3600
+      ? streamTokenTtlSeconds
+      : normalizeStreamTokenTtlSeconds(base.streamTokenTtlSeconds),
+  };
+}
+
+function validateSystemConfigInput(input = {}) {
+  const source = input && typeof input === 'object' ? input : {};
+  const checks = [
+    ['maxRooms', 1, 500, 'maxRooms 必须是 1-500 的整数'],
+    ['sessionTtlHours', 1, 168, 'sessionTtlHours 必须是 1-168 的整数'],
+    ['streamTokenTtlSeconds', 30, 3600, 'streamTokenTtlSeconds 必须是 30-3600 的整数'],
+  ];
+  for (const [key, min, max, message] of checks) {
+    if (!Object.prototype.hasOwnProperty.call(source, key)) continue;
+    const value = Number(source[key]);
+    if (!Number.isInteger(value) || value < min || value > max) {
+      const error = new Error(message);
+      error.statusCode = 400;
+      throw error;
+    }
+  }
 }
 
 function roomStatus(access = {}) {
@@ -641,6 +1003,15 @@ function createRoomAccess(id, input = {}) {
     teamName: String(team.name || `队伍${index + 1}`).trim().slice(0, 40),
     code: safeProvidedCode(team.code) || generateSecret(`cap${index + 1}`),
   }));
+  const codeVault = {
+    refereeCode,
+    viewerCode,
+    captainCodes: captainCodes.map(item => ({
+      teamId: item.teamId,
+      teamName: item.teamName,
+      code: item.code,
+    })),
+  };
   return {
     initial: {
       tournamentId: id,
@@ -655,6 +1026,7 @@ function createRoomAccess(id, input = {}) {
       status: 'active',
       refereeCodeHash: hashSecret(refereeCode),
       viewerCodeHash: hashSecret(viewerCode),
+      codeVaultEncrypted: encryptRoomCodeVault(codeVault),
       captainCodes: captainCodes.map(item => ({
         teamId: item.teamId,
         teamName: item.teamName,
@@ -683,6 +1055,111 @@ function generateSecret(prefix) {
 
 function hashSecret(secret) {
   return crypto.createHash('sha256').update(String(secret || ''), 'utf8').digest('hex');
+}
+
+function roomCodeSecret() {
+  return String(
+    process.env.HEXCORE_ROOM_CODE_SECRET
+    || process.env.HEXCORE_POSTGRES_PASSWORD
+    || process.env.HEXCORE_ADMIN_SECRET
+    || 'hexcore2-local-room-code-secret'
+  );
+}
+
+function encryptRoomCodeVault(value) {
+  const iv = crypto.randomBytes(12);
+  const key = crypto.createHash('sha256').update(roomCodeSecret(), 'utf8').digest();
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+  const data = Buffer.concat([
+    cipher.update(JSON.stringify(value || {}), 'utf8'),
+    cipher.final(),
+  ]);
+  return {
+    alg: 'aes-256-gcm-v1',
+    iv: iv.toString('base64url'),
+    tag: cipher.getAuthTag().toString('base64url'),
+    data: data.toString('base64url'),
+  };
+}
+
+function decryptRoomCodeVault(encrypted) {
+  if (!encrypted || typeof encrypted !== 'object') return null;
+  if (encrypted.refereeCode || encrypted.viewerCode || Array.isArray(encrypted.captainCodes)) {
+    return normalizeRoomCodeVault(encrypted);
+  }
+  if (encrypted.alg !== 'aes-256-gcm-v1' || !encrypted.iv || !encrypted.tag || !encrypted.data) return null;
+  try {
+    const key = crypto.createHash('sha256').update(roomCodeSecret(), 'utf8').digest();
+    const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(encrypted.iv, 'base64url'));
+    decipher.setAuthTag(Buffer.from(encrypted.tag, 'base64url'));
+    const text = Buffer.concat([
+      decipher.update(Buffer.from(encrypted.data, 'base64url')),
+      decipher.final(),
+    ]).toString('utf8');
+    return normalizeRoomCodeVault(JSON.parse(text));
+  } catch (error) {
+    return null;
+  }
+}
+
+function normalizeRoomCodeVault(vault = {}) {
+  const source = vault && typeof vault === 'object' ? vault : {};
+  return {
+    available: Boolean(source.refereeCode || source.viewerCode || (Array.isArray(source.captainCodes) && source.captainCodes.length)),
+    refereeCode: String(source.refereeCode || '').trim(),
+    viewerCode: String(source.viewerCode || '').trim(),
+    captainCodes: (Array.isArray(source.captainCodes) ? source.captainCodes : []).map((item, index) => ({
+      teamId: String(item && (item.teamId || item.id) || `team-${index + 1}`).trim(),
+      teamName: String(item && item.teamName || item && item.name || `队伍${index + 1}`).trim().slice(0, 40),
+      code: String(item && item.code || '').trim(),
+    })).filter(item => item.teamId).slice(0, 20),
+  };
+}
+
+function roomCodesFromAccess(access = {}) {
+  const vault = decryptRoomCodeVault(access.codeVaultEncrypted || access.codeVault);
+  if (vault && vault.available) return vault;
+  return {
+    available: false,
+    refereeCode: '',
+    viewerCode: '',
+    captainCodes: (Array.isArray(access.captainCodes) ? access.captainCodes : []).map((item, index) => ({
+      teamId: String(item.teamId || `team-${index + 1}`).trim(),
+      teamName: String(item.teamName || `队伍${index + 1}`).trim().slice(0, 40),
+      code: '',
+    })),
+  };
+}
+
+function hashPassword(password, salt = crypto.randomBytes(18).toString('base64url')) {
+  const credentialHash = crypto.scryptSync(String(password || ''), salt, 32).toString('base64url');
+  return {
+    algorithm: 'scrypt-sha256-v1',
+    salt,
+    credentialHash,
+  };
+}
+
+function verifyPassword(password, record = null) {
+  if (!record || !record.salt || !record.credentialHash) return false;
+  const next = hashPassword(String(password || ''), record.salt);
+  return constantTimeEqual(next.credentialHash, record.credentialHash);
+}
+
+function constantTimeEqual(left, right) {
+  const leftHash = crypto.createHash('sha256').update(String(left || ''), 'utf8').digest();
+  const rightHash = crypto.createHash('sha256').update(String(right || ''), 'utf8').digest();
+  return crypto.timingSafeEqual(leftHash, rightHash);
+}
+
+function normalizeAdminPassword(value) {
+  const text = String(value || '');
+  if (text.length < 8 || text.length > 200) {
+    const error = new Error('管理员密码长度必须为 8-200 位');
+    error.statusCode = 400;
+    throw error;
+  }
+  return text;
 }
 
 function checksumJson(value) {
@@ -717,6 +1194,26 @@ function roomAccessSummary(access) {
   });
 }
 
+function sanitizeSecurityEvent(event = {}) {
+  const removeSecrets = value => {
+    if (Array.isArray(value)) return value.map(removeSecrets).slice(0, 20);
+    if (!value || typeof value !== 'object') return value;
+    return Object.fromEntries(Object.entries(value)
+      .filter(([key]) => !/password|token|code|secret|hash/i.test(String(key || '')))
+      .map(([key, item]) => [key, removeSecrets(item)]));
+  };
+  return {
+    eventId: String(event.eventId || '').trim().slice(0, 120),
+    type: String(event.type || 'security_event').trim().slice(0, 80),
+    actorId: String(event.actorId || '').trim().slice(0, 80),
+    role: String(event.role || SYSTEM_ADMIN_ROLE).trim().slice(0, 40),
+    tournamentId: String(event.tournamentId || '').trim().slice(0, 80),
+    summary: removeSecrets(event.summary && typeof event.summary === 'object' ? event.summary : {}),
+    config: removeSecrets(event.config && typeof event.config === 'object' ? event.config : undefined),
+    createdAt: String(event.createdAt || new Date().toISOString()).trim().slice(0, 40),
+  };
+}
+
 function roomLifecycleSummary(id, access = {}) {
   return {
     tournamentId: id,
@@ -733,6 +1230,7 @@ module.exports = {
   createRoomAccess,
   generateSecret,
   hashSecret,
+  normalizeSystemConfig,
   roomLifecycleSummary,
   roomAccessSummary,
 };

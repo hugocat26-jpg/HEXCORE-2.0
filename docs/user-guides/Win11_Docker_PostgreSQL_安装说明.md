@@ -21,7 +21,7 @@ winget install Docker.DockerDesktop
 
 ## 安装
 
-1. 运行 `HEXCORE2_Setup_v2.0.23.exe`。
+1. 运行 `HEXCORE2_Setup_v2.0.25.exe`。
 2. 安装目录默认使用 `%LOCALAPPDATA%\HEXCORE2`。
 3. 保留默认快捷方式：
    - 启动 HEXCORE2
@@ -29,7 +29,7 @@ winget install Docker.DockerDesktop
    - 打开裁判页面
    - 查看服务日志
 
-首次启动时，脚本会从 `.env.example` 生成本机 `.env`，并自动生成随机 PostgreSQL 密码。该密码只保存在客户电脑本机，不会显示在控制台或写入说明文档。
+首次启动时，脚本会从 `.env.example` 生成本机 `.env`，并自动生成随机 PostgreSQL 密码和房间码加密密钥。密钥只保存在客户电脑本机，不会显示在控制台或写入说明文档。
 
 ## 启动
 

@@ -1171,7 +1171,7 @@ function testSystemIntegrityCheck() {
   H.actions.setActiveView('settings');
   H.actions.runSystemCheck();
 
-  assert(H.meta.version === '2.0.23' && app.innerHTML.includes('HEXCORE 2.0 v2.0.23 裁判端'), '系统设置页应展示统一项目版本号');
+  assert(H.meta.version === '2.0.25' && app.innerHTML.includes('HEXCORE 2.0 v2.0.25 裁判端'), '系统设置页应展示统一项目版本号');
   assert(H.state.ui.systemCheckResult && !H.state.ui.systemCheckResult.ok, '状态检查应保存可视化结果');
   assert(H.state.ui.systemCheckResult.issues.some(issue => issue.type === '重复归属'), '状态检查应识别重复归属');
   assert(H.state.ui.systemCheckResult.issues.some(issue => issue.type === '跨阵营'), '状态检查应识别跨阵营');
@@ -3765,11 +3765,69 @@ async function testMultiplayerApiServer() {
     assert(created.status === 201 && created.body.tournament.stateVersion === 1, '创建赛事应写入 TournamentCreated 事件并推进版本');
     assert(created.body.tournament.events[0].type === multiplayerShared.EVENT_TYPES.TOURNAMENT_CREATED, '创建赛事应返回创建事件');
     assert(created.body.room && created.body.room.captainCodes[0].code === 'captain-code-1', '创建赛事响应应一次性返回初始房间码');
+    assert(!created.body.room.superAdminCode && !created.body.room.adminCode, '创建赛事响应不应再返回赛事管理员码');
     assert(!created.body.room.displayCode, '多人端当前不提供大屏端房间码');
     assert(!created.body.tournament.events[0].payload.refereeCode && !created.body.tournament.snapshot.refereeCode, '公开快照和事件不应包含房间明文码');
 
     const anonymousRoom = await requestJson(port, 'GET', '/api/tournaments/t-api/room');
     assert(anonymousRoom.status === 401 && /sessionToken/.test(anonymousRoom.body.error), '匿名用户不应读取房间码管理信息');
+
+    const anonymousAdminList = await requestJson(port, 'GET', '/api/admin/tournaments');
+    assert(anonymousAdminList.status === 401 && !anonymousAdminList.body.rooms, '匿名用户不应读取系统管理员房间列表');
+    const adminStatusBefore = await requestJson(port, 'GET', '/api/admin/status');
+    assert(adminStatusBefore.status === 200 && adminStatusBefore.body.admin.setupRequired === true, '未初始化时管理员状态应要求首次设置');
+    const adminSetup = await requestJson(port, 'POST', '/api/admin/setup', {
+      password: 'AdminPass#2026',
+      displayName: '系统管理员',
+    });
+    assert(
+      adminSetup.status === 201
+      && adminSetup.body.session
+      && adminSetup.body.session.role === 'system_admin'
+      && adminSetup.body.session.sessionToken
+      && !adminSetup.body.session.sessionTokenHash,
+      '首次设置应签发独立系统管理员 session，且不返回摘要'
+    );
+    const adminSetupAgain = await requestJson(port, 'POST', '/api/admin/setup', {
+      password: 'AdminPass#2026',
+      displayName: '系统管理员',
+    });
+    assert(adminSetupAgain.status === 409, '管理员已初始化后不能再次首次设置');
+    const adminWrongLogin = await requestJson(port, 'POST', '/api/admin/login', {
+      password: 'wrong-password',
+      displayName: '系统管理员',
+    });
+    assert(adminWrongLogin.status === 401, '错误管理员密码应登录失败');
+    const adminList = await requestJson(port, 'GET', '/api/admin/tournaments', undefined, {
+      headers: { Authorization: `Bearer ${adminSetup.body.session.sessionToken}` },
+    });
+    assert(
+      adminList.status === 200
+      && adminList.body.rooms.some(room => room.tournamentId === 't-api'
+        && room.codes
+        && room.codes.refereeCode === created.body.room.refereeCode
+        && room.codes.viewerCode === created.body.room.viewerCode
+        && room.codes.captainCodes[0].code === 'captain-code-1'
+        && !room.superAdminCode),
+      '系统管理员后台应能查看所有房间的裁判码、观众码和队长码，但不应出现赛事管理员码'
+    );
+    const anonymousSystemLoad = await requestJson(port, 'GET', '/api/admin/system-load');
+    assert(anonymousSystemLoad.status === 401 && !anonymousSystemLoad.body.load, '匿名用户不应读取系统负荷');
+    const systemLoad = await requestJson(port, 'GET', '/api/admin/system-load', undefined, {
+      headers: { Authorization: `Bearer ${adminSetup.body.session.sessionToken}` },
+    });
+    assert(
+      systemLoad.status === 200
+      && systemLoad.body.load
+      && systemLoad.body.load.activeRoomCount >= 1
+      && systemLoad.body.load.sessionCount >= 0
+      && systemLoad.body.load.systemAdminSessionCount >= 1
+      && systemLoad.body.load.process
+      && Number.isInteger(systemLoad.body.load.process.rssMb),
+      '系统管理员应能读取系统负荷，用于多场赛事实时分析'
+    );
+    const systemSessionAsTournamentSession = await requestJson(port, 'GET', `/api/tournaments/t-api/projection?view=referee&sessionToken=${encodeURIComponent(adminSetup.body.session.sessionToken)}`);
+    assert(systemSessionAsTournamentSession.status === 401, '系统管理员 session 不能直接替代赛事 session 读取裁判投影');
 
     const captainJoin = await requestJson(port, 'POST', '/api/tournaments/t-api/join', {
       code: created.body.room.captainCodes[0].code,
@@ -3810,6 +3868,16 @@ async function testMultiplayerApiServer() {
     });
     assert(refereeJoin.status === 200 && refereeJoin.body.session.role === multiplayerShared.ROLES.REFEREE, '裁判应能通过创建时返回的裁判码加入房间');
 
+    const adminBridge = await requestJson(port, 'POST', '/api/admin/tournaments/t-api/session', {}, {
+      headers: { Authorization: `Bearer ${adminSetup.body.session.sessionToken}` },
+    });
+    assert(
+      adminBridge.status === 200
+      && adminBridge.body.session.role === multiplayerShared.ROLES.SUPER_ADMIN
+      && adminBridge.body.session.bridgedBySystemAdmin === true,
+      '系统管理员应通过后台桥接接口获得临时 super_admin 赛事会话'
+    );
+
     const noCampProjectionCreated = await requestJson(port, 'POST', '/api/tournaments', {
       id: 't-api-projection-nocamp',
       name: '无阵营投影回归',
@@ -3840,13 +3908,16 @@ async function testMultiplayerApiServer() {
 
     const room = await requestJson(port, 'GET', `/api/tournaments/t-api/room?sessionToken=${encodeURIComponent(refereeJoin.body.session.sessionToken)}`);
     assert(room.status === 200 && room.body.room.captainCodes[0].codeIssued === true, '裁判 session 应能读取房间码管理摘要');
+    assert(!room.body.room.superAdminCode && !room.body.room.adminCode, '房间码管理摘要不应显示赛事管理员码');
     assert(!room.body.room.refereeCodeHash && !room.body.room.refereeCode.code && !room.body.room.captainCodes[0].code, '房间码管理摘要不应返回明文码或摘要');
     assert(!room.body.room.displayCode, '房间码管理摘要不应保留大屏端入口');
 
     const anonymousRefereeProjection = await requestJson(port, 'GET', '/api/tournaments/t-api/projection?view=referee');
     const refereeProjection = await requestJson(port, 'GET', `/api/tournaments/t-api/projection?view=referee&sessionToken=${encodeURIComponent(refereeJoin.body.session.sessionToken)}`);
+    const adminProjection = await requestJson(port, 'GET', `/api/tournaments/t-api/projection?view=referee&sessionToken=${encodeURIComponent(adminBridge.body.session.sessionToken)}`);
     const refereeProjectionText = JSON.stringify(refereeProjection.body);
     assert(anonymousRefereeProjection.status === 401 && /sessionToken/.test(anonymousRefereeProjection.body.error), '裁判投影必须通过有效裁判 sessionToken 读取');
+    assert(adminProjection.status === 200 && adminProjection.body.tournament.view === 'referee', '管理员最高权限应能读取裁判投影');
     assert(
       refereeProjection.status === 200
       && refereeProjection.body.tournament.view === 'referee'
@@ -4082,6 +4153,17 @@ async function testMultiplayerApiServer() {
       code: hexCreated.body.room.viewerCode,
       displayName: '海克斯观众',
     });
+    const hexOpenViewerJoin = await requestJson(port, 'POST', '/api/tournaments/t-hex-sync/join', {
+      code: '',
+      role: 'viewer',
+      displayName: '免码观众',
+    });
+    assert(
+      hexOpenViewerJoin.status === 200
+      && hexOpenViewerJoin.body.session.role === multiplayerShared.ROLES.VIEWER
+      && hexOpenViewerJoin.body.session.sessionToken,
+      '房间列表应允许不输入加入码直接进入观众端只读会话'
+    );
     const hexRefereeJoin = await requestJson(port, 'POST', '/api/tournaments/t-hex-sync/join', {
       code: hexCreated.body.room.refereeCode,
       displayName: '海克斯裁判',
@@ -6442,7 +6524,20 @@ function testMultiplayerJoinGateAndCors() {
     && ui.includes('join-room-code')
     && ui.includes('window.hexcoreUI.joinRoom()')
     && ui.includes('shouldShowJoinGate()')
-    && ui.includes('裁判创建赛事')
+    && ui.includes('HEXCORE 2.0 多人登录页')
+    && ui.includes('HEXCORE 2.0 管理员后台')
+    && ui.includes("return 'HEXCORE 2.0 管理员端'")
+    && ui.includes("return 'HEXCORE 2.0 裁判端'")
+    && ui.includes("return 'HEXCORE 2.0 队长端'")
+    && ui.includes("return 'HEXCORE 2.0 观众端'")
+    && ui.includes('isAdminClient()')
+    && ui.includes('MANAGEMENT_ROLES')
+    && ui.includes('管理员端')
+    && ui.includes('adminPanel(apiBase)')
+    && ui.includes('系统管理员后台')
+    && ui.includes('当前系统负荷')
+    && ui.includes('updateDocumentTitle()')
+    && ui.includes('任何人都可创建赛事')
     && ui.includes('create-tournament-id')
     && ui.includes('create-tournament-name')
     && ui.includes('createdRoomPanel()')
@@ -6467,6 +6562,12 @@ function testMultiplayerJoinGateAndCors() {
     && ui.includes('window.hexcoreUI.copyJoinGateAccessText()')
     && ui.includes('window.hexcoreUI.checkJoinApiHealth()')
     && ui.includes('window.hexcoreUI.loadRoomList()')
+    && ui.includes('window.hexcoreUI.loadAdminDashboard()')
+    && ui.includes('window.hexcoreUI.adminCopyRoomCodes')
+    && ui.includes('window.hexcoreUI.openRoomActionDialog')
+    && ui.includes('roomActionDialog()')
+    && ui.includes('免码进入观众端')
+    && ui.includes('归档/关闭房间')
     && ui.includes('window.hexcoreUI.archiveCurrentRoom()')
     && ui.includes('window.hexcoreUI.deleteCurrentRoom()')
     && ui.includes('join-room-list')
@@ -6482,9 +6583,12 @@ function testMultiplayerJoinGateAndCors() {
     && ui.includes('可抽选、购买和维护本队')
     && ui.includes('返回多人房间')
     && ui.includes('window.hexcoreUI.leaveMultiplayerRoom()')
+    && ui.includes('function validRoleSession(session)')
+    && ui.includes('if (!session) return true')
+    && ui.includes('if (hasExplicitClientRole()) return !validRoleSession(session)')
     && ui.includes('Hexcore2.volatileCreatedRoom')
     && ui.includes('房间码明文已清空')
-    && ui.includes('创建前会先校验服务端是否已有同名赛事')
+    && ui.includes('创建成功后会显示该赛事裁判码、队长码和观众码')
     && ui.includes('roomSyncInfo()')
     && ui.includes('syncDetail')
     && ui.includes("label: '会话'")
@@ -6495,6 +6599,7 @@ function testMultiplayerJoinGateAndCors() {
   );
   assert(
     main.includes('MULTIPLAYER_SESSION_KEY')
+    && main.includes('SYSTEM_ADMIN_SESSION_KEY')
     && main.includes('joinRoom()')
     && main.includes('MULTIPLAYER_API_BASE_KEY')
     && main.includes('recentMultiplayerApiBase()')
@@ -6526,9 +6631,21 @@ function testMultiplayerJoinGateAndCors() {
     && main.includes('确认赛事 ID 与裁判创建赛事后分发文本中的赛事 ID 完全一致')
     && main.includes('加入失败，请检查分发文本或联系裁判')
     && main.includes('copyCreatedRoomCodes')
+    && main.includes('adminCopyRoomCodes')
+    && main.includes('/api/admin/tournaments')
+    && main.includes('/api/admin/config')
+    && main.includes('/api/admin/system-load')
+    && main.includes('/api/admin/tournaments/${encodeURIComponent(tournamentId)}/session')
     && main.includes('copyJoinGateAccessText')
     && main.includes('checkJoinApiHealth')
     && main.includes('loadRoomList')
+    && main.includes('openRoomActionDialog')
+    && main.includes('joinSelectedRoomAsViewer')
+    && main.includes('joinSelectedRoomWithCode')
+    && main.includes('archiveSelectedRoom')
+    && main.includes('deleteSelectedRoom')
+    && main.includes("role: 'viewer'")
+    && main.includes('refereeSessionForRoom')
     && main.includes('archiveCurrentRoom')
     && main.includes('/archive')
     && main.includes('deleteCurrentRoom')
@@ -6551,12 +6668,21 @@ function testMultiplayerJoinGateAndCors() {
     && main.includes('session.sessionToken')
     && main.includes("role=viewer")
     && main.includes("role=captain&teamId=")
+    && main.includes("role=admin")
     && main.includes('createTournamentRoom()')
     && main.includes('enterCreatedRefereeRoom()')
+    && main.includes('MANAGEMENT_ROLES')
+    && main.includes('isManagementRole(session.role)')
+    && main.includes('系统管理员')
+    && !main.includes('enterCreatedAdminRoom()')
+    && !main.includes('superAdminCode')
     && main.includes('leaveMultiplayerRoom()')
     && main.includes('dismissRoomWelcome()')
     && main.includes('localStorage.removeItem(MULTIPLAYER_SESSION_KEY)')
     && main.includes('Hexcore2.roomEventSource.close')
+    && main.includes('delete Hexcore2.state.ui.roomActionDialog')
+    && main.includes('delete Hexcore2.state.multiplayer.role')
+    && main.includes('delete Hexcore2.state.multiplayer.teamId')
     && main.includes('history.replaceState({}, \'\', path)')
     && main.includes('/api/tournaments')
     && main.includes('persistJoinedSession(apiBase, tournamentId, payload)')
@@ -6624,6 +6750,9 @@ function testMultiplayerJoinGateAndCors() {
     && css.includes('.join-api-check.success')
     && css.includes('.join-api-check.warn')
     && css.includes('.room-list-panel')
+    && css.includes('.admin-entry-panel')
+    && css.includes('.admin-load-grid')
+    && css.includes('.admin-code-vault')
     && css.includes('.room-list-row')
     && css.includes('.room-list-status.archived')
     && css.includes('.room-lifecycle-panel')
@@ -6719,8 +6848,8 @@ function testMultiplayerClientSubmitsAuthoritativeCommands() {
     && main.includes('/stream-token')
     && main.includes("params.set('streamToken', streamToken)")
     && main.includes('function projectionViewForSession')
-    && main.includes("if (session.role === 'referee') return 'referee'")
-    && main.includes("session.role === 'captain' || session.role === 'referee'")
+    && main.includes("if (isManagementRole(session.role)) return 'referee'")
+    && main.includes("session.role === 'captain' || isManagementRole(session.role)")
     && !main.includes("params.set('sessionToken', session.sessionToken)")
     && main.includes('eventSource.addEventListener')
     && main.includes('fetchRoomProjection(multiplayerSession())')
@@ -6793,6 +6922,10 @@ function testMultiplayerClientSubmitsAuthoritativeCommands() {
     && postgresSchema.includes('session_json::TEXT NOT LIKE')
     && postgresSchema.includes('access_json::TEXT NOT LIKE')
     && postgresSchema.includes('access_json::TEXT NOT LIKE \'%"code":%\'')
+    && postgresSchema.includes('access_json::TEXT NOT LIKE \'%"superAdminCode":%\'')
+    && postgresSchema.includes('summary_json::TEXT NOT LIKE \'%superAdminCode%\'')
+    && postgresSchema.includes('config_json::TEXT NOT LIKE \'%"streamToken"%\'')
+    && !postgresSchema.includes("config_json::TEXT NOT LIKE '%streamToken%'")
     && postgresSchema.includes("'supervisor'")
     && postgresBackup.includes('$env:HEXCORE_POSTGRES_URL')
     && postgresBackup.includes('$env:PGDATABASE = $env:HEXCORE_POSTGRES_URL')
@@ -6846,6 +6979,7 @@ function testMultiplayerClientSubmitsAuthoritativeCommands() {
     && compose.includes('HEXCORE_POSTGRES_PASSWORD:?')
     && compose.includes('HEXCORE_POSTGRES_URL: postgres://')
     && compose.includes('HEXCORE_MAX_ROOMS: ${HEXCORE_MAX_ROOMS:-20}')
+    && compose.includes('HEXCORE_ROOM_CODE_SECRET: ${HEXCORE_ROOM_CODE_SECRET:-}')
     && compose.includes('hexcore-postgres-data')
     && compose.includes('${HEXCORE_APP_PORT:-4186}:4186')
     && compose.includes('${HEXCORE_API_PORT:-4196}:4196')
@@ -6853,8 +6987,10 @@ function testMultiplayerClientSubmitsAuthoritativeCommands() {
     && dockerignore.includes('.env')
     && dockerignore.includes('*.dump')
     && dockerEnv.includes('HEXCORE_POSTGRES_PASSWORD=change-this-local-password')
+    && dockerEnv.includes('HEXCORE_ROOM_CODE_SECRET=change-this-local-room-code-secret')
     && dockerEnv.includes('HEXCORE_MAX_ROOMS=20')
     && envExample.includes('HEXCORE_POSTGRES_PASSWORD=change-this-local-password')
+    && envExample.includes('HEXCORE_ROOM_CODE_SECRET=change-this-local-room-code-secret')
     && envExample.includes('HEXCORE_POSTGRES_DB=hexcore')
     && envExample.includes('HEXCORE_POSTGRES_USER=hexcore')
     && envExample.includes('HEXCORE_APP_PORT=4186')
@@ -7057,12 +7193,14 @@ function testM13DeploymentDeliveryArtifacts() {
   const winGuide = fs.readFileSync(path.join(root, 'docs/user-guides/Win11_Docker_PostgreSQL_安装说明.md'), 'utf8');
   const baotaGuide = fs.readFileSync(path.join(root, 'docs/multiplayer/腾讯云宝塔大陆部署说明.md'), 'utf8');
   const opsGuide = fs.readFileSync(path.join(root, 'docs/multiplayer/多人端部署运维说明.md'), 'utf8');
+  const css = fs.readFileSync(path.join(root, 'apps/multiplayer/src/styles/main.css'), 'utf8');
 
   assert(
     startScript.includes('Get-Command docker')
     && startScript.includes('Docker.DockerDesktop')
     && startScript.includes('.env.example')
     && startScript.includes('HEXCORE_POSTGRES_PASSWORD')
+    && startScript.includes('HEXCORE_ROOM_CODE_SECRET')
     && startScript.includes('RandomNumberGenerator')
     && startScript.includes('"compose", "up", "-d"')
     && startScript.includes('"--build"')
@@ -7078,6 +7216,13 @@ function testM13DeploymentDeliveryArtifacts() {
     && openScript.includes('HEXCORE_APP_PORT'),
     'M13：Win11 一键脚本应检测 Docker、生成随机 .env、启动 Compose、确认 postgres 健康状态，并避免输出连接串'
   );
+  assert(
+    css.includes('.room-action-modal')
+    && css.includes('.room-action-buttons')
+    && css.includes('.room-list-row:hover')
+    && css.includes('width: min(620px, calc(100vw - 48px))'),
+    '房间列表操作弹窗应有明确布局，房间行应可点击并提供悬停反馈',
+  );
 
   assert(
     !/[^\x00-\x7F]/.test(startScript + stopScript + logScript + openScript),
@@ -7086,7 +7231,7 @@ function testM13DeploymentDeliveryArtifacts() {
 
   assert(
     installer.includes('AppVersion={#AppVersion}')
-    && installer.includes('#define AppVersion "2.0.23"')
+    && installer.includes('#define AppVersion "2.0.25"')
     && installer.includes('OutputBaseFilename=HEXCORE2_Setup_v{#AppVersion}')
     && installer.includes('DefaultDirName={localappdata}\\HEXCORE2')
     && installer.includes('PrivilegesRequired=lowest')
@@ -7107,6 +7252,7 @@ function testM13DeploymentDeliveryArtifacts() {
     baotaInstall.includes('codex/multiplayer-realtime')
     && baotaInstall.includes('https://github.com/hugocat26-jpg/HEXCORE-2.0.git')
     && baotaInstall.includes('.env.example')
+    && baotaInstall.includes('HEXCORE_ROOM_CODE_SECRET')
     && baotaInstall.includes('openssl rand')
     && baotaInstall.includes('compose up -d --build')
     && baotaInstall.includes('"storage":"postgres"')
@@ -7150,7 +7296,7 @@ function testM13DeploymentDeliveryArtifacts() {
   );
 
   assert(
-    winGuide.includes('HEXCORE2_Setup_v2.0.23.exe')
+    winGuide.includes('HEXCORE2_Setup_v2.0.25.exe')
     && winGuide.includes('winget install Docker.DockerDesktop')
     && winGuide.includes('runtime.storage')
     && winGuide.includes('postgres')
