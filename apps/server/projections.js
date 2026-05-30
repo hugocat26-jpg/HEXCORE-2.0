@@ -72,14 +72,38 @@ function normalizeProjectionView(view) {
   throw new Error('未知只读投影视图');
 }
 
+function publicPlayerLite(player = null) {
+  if (!player || typeof player !== 'object') return null;
+  const id = String(player.id || player.playerId || '').trim();
+  if (!id) return null;
+  return {
+    id,
+    name: String(player.name || '').trim().slice(0, 40),
+    gameId: String(player.gameId || '').trim().slice(0, 80),
+    camp: String(player.camp || '').trim().slice(0, 40),
+    tier: Math.max(0, Number(player.tier) || 0),
+  };
+}
+
 function publicTeams(snapshot = {}) {
+  const playerById = new Map((Array.isArray(snapshot.players) ? snapshot.players : [])
+    .map(player => publicPlayerLite(player))
+    .filter(Boolean)
+    .map(player => [player.id, player]));
   return Array.isArray(snapshot.teams) ? snapshot.teams.map(team => {
+    const captainPlayerId = String(team.playerId || team.captainPlayerId || '').trim();
+    const captainPlayer = playerById.get(captainPlayerId) || publicPlayerLite(team.captainPlayer || team.player);
     const projected = {
       teamId: team.teamId || team.id || '',
       name: team.name || '',
       camp: team.camp || '',
     };
-    if (team.playerId || team.captainPlayerId) projected.playerId = team.playerId || team.captainPlayerId || '';
+    if (captainPlayerId) projected.playerId = captainPlayerId;
+    if (captainPlayer) {
+      projected.captainPlayer = captainPlayer;
+      projected.playerName = captainPlayer.name;
+      projected.playerGameId = captainPlayer.gameId;
+    }
     if (Array.isArray(team.team)) projected.team = team.team.map(playerId => String(playerId || '').trim()).filter(Boolean);
     if (team.economy && typeof team.economy === 'object') {
       projected.economy = {

@@ -1171,7 +1171,7 @@ function testSystemIntegrityCheck() {
   H.actions.setActiveView('settings');
   H.actions.runSystemCheck();
 
-  assert(H.meta.version === '2.0.22' && app.innerHTML.includes('HEXCORE 2.0 v2.0.22 裁判端'), '系统设置页应展示统一项目版本号');
+  assert(H.meta.version === '2.0.23' && app.innerHTML.includes('HEXCORE 2.0 v2.0.23 裁判端'), '系统设置页应展示统一项目版本号');
   assert(H.state.ui.systemCheckResult && !H.state.ui.systemCheckResult.ok, '状态检查应保存可视化结果');
   assert(H.state.ui.systemCheckResult.issues.some(issue => issue.type === '重复归属'), '状态检查应识别重复归属');
   assert(H.state.ui.systemCheckResult.issues.some(issue => issue.type === '跨阵营'), '状态检查应识别跨阵营');
@@ -6702,6 +6702,10 @@ function testMultiplayerClientSubmitsAuthoritativeCommands() {
     && main.includes('applyHexcoreWindowProjection(snapshot.hexcoreActionWindows)')
     && main.includes('applyHexcoreAssignmentsProjection(snapshot.hexcoreAssignments)')
     && main.includes('applyHexcoreDraftProjection(snapshot.hexcoreDraft)')
+    && main.includes("captain.playerId = nextPlayerId")
+    && main.includes("player.status = 'captain'")
+    && main.includes("Hexcore2.state.ui.hexCaptainId = projectedHexCaptainId")
+    && main.includes('function syncHexcoreAssignmentsToRoom')
     && main.includes('if (event.tournament)')
     && main.includes('applyTournamentProjection(snapshot.tournament)')
     && main.includes('connectRoomEventStream()')
@@ -6747,10 +6751,15 @@ function testMultiplayerClientSubmitsAuthoritativeCommands() {
     && rules.includes('EVENT_TYPES.HEXCORE_DRAW_ORDER_SET')
     && rules.includes('EVENT_TYPES.HEXCORE_CANDIDATE_REFRESHED')
     && rules.includes('EVENT_TYPES.HEXCORE_PICKED')
+    && rules.includes('normalizeHexcoreAssignmentsProjection')
+    && rules.includes('payload.hexcoreAssignments')
+    && rules.includes('usedHexcoreIds')
     && rules.includes('EVENT_TYPES.MATCH_SCORE_RECORDED')
     && rules.includes('recordTournamentMatchScore(next, payload)')
     && projections.includes('publicHexcoreAssignments')
     && projections.includes('publicHexcoreDraft')
+    && projections.includes('captainPlayer')
+    && projections.includes('playerName')
     && projections.includes('VIEW_TYPES.REFEREE')
     && server.includes('createReadOnlyProjection(nextState, view, projectionOptions)')
     && server.includes('requireStreamToken: true')
@@ -7077,7 +7086,7 @@ function testM13DeploymentDeliveryArtifacts() {
 
   assert(
     installer.includes('AppVersion={#AppVersion}')
-    && installer.includes('#define AppVersion "2.0.22"')
+    && installer.includes('#define AppVersion "2.0.23"')
     && installer.includes('OutputBaseFilename=HEXCORE2_Setup_v{#AppVersion}')
     && installer.includes('DefaultDirName={localappdata}\\HEXCORE2')
     && installer.includes('PrivilegesRequired=lowest')
@@ -7141,7 +7150,7 @@ function testM13DeploymentDeliveryArtifacts() {
   );
 
   assert(
-    winGuide.includes('HEXCORE2_Setup_v2.0.22.exe')
+    winGuide.includes('HEXCORE2_Setup_v2.0.23.exe')
     && winGuide.includes('winget install Docker.DockerDesktop')
     && winGuide.includes('runtime.storage')
     && winGuide.includes('postgres')

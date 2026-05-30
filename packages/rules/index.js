@@ -508,6 +508,30 @@ function ensureHexcoreAssignments(snapshot) {
   return snapshot.hexcoreAssignments;
 }
 
+function normalizeHexcoreAssignmentsProjection(input = {}, validTeamIds = new Set()) {
+  const allowedHexcoreIds = new Set(HEXCORE_IDS);
+  const usedHexcoreIds = new Set();
+  if (!input || typeof input !== 'object') return {};
+  return Object.fromEntries(Object.entries(input).map(([teamId, list]) => {
+    const cleanTeamId = safeText(teamId, '', 80);
+    if (!cleanTeamId || (validTeamIds.size && !validTeamIds.has(cleanTeamId))) return null;
+    const normalized = (Array.isArray(list) ? list : [])
+      .map(item => {
+        const hexcoreId = safeText(item && (item.id || item.hexcoreId) || item, '', 80);
+        if (!hexcoreId || !allowedHexcoreIds.has(hexcoreId)) return null;
+        if (usedHexcoreIds.has(hexcoreId)) return null;
+        usedHexcoreIds.add(hexcoreId);
+        return {
+          id: hexcoreId,
+          status: safeText(item && item.status, 'available', 40) || 'available',
+        };
+      })
+      .filter(Boolean)
+      .slice(0, 4);
+    return [cleanTeamId, normalized];
+  }).filter(Boolean));
+}
+
 function assignHexcore(snapshot, teamId, hexcoreId, status = 'available') {
   const cleanTeamId = safeText(teamId, '', 80);
   const cleanHexcoreId = safeText(hexcoreId, '', 80);
@@ -1377,10 +1401,17 @@ function applyEventToSnapshot(snapshot, event) {
       ? payload.teamIds.map(item => safeText(item, '', 80)).filter(teamId => teamId && validTeamIds.has(teamId))
       : [];
     const drawOrder = [...new Set(teamIds)];
-    next.hexcoreAssignments = {};
-    drawOrder.forEach(teamId => {
-      next.hexcoreAssignments[teamId] = [];
-    });
+    if (payload.hexcoreAssignments && typeof payload.hexcoreAssignments === 'object') {
+      next.hexcoreAssignments = normalizeHexcoreAssignmentsProjection(payload.hexcoreAssignments, validTeamIds);
+      teamIdsFrom(next).forEach(teamId => {
+        if (!Array.isArray(next.hexcoreAssignments[teamId])) next.hexcoreAssignments[teamId] = [];
+      });
+    } else {
+      next.hexcoreAssignments = {};
+      drawOrder.forEach(teamId => {
+        next.hexcoreAssignments[teamId] = [];
+      });
+    }
     next.hexcoreDraft = {
       captainId: '',
       teamId: '',
