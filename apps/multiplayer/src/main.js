@@ -1268,7 +1268,7 @@
   async function verifyTournamentAvailableForCreate(apiBase, tournamentId) {
     let response;
     try {
-      response = await fetch(`${apiBase}/api/tournaments/${encodeURIComponent(tournamentId)}/snapshot`, {
+      response = await fetch(`${apiBase}/api/tournaments`, {
         method: 'GET',
       });
     } catch (error) {
@@ -1280,8 +1280,10 @@
     } catch (error) {
       throw new Error('服务返回格式异常，请确认填写的是多人端 API 地址');
     }
-    if (response.status === 404) return true;
     if (response.ok && payload && payload.ok) {
+      const rooms = Array.isArray(payload.rooms) ? payload.rooms : [];
+      const exists = rooms.some(room => String(room.tournamentId || room.id || '').trim() === tournamentId);
+      if (!exists) return true;
       throw new Error('赛事 ID 已存在。请换一个赛事 ID，或使用已有房间码加入。');
     }
     throw new Error(payload && payload.error ? payload.error : '赛事 ID 校验失败');

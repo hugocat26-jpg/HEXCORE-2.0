@@ -19,6 +19,7 @@
 | 数据模型 | [architecture/数据模型.md](architecture/数据模型.md) |
 | 多人端部署 | [multiplayer/多人端部署运维说明.md](multiplayer/多人端部署运维说明.md) |
 | 腾讯云宝塔部署 | [multiplayer/腾讯云宝塔大陆部署说明.md](multiplayer/腾讯云宝塔大陆部署说明.md) |
+| Win11 客户安装 | [user-guides/Win11_Docker_PostgreSQL_安装说明.md](user-guides/Win11_Docker_PostgreSQL_安装说明.md) |
 
 ## 目录职责
 

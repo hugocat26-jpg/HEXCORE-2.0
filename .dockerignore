@@ -10,6 +10,8 @@ __pycache__
 *.sqlite
 *.sqlite-*
 *.dump
+backups
 .env
 .env.*
+!.env.example
 !.env.docker.example

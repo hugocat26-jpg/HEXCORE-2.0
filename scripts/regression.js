@@ -1171,7 +1171,7 @@ function testSystemIntegrityCheck() {
   H.actions.setActiveView('settings');
   H.actions.runSystemCheck();
 
-  assert(H.meta.version === '2.0.19' && app.innerHTML.includes('HEXCORE 2.0 v2.0.19 裁判端'), '系统设置页应展示统一项目版本号');
+  assert(H.meta.version === '2.0.20' && app.innerHTML.includes('HEXCORE 2.0 v2.0.20 裁判端'), '系统设置页应展示统一项目版本号');
   assert(H.state.ui.systemCheckResult && !H.state.ui.systemCheckResult.ok, '状态检查应保存可视化结果');
   assert(H.state.ui.systemCheckResult.issues.some(issue => issue.type === '重复归属'), '状态检查应识别重复归属');
   assert(H.state.ui.systemCheckResult.issues.some(issue => issue.type === '跨阵营'), '状态检查应识别跨阵营');
@@ -6506,7 +6506,8 @@ function testMultiplayerJoinGateAndCors() {
     && main.includes('localMultiplayerApiBase(location)')
     && main.includes('Hexcore2.volatileCreatedRoom')
     && main.includes('verifyTournamentAvailableForCreate')
-    && main.includes('/api/tournaments/${encodeURIComponent(tournamentId)}/snapshot')
+    && main.includes('const rooms = Array.isArray(payload.rooms) ? payload.rooms : []')
+    && main.includes("String(room.tournamentId || room.id || '').trim() === tournamentId")
     && main.includes('赛事 ID 已存在')
     && main.includes('currentCreatedRoom()')
     && main.includes('setRoomCommandSubmitting(type)')
@@ -7028,6 +7029,126 @@ async function testM12DynamicRulesBaseline() {
   );
 }
 
+function testM13DeploymentDeliveryArtifacts() {
+  const startScript = fs.readFileSync(path.join(root, 'scripts/windows/Start-HEXCORE2.ps1'), 'utf8');
+  const stopScript = fs.readFileSync(path.join(root, 'scripts/windows/Stop-HEXCORE2.ps1'), 'utf8');
+  const logScript = fs.readFileSync(path.join(root, 'scripts/windows/Show-HEXCORE2-Logs.ps1'), 'utf8');
+  const openScript = fs.readFileSync(path.join(root, 'scripts/windows/Open-HEXCORE2.ps1'), 'utf8');
+  const installer = fs.readFileSync(path.join(root, 'installer/windows/HEXCORE2_Setup.iss'), 'utf8');
+  const baotaInstall = fs.readFileSync(path.join(root, 'deploy/baota/install-hexcore-docker.sh'), 'utf8');
+  const baotaUpdate = fs.readFileSync(path.join(root, 'deploy/baota/update-hexcore.sh'), 'utf8');
+  const baotaBackup = fs.readFileSync(path.join(root, 'deploy/baota/backup-postgres.sh'), 'utf8');
+  const baotaStatus = fs.readFileSync(path.join(root, 'deploy/baota/status-hexcore.sh'), 'utf8');
+  const baotaNginx = fs.readFileSync(path.join(root, 'deploy/baota/nginx-hexcore.conf'), 'utf8');
+  const dockerVerifier = fs.readFileSync(path.join(root, 'scripts/verify-docker-postgres.js'), 'utf8');
+  const packageJson = fs.readFileSync(path.join(root, 'package.json'), 'utf8');
+  const winGuide = fs.readFileSync(path.join(root, 'docs/user-guides/Win11_Docker_PostgreSQL_安装说明.md'), 'utf8');
+  const baotaGuide = fs.readFileSync(path.join(root, 'docs/multiplayer/腾讯云宝塔大陆部署说明.md'), 'utf8');
+  const opsGuide = fs.readFileSync(path.join(root, 'docs/multiplayer/多人端部署运维说明.md'), 'utf8');
+
+  assert(
+    startScript.includes('Get-Command docker')
+    && startScript.includes('Docker.DockerDesktop')
+    && startScript.includes('.env.example')
+    && startScript.includes('HEXCORE_POSTGRES_PASSWORD')
+    && startScript.includes('RandomNumberGenerator')
+    && startScript.includes('"compose", "up", "-d"')
+    && startScript.includes('"--build"')
+    && startScript.includes('runtime.storage -eq "postgres"')
+    && !startScript.includes('HEXCORE_POSTGRES_URL')
+    && stopScript.includes('docker compose down')
+    && stopScript.includes('Read-Host')
+    && stopScript.includes('DELETE')
+    && stopScript.includes('docker compose down -v')
+    && logScript.includes('ValidateSet("hexcore", "postgres", "all")')
+    && openScript.includes('HEXCORE_APP_PORT'),
+    'M13：Win11 一键脚本应检测 Docker、生成随机 .env、启动 Compose、确认 postgres 健康状态，并避免输出连接串'
+  );
+
+  assert(
+    installer.includes('AppVersion={#AppVersion}')
+    && installer.includes('#define AppVersion "2.0.20"')
+    && installer.includes('OutputBaseFilename=HEXCORE2_Setup_v{#AppVersion}')
+    && installer.includes('DefaultDirName={localappdata}\\HEXCORE2')
+    && installer.includes('PrivilegesRequired=lowest')
+    && installer.includes('Start-HEXCORE2.cmd')
+    && installer.includes('Stop-HEXCORE2.cmd')
+    && installer.includes('Open-HEXCORE2.cmd')
+    && installer.includes('Show-HEXCORE2-Logs.cmd')
+    && installer.includes('Docker Desktop')
+    && installer.includes('Source: "{#SourceRoot}\\apps\\*"')
+    && installer.includes('Source: "{#SourceRoot}\\scripts\\*"')
+    && installer.includes('Source: "{#SourceRoot}\\deploy\\*"')
+    && installer.includes('Source: "{#SourceRoot}\\.env.example"')
+    && !installer.includes('Source: "{#SourceRoot}\\*"'),
+    'M13：Inno Setup 工程应产出 Win11 在线安装器，包含脚本入口并排除真实环境和数据文件'
+  );
+
+  assert(
+    baotaInstall.includes('codex/multiplayer-realtime')
+    && baotaInstall.includes('https://github.com/hugocat26-jpg/HEXCORE-2.0.git')
+    && baotaInstall.includes('.env.example')
+    && baotaInstall.includes('openssl rand')
+    && baotaInstall.includes('compose up -d --build')
+    && baotaInstall.includes('"storage":"postgres"')
+    && baotaUpdate.includes('docker compose up -d --build')
+    && baotaUpdate.includes('保留 PostgreSQL volume')
+    && baotaBackup.includes('pg_dump')
+    && baotaBackup.includes('HEXCORE_BACKUP_KEEP')
+    && baotaBackup.includes('PGPASSWORD="$POSTGRES_PASSWORD"')
+    && !baotaBackup.includes('-e PGPASSWORD=')
+    && !baotaBackup.includes('. ./.env')
+    && !baotaBackup.includes('echo $HEXCORE_POSTGRES_PASSWORD')
+    && !baotaBackup.includes('printf "$HEXCORE_POSTGRES_PASSWORD')
+    && baotaStatus.includes('/health')
+    && baotaStatus.includes('read_env_value')
+    && !baotaStatus.includes('. ./.env')
+    && baotaNginx.includes('location ~ ^/api/tournaments/[^/]+/events$')
+    && baotaNginx.includes('proxy_buffering off')
+    && baotaNginx.includes('proxy_read_timeout 3600s')
+    && baotaNginx.includes('proxy_pass http://127.0.0.1:4196/health')
+    && baotaNginx.includes('proxy_pass http://127.0.0.1:4186/'),
+    'M13：宝塔交付应提供安装、更新、备份、状态脚本和支持 SSE 的 Nginx 反代模板，且不打印数据库密码'
+  );
+
+  assert(
+    packageJson.includes('"verify:docker-postgres": "node scripts/verify-docker-postgres.js"')
+    && dockerVerifier.includes('docker([\'compose\', \'config\'])')
+    && dockerVerifier.includes('docker([\'compose\', \'up\', \'-d\'')
+    && dockerVerifier.includes('runtime.storage === expectedStorage')
+    && dockerVerifier.includes('teamCount: 12')
+    && dockerVerifier.includes("campMode: 'no_camp'")
+    && dockerVerifier.includes('createSseClient')
+    && dockerVerifier.includes('event: ShopOpened')
+    && dockerVerifier.includes('docker([\'compose\', \'restart\', \'hexcore\'])')
+    && dockerVerifier.includes('pg_dump')
+    && dockerVerifier.includes('pg_restore --clean --if-exists')
+    && dockerVerifier.includes('HEXCORE_POSTGRES_PASSWORD')
+    && dockerVerifier.includes('change-this-local-password')
+    && !dockerVerifier.includes('console.log(env.HEXCORE_POSTGRES_PASSWORD')
+    && !dockerVerifier.includes('HEXCORE_POSTGRES_URL'),
+    'M13：Docker PostgreSQL 自动验收脚本应覆盖 Compose、postgres health、12 队无阵营、SSE、重启恢复和备份恢复，且不打印连接串'
+  );
+
+  assert(
+    winGuide.includes('HEXCORE2_Setup_v2.0.20.exe')
+    && winGuide.includes('winget install Docker.DockerDesktop')
+    && winGuide.includes('runtime.storage')
+    && winGuide.includes('postgres')
+    && winGuide.includes('http://127.0.0.1:4186/')
+    && baotaGuide.includes('deploy/baota/install-hexcore-docker.sh')
+    && baotaGuide.includes('deploy/baota/nginx-hexcore.conf')
+    && baotaGuide.includes('Docker Compose + PostgreSQL')
+    && baotaGuide.includes('https://hexsss.com')
+    && winGuide.includes('npm run verify:docker-postgres')
+    && opsGuide.includes('scripts/windows/Start-HEXCORE2.cmd')
+    && opsGuide.includes('installer/windows/HEXCORE2_Setup.iss')
+    && opsGuide.includes('deploy/baota/install-hexcore-docker.sh')
+    && opsGuide.includes('npm run verify:docker-postgres'),
+    'M13：客户 Win11 说明、宝塔部署说明和运维说明应覆盖安装、启动、反代、健康检查和访问入口'
+  );
+}
+
 async function run() {
   const tests = [
     testDefaultEmptySetup,
@@ -7090,6 +7211,7 @@ async function run() {
     testMultiplayerJoinGateAndCors,
     testMultiplayerClientSubmitsAuthoritativeCommands,
     testM12DynamicRulesBaseline,
+    testM13DeploymentDeliveryArtifacts,
   ];
 
   for (const test of tests) {

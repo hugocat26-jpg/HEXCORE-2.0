@@ -2,6 +2,28 @@
 
 本文件记录 HEXCORE 2.0 每次版本号变化的用户可见改动、规则变更和维护事项。每次提交并推送 GitHub 前，如果版本号发生变化，必须同步更新本文件。
 
+## v2.0.20 - 2026-05-30
+
+### 交付部署
+
+- 完成 M13 Docker PostgreSQL 验证与一键部署交付：新增 Win11 启动、停止、打开页面和查看日志脚本，首次启动会从 `.env.example` 生成本机 `.env` 并随机生成 PostgreSQL 密码。
+- 新增 Inno Setup 安装器工程，发布产物命名为 `HEXCORE2_Setup_v2.0.20.exe`；安装包不内置 Docker Desktop，只检测并引导安装。
+- 新增 `deploy/baota/` 宝塔部署、更新、备份、状态脚本和 Nginx 反代模板，支持 `https://hexsss.com` 同源入口下的 Docker Compose + PostgreSQL 单机部署。
+- 新增 `npm run verify:docker-postgres` 自动验收脚本，覆盖 Compose、PostgreSQL、三端加入、开店、购买、跳过、SSE 同步、容器重启恢复和备份/恢复。
+- Win11 客户安装说明、多人端部署运维说明、腾讯云宝塔大陆部署说明和文档索引已同步更新。
+
+### 体验与稳定性
+
+- 创建赛事前的赛事 ID 校验改为读取房间列表，不再用预期 404 的 `/snapshot` 请求判断不存在，避免浏览器 console 出现正常流程里的 network error。
+- 页面新增空 favicon 声明，避免浏览器默认请求 `/favicon.ico` 造成 404 日志。
+- Docker PostgreSQL 环境已通过自动验收；本机 Edge 页面验收确认 `http://127.0.0.1:4186/` 页面非空、可创建 12 队无阵营房间、无错误覆盖层、Network 和 console 均无 error/warn。
+
+### 安全边界
+
+- `.env.example` 可提交，真实 `.env`、数据库密码、备份 dump、Docker volume 数据和本机临时验收产物不进入 Git。
+- 宝塔备份/状态脚本不再 `source .env`，不通过 Docker CLI 参数传入 PostgreSQL 密码；备份在 `postgres` 容器内部读取容器环境变量执行。
+- `/health` 只返回存储状态、房间数量、session TTL、SSE 订阅等运维信息，不泄漏连接串、密码、房间码、`sessionToken` 或 `streamToken`。
+
 ## v2.0.19 - 2026-05-30
 
 ### 多人端
