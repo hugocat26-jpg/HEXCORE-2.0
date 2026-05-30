@@ -21,7 +21,7 @@ winget install Docker.DockerDesktop
 
 ## 安装
 
-1. 运行 `HEXCORE2_Setup_v2.0.21.exe`。
+1. 运行 `HEXCORE2_Setup_v2.0.22.exe`。
 2. 安装目录默认使用 `%LOCALAPPDATA%\HEXCORE2`。
 3. 保留默认快捷方式：
    - 启动 HEXCORE2

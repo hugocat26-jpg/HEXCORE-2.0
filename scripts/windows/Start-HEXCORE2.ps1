@@ -121,6 +121,35 @@ function Invoke-DockerCompose {
   }
 }
 
+function Test-HexcoreComposeRunning {
+  $services = @(& docker compose ps --services --status running 2>$null)
+  return ($services -contains "hexcore")
+}
+
+function Assert-HexcorePortsAvailable {
+  $appPort = Get-HexcoreEnvValue -Name "HEXCORE_APP_PORT" -DefaultValue "4186"
+  $apiPort = Get-HexcoreEnvValue -Name "HEXCORE_API_PORT" -DefaultValue "4196"
+  $busyPorts = @()
+  foreach ($port in @($appPort, $apiPort)) {
+    $connections = Get-NetTCPConnection -LocalPort ([int]$port) -State Listen -ErrorAction SilentlyContinue
+    if ($connections) {
+      $busyPorts += $port
+    }
+  }
+  if ($busyPorts.Count -eq 0) {
+    return
+  }
+  if (Test-HexcoreComposeRunning) {
+    return
+  }
+  $portText = ($busyPorts | Select-Object -Unique) -join ", "
+  throw @"
+HEXCORE2 ports are already in use: $portText
+Close the old HEXCORE2 window or run Stop HEXCORE2 first.
+If a development copy is running, stop it with: docker compose down
+"@
+}
+
 function Wait-HexcoreHealth {
   $apiPort = Get-HexcoreEnvValue -Name "HEXCORE_API_PORT" -DefaultValue "4196"
   $healthUrl = "http://127.0.0.1:$apiPort/health"
@@ -143,6 +172,7 @@ Write-Step "Project root: $ProjectRoot"
 Ensure-HexcoreEnvFile
 Assert-DockerCommand
 Assert-DockerDaemon
+Assert-HexcorePortsAvailable
 
 $composeArgs = @("compose", "up", "-d")
 if (-not $SkipBuild) {
